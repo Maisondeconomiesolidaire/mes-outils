@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, UserButton } from "@clerk/clerk-react";
+import { useConvexAuth } from "convex/react";
 import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { PORTAL_NAV, canAccess } from "../lib/permissions";
@@ -33,10 +34,51 @@ export function AppLayout() {
       </SignedOut>
 
       <SignedIn>
-        <AuthenticatedShell theme={theme} setTheme={setTheme} />
+        <ConvexAuthenticatedShell theme={theme} setTheme={setTheme} />
       </SignedIn>
     </>
   );
+}
+
+function ConvexAuthenticatedShell({
+  theme,
+  setTheme,
+}: {
+  theme: "light" | "dark";
+  setTheme: (theme: "light" | "dark") => void;
+}) {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+
+  if (isLoading) {
+    return <FullSpinner label="Synchronisation de la session..." />;
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4 py-10">
+        <div className="glass-card max-w-lg rounded-xl border border-[var(--border)] p-6 text-center">
+          <img
+            src={theme === "dark" ? "/mesoutils-dark.png" : "/mesoutils-light.png"}
+            alt="Mes Outils"
+            className="mx-auto h-14 w-auto"
+          />
+          <h1 className="mt-6 text-xl font-semibold text-[var(--foreground)]">
+            Connexion Convex non active
+          </h1>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted-foreground)]">
+            Votre session Clerk est ouverte, mais Convex ne reçoit pas encore de
+            jeton d'authentification valide. Vérifiez l'intégration Convex dans
+            Clerk ou le template JWT <code>convex</code>, puis reconnectez-vous.
+          </p>
+          <div className="mt-6 flex justify-center">
+            <UserButton afterSignOutUrl="/" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return <AuthenticatedShell theme={theme} setTheme={setTheme} />;
 }
 
 function AuthenticatedShell({
