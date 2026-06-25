@@ -1,0 +1,68 @@
+/**
+ * Définition des process (étapes séquentielles) par type de demande.
+ * Partagé par les mutations Convex pour résoudre et valider l'avancement.
+ */
+
+export const STEP = {
+  contact: "Contact pris",
+  devisEdite: "Devis édité",
+  devisSigne: "Devis signé",
+  prestaPlanifiee: "Prestation planifiée",
+  prestaTerminee: "Prestation terminée",
+  factureEditee: "Facture éditée",
+  factureReglee: "Facture réglée",
+  // Livraison
+  acompteVerse: "Acompte versé",
+} as const;
+
+/** Process complet à 7 étapes (aérogommage, collecte C2/C3, vélo par défaut). */
+const FULL = [
+  STEP.contact,
+  STEP.devisEdite,
+  STEP.devisSigne,
+  STEP.prestaPlanifiee,
+  STEP.prestaTerminee,
+  STEP.factureEditee,
+  STEP.factureReglee,
+];
+
+export type RequestType =
+  | "aerogommage"
+  | "collecte"
+  | "article"
+  | "velo"
+  | "livraison";
+
+export type CollecteType = "indefini" | "C1" | "C2" | "C3";
+
+/**
+ * Résout la liste ordonnée des étapes pour une demande donnée.
+ * Pour une collecte « à définir » (indefini), le process est vide tant que le
+ * sous-type (C1/C2/C3) n'a pas été choisi dans le CRM.
+ */
+export function resolveProcess(
+  type: RequestType,
+  collecteType?: CollecteType,
+): string[] {
+  switch (type) {
+    case "aerogommage":
+      return [...FULL];
+    case "velo":
+      // TODO Cycle en Bray : process défini ultérieurement (placeholder = complet).
+      return [...FULL];
+    case "article":
+      return [STEP.contact, STEP.factureReglee];
+    case "livraison":
+      return [STEP.acompteVerse, STEP.prestaPlanifiee, STEP.prestaTerminee];
+    case "collecte":
+      switch (collecteType) {
+        case "C1":
+          return [STEP.contact, STEP.prestaPlanifiee, STEP.prestaTerminee];
+        case "C2":
+        case "C3":
+          return [...FULL];
+        default:
+          return [];
+      }
+  }
+}
