@@ -75,6 +75,19 @@ export async function vehicleBusyReason(
     }
   }
 
+  // Une tâche de maintenance non terminée planifiée ce jour-là bloque le véhicule.
+  const tasks = await ctx.db
+    .query("vehicleMaintenanceTasks")
+    .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
+    .collect();
+  for (const task of tasks) {
+    if (task.status === "done" || !task.dueDate) continue;
+    const taskEnd = Math.max(task.dueDate, task.endDate ?? task.dueDate);
+    if (overlapsUtcDay(task.dueDate, taskEnd, date)) {
+      return `En maintenance (${task.title})`;
+    }
+  }
+
   return null;
 }
 
@@ -82,18 +95,22 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, "flotte", "read");
-    const vehicles = await ctx.db.query("vehicles").order("desc").collect();
+    const vehicles = (await ctx.db.query("vehicles").order("desc").collect()).filter(
+      (vehicle) => vehicle.recycappEnabled === true,
+    );
     const now = Date.now();
     return await Promise.all(
       vehicles.map(async (vehicle) => {
         const reason = vehicle.active
           ? await vehicleBusyReason(ctx, vehicle._id, now)
           : null;
-        const status: "disponible" | "sur_collecte" | "en_tournee" | "inactif" =
+        const status: "disponible" | "sur_collecte" | "en_tournee" | "en_maintenance" | "inactif" =
           !vehicle.active
             ? "inactif"
             : reason?.startsWith("En tournée")
               ? "en_tournee"
+              : reason?.startsWith("En maintenance")
+                ? "en_maintenance"
               : reason
                 ? "sur_collecte"
                 : "disponible";
@@ -119,7 +136,9 @@ export const availableOn = query({
       ["demandes", "read"],
     ]);
     const vehicles = (await ctx.db.query("vehicles").collect()).filter(
-      (vehicle) => vehicle.active || vehicle._id === includeVehicleId,
+      (vehicle) =>
+        vehicle.recycappEnabled === true &&
+        (vehicle.active || vehicle._id === includeVehicleId),
     );
     const result = [];
     for (const vehicle of vehicles) {
@@ -153,7 +172,9 @@ export const takenInRange = query({
       ["demandes", "read"],
       ["calendrier", "read"],
     ]);
-    const vehicles = await ctx.db.query("vehicles").collect();
+    const vehicles = (await ctx.db.query("vehicles").collect()).filter(
+      (vehicle) => vehicle.recycappEnabled === true,
+    );
     const nameById = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
     const entries: Array<{
@@ -218,6 +239,7 @@ export const create = mutation({
     return await ctx.db.insert("vehicles", {
       ...args,
       active: true,
+      recycappEnabled: true,
       createdAt: Date.now(),
     });
   },

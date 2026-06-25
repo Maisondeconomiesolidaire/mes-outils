@@ -68,7 +68,12 @@ export const createVehicle = mutation({
     model: v.optional(v.string()),
     seats: v.optional(v.number()),
     assignedTo: v.optional(v.string()),
+    photo: v.optional(v.id("_storage")),
     photoUrl: v.optional(v.string()),
+    odometerKm: v.optional(v.number()),
+    technicalControlDate: v.optional(v.string()),
+    pollutionControlDate: v.optional(v.string()),
+    recycappEnabled: v.optional(v.boolean()),
     active: v.boolean(),
   },
   handler: async (ctx, args) => {
@@ -81,6 +86,7 @@ export const createVehicle = mutation({
       model: args.model?.trim() || undefined,
       assignedTo: args.assignedTo?.trim() || undefined,
       photoUrl: args.photoUrl?.trim() || undefined,
+      odometerUpdatedAt: typeof args.odometerKm === "number" ? new Date().toISOString() : undefined,
       createdAt: Date.now(),
     });
   },
@@ -97,16 +103,22 @@ export const updateVehicle = mutation({
     model: v.optional(v.string()),
     seats: v.optional(v.number()),
     assignedTo: v.optional(v.string()),
+    photo: v.optional(v.id("_storage")),
     photoUrl: v.optional(v.string()),
     odometerKm: v.optional(v.number()),
     technicalControlDate: v.optional(v.string()),
     pollutionControlDate: v.optional(v.string()),
     insuranceCompany: v.optional(v.string()),
     insurancePolicy: v.optional(v.string()),
+    saleDate: v.optional(v.string()),
+    recycappEnabled: v.optional(v.boolean()),
     active: v.boolean(),
   },
   handler: async (ctx, { vehicleId, ...patch }) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
+    const existing = await ctx.db.get(vehicleId);
+    const odometerChanged =
+      typeof patch.odometerKm === "number" && patch.odometerKm !== existing?.odometerKm;
     await ctx.db.patch(vehicleId, {
       ...patch,
       name: patch.name.trim(),
@@ -117,6 +129,8 @@ export const updateVehicle = mutation({
       photoUrl: patch.photoUrl?.trim() || undefined,
       insuranceCompany: patch.insuranceCompany?.trim() || undefined,
       insurancePolicy: patch.insurancePolicy?.trim() || undefined,
+      saleDate: patch.saleDate?.trim() || undefined,
+      ...(odometerChanged ? { odometerUpdatedAt: new Date().toISOString() } : {}),
     });
   },
 });
@@ -150,6 +164,7 @@ export const createVehicleTask = mutation({
     description: v.optional(v.string()),
     priority: taskPriority,
     dueDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "create");
@@ -161,10 +176,67 @@ export const createVehicleTask = mutation({
       priority: args.priority,
       status: "todo",
       dueDate: args.dueDate,
+      endDate: args.endDate,
       createdBy: displayName(identity),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
+  },
+});
+
+const documentCategory = v.union(
+  v.literal("carte_grise"),
+  v.literal("facture"),
+  v.literal("devis"),
+  v.literal("assurance"),
+  v.literal("controle_technique"),
+  v.literal("autre"),
+);
+
+export const listVehicleDocuments = query({
+  args: { vehicleId: v.id("vehicles") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "read");
+    const documents = await ctx.db
+      .query("vehicleDocuments")
+      .withIndex("by_vehicleId", (q) => q.eq("vehicleId", args.vehicleId))
+      .order("desc")
+      .collect();
+    return await Promise.all(
+      documents.map(async (document) => ({
+        ...document,
+        url: await ctx.storage.getUrl(document.storageId),
+      })),
+    );
+  },
+});
+
+export const addVehicleDocument = mutation({
+  args: {
+    vehicleId: v.id("vehicles"),
+    name: v.string(),
+    category: documentCategory,
+    storageId: v.id("_storage"),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
+    const identity = await requireUser(ctx);
+    return await ctx.db.insert("vehicleDocuments", {
+      vehicleId: args.vehicleId,
+      name: args.name.trim() || "Document",
+      category: args.category,
+      storageId: args.storageId,
+      uploadedBy: displayName(identity),
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const removeVehicleDocument = mutation({
+  args: { documentId: v.id("vehicleDocuments") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
+    await ctx.db.delete(args.documentId);
   },
 });
 
@@ -188,7 +260,13 @@ export const listRooms = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, ROOMS_PAGE_KEY, "read");
-    return await ctx.db.query("rooms").order("asc").collect();
+    const rooms = await ctx.db.query("rooms").order("asc").collect();
+    return await Promise.all(
+      rooms.map(async (room) => ({
+        ...room,
+        photoUrl: room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl,
+      })),
+    );
   },
 });
 
@@ -199,6 +277,7 @@ export const createRoom = mutation({
     capacity: v.optional(v.number()),
     color: v.optional(v.string()),
     buildingLabel: v.optional(v.string()),
+    photo: v.optional(v.id("_storage")),
     photoUrl: v.optional(v.string()),
     services: v.optional(v.array(v.string())),
     reservable: v.optional(v.boolean()),
@@ -224,6 +303,7 @@ export const updateRoom = mutation({
     capacity: v.optional(v.number()),
     color: v.optional(v.string()),
     buildingLabel: v.optional(v.string()),
+    photo: v.optional(v.id("_storage")),
     photoUrl: v.optional(v.string()),
     services: v.optional(v.array(v.string())),
     reservable: v.optional(v.boolean()),

@@ -13,6 +13,7 @@ import type * as arrivages from "../arrivages.js";
 import type * as articles from "../articles.js";
 import type * as ateliers from "../ateliers.js";
 import type * as clients from "../clients.js";
+import type * as community from "../community.js";
 import type * as dashboard from "../dashboard.js";
 import type * as documents from "../documents.js";
 import type * as emails from "../emails.js";
@@ -48,6 +49,7 @@ declare const fullApi: ApiFromModules<{
   articles: typeof articles;
   ateliers: typeof ateliers;
   clients: typeof clients;
+  community: typeof community;
   dashboard: typeof dashboard;
   documents: typeof documents;
   emails: typeof emails;

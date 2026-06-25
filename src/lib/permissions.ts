@@ -1,5 +1,15 @@
 import {
+  CalendarCheck,
+  CalendarClock,
+  CalendarDays,
+  CarFront,
+  DoorOpen,
+  Newspaper,
+  PartyPopper,
   ShieldCheck,
+  Shirt,
+  Tag,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,7 +41,7 @@ export type Access = {
 };
 
 export type AppDefinition = {
-  key: "recycapp" | "mesoutils" | "pointage" | "collecte";
+  key: "recycapp" | "mesoutils" | "klyde" | "pointage" | "collecte";
   label: string;
   description: string;
   icon: LucideIcon;
@@ -40,10 +50,11 @@ export type AppDefinition = {
   external?: boolean;
   comingSoon?: boolean;
   accent: string;
+  cardBg?: string;
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils";
+  app: "recycapp" | "mesoutils" | "klyde";
   key: string;
   label: string;
   description: string;
@@ -217,7 +228,38 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES];
+export const KLYDE_PAGES: PermissionPage[] = [
+  {
+    app: "klyde",
+    key: "klyde:stock",
+    label: "Stock & articles",
+    description: "Saisie, detourage, analyse IA et gestion du stock textile.",
+    actions: ["read", "create", "update", "delete", "analyze"],
+  },
+  {
+    app: "klyde",
+    key: "klyde:boutique",
+    label: "Boutique en ligne",
+    description: "Mise en ligne, retrait et vitrine publique des articles.",
+    actions: ["read", "manage"],
+  },
+  {
+    app: "klyde",
+    key: "klyde:commandes",
+    label: "Commandes",
+    description: "Suivi des commandes boutique et expeditions.",
+    actions: ["read", "manage"],
+  },
+  {
+    app: "klyde",
+    key: "klyde:admin",
+    label: "Admin Klyde",
+    description: "Configuration et droits de la boutique Klyde.",
+    actions: ["read", "manage"],
+  },
+];
+
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
@@ -227,9 +269,20 @@ export const APPS: AppDefinition[] = [
     description: "CRM operationnel: demandes, flotte, tournees, boutique, stock et clients.",
     icon: ShieldCheck,
     logoSrc: "/recyclerie-logo.png",
-    href: import.meta.env.VITE_RECYCAPP_URL,
+    href: import.meta.env.VITE_RECYCAPP_URL ?? "https://mesrecycleries.vercel.app",
     external: true,
     accent: "from-brand-500 to-brand-600",
+  },
+  {
+    key: "klyde",
+    label: "Klyd",
+    description: "Boutique textile haut de gamme : stock, mise en ligne et commandes.",
+    icon: Shirt,
+    logoSrc: "/klyd-logo.png",
+    href: import.meta.env.VITE_KLYD_URL ?? "https://klyd.vercel.app",
+    external: true,
+    accent: "from-brand-500 to-brand-600",
+    cardBg: "#f6eee5",
   },
 ];
 
@@ -239,8 +292,42 @@ export const PORTAL_NAV = [
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations" },
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux" },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles" },
+  { to: "/messagerie", label: "Messagerie" },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },
 ] as const;
+
+export type SubNavItem = { key: string; label: string; icon: LucideIcon };
+
+/** Sous-pages affichées dans la sidebar pour chaque section principale. */
+export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
+  "/actualites": [
+    { key: "publications", label: "Publications", icon: Newspaper },
+    { key: "evenements", label: "Événements", icon: PartyPopper },
+    { key: "bonsplans", label: "Bons plans", icon: Tag },
+  ],
+  "/reservations": [
+    { key: "rooms", label: "Salles", icon: DoorOpen },
+    { key: "vehicles", label: "Véhicules", icon: CarFront },
+    { key: "mine", label: "Mes réservations", icon: CalendarCheck },
+  ],
+  "/gotravaux": [
+    { key: "vehicles", label: "Véhicules", icon: CarFront },
+    { key: "tasks", label: "Maintenance", icon: Wrench },
+    { key: "reservations", label: "Réservations", icon: CalendarClock },
+    { key: "calendar", label: "Calendrier", icon: CalendarDays },
+  ],
+  "/salles": [
+    { key: "rooms", label: "Salles", icon: DoorOpen },
+    { key: "reservations", label: "Réservations", icon: CalendarDays },
+  ],
+};
+
+/** Retrouve la section principale correspondant à un pathname. */
+export function sectionForPath(pathname: string): (typeof PORTAL_NAV)[number] | undefined {
+  return PORTAL_NAV.find((item) =>
+    item.to === "/" ? pathname === "/" : pathname === item.to || pathname.startsWith(`${item.to}/`),
+  );
+}
 
 export function canAccess(
   access: Access | undefined,
@@ -263,6 +350,9 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
   if (appKey === "mesoutils") {
     return access.grants.some((grant) => grant.pageKey.startsWith("mesoutils:"));
   }
+  if (appKey === "klyde") {
+    return access.grants.some((grant) => grant.pageKey.startsWith("klyde:"));
+  }
   return access.grants.some((grant) => !grant.pageKey.includes(":"));
 }
 
@@ -270,5 +360,6 @@ export function groupPagesByApp() {
   return [
     { key: "mesoutils", label: "Mes Outils", pages: MESOUTILS_PAGES },
     { key: "recycapp", label: "Recyclerie", pages: RECYCAPP_PAGES },
+    { key: "klyde", label: "Klyde", pages: KLYDE_PAGES },
   ] as const;
 }

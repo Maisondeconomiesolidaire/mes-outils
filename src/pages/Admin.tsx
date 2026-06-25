@@ -24,6 +24,7 @@ type ClerkUser = {
 type PermissionPerson = {
   email: string;
   name?: string;
+  role?: CrmRole;
   permissionActive?: boolean;
   grants: Grant[];
   updatedAt?: number;
@@ -93,7 +94,8 @@ function mergeUsers(clerkUsers: ClerkUser[], permissionPeople: PermissionPerson[
       name: user.name,
       clerkId: user.clerkId,
       imageUrl: user.imageUrl,
-      role: user.role,
+      // Le rôle fait foi côté Convex : tant qu'aucun droit n'est défini, l'utilisateur est client.
+      role: "client",
       permissionActive: undefined,
       grants: [],
       source: "clerk",
@@ -106,7 +108,7 @@ function mergeUsers(clerkUsers: ClerkUser[], permissionPeople: PermissionPerson[
       ...existing,
       email: permission.email,
       name: existing?.name ?? permission.name,
-      role: existing?.role ?? "staff",
+      role: permission.role ?? "staff",
       permissionActive: permission.permissionActive,
       grants: permission.grants,
       updatedAt: permission.updatedAt,
@@ -122,9 +124,12 @@ function mergeUsers(clerkUsers: ClerkUser[], permissionPeople: PermissionPerson[
 export function Admin() {
   const permissionsData = useQuery(api.permissions.listManaged);
   const listClerkUsers = useAction(api.permissions.listClerkUsers);
-  const updateClerkRole = useAction(api.permissions.updateClerkRole);
   const upsert = useMutation(api.permissions.upsert);
   const remove = useMutation(api.permissions.remove);
+
+  const groups = groupPagesByApp();
+  const [selectedApp, setSelectedApp] = useState<string>(groups[0].key);
+  const currentGroup = groups.find((group) => group.key === selectedApp) ?? groups[0];
 
   const [search, setSearch] = useState("");
   const [clerkData, setClerkData] = useState<ClerkUsersState | null>(null);
@@ -136,6 +141,7 @@ export function Admin() {
   const [grants, setGrants] = useState<Grant[]>(emptyGrants);
   const [unknownGrants, setUnknownGrants] = useState<Grant[]>([]);
   const [saving, setSaving] = useState(false);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -178,6 +184,7 @@ export function Admin() {
   }, [permissionsData, clerkData, people, selectedEmail]);
 
   useEffect(() => {
+    setSavedMessage(null);
     if (!selectedPerson) {
       setDraftName("");
       setDraftEmail("");
@@ -195,37 +202,44 @@ export function Admin() {
     setUnknownGrants(preservedUnknownGrants(selectedPerson.grants));
   }, [selectedPerson]);
 
+  useEffect(() => {
+    if (!savedMessage) return;
+    const timer = setTimeout(() => setSavedMessage(null), 3000);
+    return () => clearTimeout(timer);
+  }, [savedMessage]);
+
   async function save() {
     const email = draftEmail.trim().toLowerCase();
     if (!email) return;
     setSaving(true);
+    setSavedMessage(null);
     try {
-      if (selectedPerson?.clerkId && selectedPerson.role !== draftRole) {
-        const roleResult = await updateClerkRole({ clerkId: selectedPerson.clerkId, role: draftRole });
-        if (!roleResult.ok) {
-          throw new Error(
-            roleResult.setupError === "missing_clerk_secret_key"
-              ? "CLERK_SECRET_KEY est manquante cote Convex."
-              : "Impossible de modifier le role Clerk.",
-          );
+      if (draftRole === "client") {
+        // Aucun accès : on retire l'enregistrement Convex s'il existe.
+        if (selectedPerson?.grants.length || selectedPerson?.role) {
+          await remove({ email });
         }
+        setSavedMessage("Droits modifiés avec succès");
+        return;
       }
 
-      if (draftRole === "staff") {
-        await upsert({
-          email,
-          name: draftName.trim() || undefined,
-          active,
-          grants: [
-            ...grants
-              .map((grant) => ({ pageKey: grant.pageKey, actions: grant.actions }))
-              .filter((grant) => grant.actions.length > 0),
-            ...unknownGrants,
-          ],
-        });
-      } else if (selectedPerson?.grants.length) {
-        await remove({ email });
-      }
+      await upsert({
+        email,
+        name: draftName.trim() || undefined,
+        role: draftRole,
+        // L'admin a un accès total (les grants sont ignorés côté serveur).
+        active: draftRole === "admin" ? true : active,
+        grants:
+          draftRole === "admin"
+            ? unknownGrants
+            : [
+                ...grants
+                  .map((grant) => ({ pageKey: grant.pageKey, actions: grant.actions }))
+                  .filter((grant) => grant.actions.length > 0),
+                ...unknownGrants,
+              ],
+      });
+      setSavedMessage("Droits modifiés avec succès");
     } finally {
       setSaving(false);
     }
@@ -234,8 +248,10 @@ export function Admin() {
   async function removeAccess() {
     if (!selectedPerson) return;
     setSaving(true);
+    setSavedMessage(null);
     try {
       await remove({ email: selectedPerson.email });
+      setSavedMessage("Droits modifiés avec succès");
     } finally {
       setSaving(false);
     }
@@ -249,7 +265,7 @@ export function Admin() {
     <div className="space-y-6">
       <section className="border-b border-[var(--border)] pb-5">
         <p className="section-kicker">Administration</p>
-        <h2 className="mt-2 text-2xl font-semibold text-[var(--foreground)]">Acces Mes Outils et recycapp</h2>
+        <h2 className="mt-2 text-2xl font-semibold text-[var(--foreground)]">Acces Mes Outils, Recyclerie et Klyde</h2>
         <p className="mt-1 text-sm text-[var(--muted-foreground)]">
           {people.length} utilisateurs · {ALL_PERMISSION_PAGES.length} pages suivies
         </p>
@@ -338,7 +354,6 @@ export function Admin() {
                 <Select
                   value={draftRole}
                   onChange={(event) => setDraftRole(event.target.value as CrmRole)}
-                  disabled={!selectedPerson?.clerkId}
                 >
                   <option value="client">Client</option>
                   <option value="staff">Staff</option>
@@ -364,69 +379,133 @@ export function Admin() {
             </div>
           </div>
 
-          <div className={cn("space-y-6 p-5", draftRole !== "staff" && "opacity-50")}>
-            {groupPagesByApp().map((group) => (
-              <div key={group.key}>
-                <div className="mb-3">
-                  <h3 className="text-lg font-semibold text-[var(--foreground)]">{group.label}</h3>
-                  <p className="text-sm text-[var(--muted-foreground)]">
-                    Permissions fines par page et par action.
+          {draftRole === "admin" ? (
+            <div className="p-5">
+              <div className="flex items-start gap-3 rounded-lg border border-brand-200 bg-brand-50 p-4">
+                <ShieldCheck className="mt-0.5 h-5 w-5 text-brand-700" />
+                <div>
+                  <p className="font-semibold text-brand-900">Accès total</p>
+                  <p className="text-sm text-brand-800/80">
+                    Un administrateur a tous les droits sur Mes Outils, la Recyclerie et Klyde.
+                    Les permissions fines ci-dessous ne sont pas nécessaires.
                   </p>
                 </div>
-                <div className="space-y-3">
-                  {group.pages.map((page) => {
-                    const enabledActions = page.actions.filter((action) => hasAction(grants, page.key, action));
-                    const allChecked = enabledActions.length === page.actions.length;
+              </div>
+            </div>
+          ) : (
+            <div className={cn("space-y-5 p-5", draftRole !== "staff" && "opacity-50")}>
+              <div className="grid gap-4 sm:grid-cols-[260px_minmax(0,1fr)] sm:items-end">
+                <Field label="Application">
+                  <Select
+                    value={selectedApp}
+                    onChange={(event) => setSelectedApp(event.target.value)}
+                  >
+                    {groups.map((group) => {
+                      const count = group.pages.filter((page) =>
+                        page.actions.some((action) => hasAction(grants, page.key, action)),
+                      ).length;
+                      return (
+                        <option key={group.key} value={group.key}>
+                          {group.label}
+                          {count > 0 ? ` — ${count} page${count > 1 ? "s" : ""} activée${count > 1 ? "s" : ""}` : ""}
+                        </option>
+                      );
+                    })}
+                  </Select>
+                </Field>
+                <div className="flex flex-wrap gap-2">
+                  {groups.map((group) => {
+                    const count = group.pages.filter((page) =>
+                      page.actions.some((action) => hasAction(grants, page.key, action)),
+                    ).length;
                     return (
-                      <div key={page.key} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
-                            <p className="font-semibold text-[var(--foreground)]">{page.label}</p>
-                            <p className="text-sm text-[var(--muted-foreground)]">{page.description}</p>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={draftRole !== "staff"}
-                            onClick={() => setGrants((current) => setPageAll(current, page.key, page.actions, !allChecked))}
-                            className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-800"
+                      <button
+                        key={group.key}
+                        type="button"
+                        onClick={() => setSelectedApp(group.key)}
+                        className={cn(
+                          "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition",
+                          selectedApp === group.key
+                            ? "border-brand-500 bg-brand-500 text-white"
+                            : "border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--accent)]",
+                        )}
+                      >
+                        {group.label}
+                        {count > 0 ? (
+                          <span
+                            className={cn(
+                              "rounded-full px-1.5 text-[10px] font-semibold",
+                              selectedApp === group.key ? "bg-white/25 text-white" : "bg-brand-50 text-brand-800",
+                            )}
                           >
-                            {allChecked ? "Tout retire" : "Tout activer"}
-                          </button>
-                        </div>
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {page.actions.map((action) => {
-                            const checked = hasAction(grants, page.key, action);
-                            return (
-                              <button
-                                key={action}
-                                type="button"
-                                disabled={draftRole !== "staff"}
-                                onClick={() => setGrants((current) => toggleAction(current, page.key, action))}
-                                className={cn(
-                                  "rounded-full px-3 py-2 text-sm font-medium transition",
-                                  checked
-                                    ? "bg-brand-500 text-white"
-                                    : "bg-brand-50 text-[var(--foreground)]",
-                                )}
-                              >
-                                {ACTION_LABELS[action]}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                            {count}
+                          </span>
+                        ) : null}
+                      </button>
                     );
                   })}
                 </div>
               </div>
-            ))}
-          </div>
+
+              <div className="space-y-3">
+                {currentGroup.pages.map((page) => {
+                  const enabledActions = page.actions.filter((action) => hasAction(grants, page.key, action));
+                  const allChecked = enabledActions.length === page.actions.length;
+                  return (
+                    <div key={page.key} className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="font-semibold text-[var(--foreground)]">{page.label}</p>
+                          <p className="text-sm text-[var(--muted-foreground)]">{page.description}</p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={draftRole !== "staff"}
+                          onClick={() => setGrants((current) => setPageAll(current, page.key, page.actions, !allChecked))}
+                          className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-800"
+                        >
+                          {allChecked ? "Tout retire" : "Tout activer"}
+                        </button>
+                      </div>
+                      <div className="mt-4 flex flex-wrap gap-2">
+                        {page.actions.map((action) => {
+                          const checked = hasAction(grants, page.key, action);
+                          return (
+                            <button
+                              key={action}
+                              type="button"
+                              disabled={draftRole !== "staff"}
+                              onClick={() => setGrants((current) => toggleAction(current, page.key, action))}
+                              className={cn(
+                                "rounded-full px-3 py-2 text-sm font-medium transition",
+                                checked
+                                  ? "bg-brand-500 text-white"
+                                  : "bg-brand-50 text-[var(--foreground)]",
+                              )}
+                            >
+                              {ACTION_LABELS[action]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           <div className="flex flex-col gap-3 border-t border-[var(--border)] bg-[var(--accent)] p-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs leading-5 text-[var(--muted-foreground)]">
               Les grants inconnus sont preserves au moment de la sauvegarde pour ne rien ecraser.
             </p>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-3">
+              {savedMessage ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1.5 text-sm font-medium text-green-800">
+                  <Check className="h-4 w-4" />
+                  {savedMessage}
+                </span>
+              ) : null}
               {selectedPerson?.grants.length ? (
                 <Button variant="danger" onClick={removeAccess} disabled={saving}>
                   <Trash2 className="h-4 w-4" />

@@ -17,44 +17,52 @@
 
 :root {
   color-scheme: light;
-  --background: #f4f7f3;
-  --foreground: #17231a;
+  --background: #f5f7f6;
+  --foreground: #131a15;
   --card: #ffffff;
-  --card-foreground: #17231a;
-  --muted: #eef3ef;
-  --muted-foreground: #5d6c61;
-  --accent: #edf8f0;
-  --accent-foreground: #17231a;
-  --border: #dfe8e1;
+  --card-foreground: #131a15;
+  --muted: #eef2ef;
+  --muted-foreground: #5b6a60;
+  --accent: #eef5f0;
+  --accent-foreground: #131a15;
+  --border: #e2e8e4;
+  --border-strong: #d2dcd5;
   --input: #ffffff;
   --ring: rgba(71, 198, 103, 0.28);
-  --shadow-soft: 0 18px 48px rgba(20, 45, 26, 0.08);
-  --shadow-strong: 0 24px 70px rgba(20, 45, 26, 0.14);
-  --nav-bg: rgba(255, 255, 255, 0.92);
-  --nav-border: #e7eee8;
-  --nav-text: #17231a;
-  --nav-muted: #59665c;
+  --shadow-soft: 0 1px 2px rgba(20, 45, 26, 0.04), 0 8px 24px rgba(20, 45, 26, 0.05);
+  --shadow-strong: 0 12px 40px rgba(20, 45, 26, 0.10);
+  /* Surface "forte" pour les entêtes/héros — couleur de marque plain. */
+  --surface-strong: #1b3325;
+  --surface-strong-foreground: #ffffff;
+  /* Navbar */
+  --nav-bg: #ffffff;
+  --nav-border: #e2e8e4;
+  --nav-text: #131a15;
+  --nav-muted: #5b6a60;
 }
 
 body.theme-dark {
   color-scheme: dark;
-  --background: #0f1511;
-  --foreground: #edf4ee;
-  --card: #151d17;
-  --card-foreground: #edf4ee;
-  --muted: #1b241d;
-  --muted-foreground: #9aa89d;
-  --accent: #18281d;
-  --accent-foreground: #edf4ee;
-  --border: #263228;
-  --input: #111914;
-  --ring: rgba(71, 198, 103, 0.24);
-  --shadow-soft: 0 14px 38px rgba(0, 0, 0, 0.28);
-  --shadow-strong: 0 20px 56px rgba(0, 0, 0, 0.35);
-  --nav-bg: rgba(17, 24, 18, 0.94);
-  --nav-border: rgba(255, 255, 255, 0.1);
+  --background: #0e130f;
+  --foreground: #e9f1eb;
+  --card: #161d18;
+  --card-foreground: #e9f1eb;
+  --muted: #1a221c;
+  --muted-foreground: #94a399;
+  --accent: #1d281f;
+  --accent-foreground: #e9f1eb;
+  --border: #28332b;
+  --border-strong: #36443a;
+  --input: #131a15;
+  --ring: rgba(71, 198, 103, 0.32);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-strong: 0 16px 48px rgba(0, 0, 0, 0.4);
+  --surface-strong: #12211a;
+  --surface-strong-foreground: #ffffff;
+  --nav-bg: #131a15;
+  --nav-border: #28332b;
   --nav-text: #ffffff;
-  --nav-muted: rgba(255, 255, 255, 0.72);
+  --nav-muted: #aebbb2;
 }
 
 html,
@@ -67,18 +75,11 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   color: var(--foreground);
-  background:
-    radial-gradient(circle at top left, rgba(71, 198, 103, 0.13), transparent 34rem),
-    linear-gradient(180deg, #fbfdfb 0%, var(--background) 38%, var(--background) 100%);
+  /* Fond uni, sans dégradé. */
+  background: var(--background);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  transition: background 180ms ease, color 180ms ease;
-}
-
-body.theme-dark {
-  background:
-    radial-gradient(circle at top left, rgba(71, 198, 103, 0.16), transparent 34rem),
-    linear-gradient(180deg, #111a13 0%, var(--background) 48%, #0b100d 100%);
+  transition: background 160ms ease, color 160ms ease;
 }
 
 a {
@@ -94,55 +95,37 @@ textarea {
 }
 
 ::selection {
-  background: rgba(22, 163, 74, 0.18);
+  background: rgba(47, 170, 80, 0.22);
 }
 
-.glass-card {
-  background: var(--card);
-  box-shadow: var(--shadow-soft);
-}
-
+/* ─── Surfaces (toutes unies, aucun dégradé) ─────────────────────────────── */
+.glass-card,
+.mesh-panel,
 .premium-panel {
-  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--card) 98%, white 2%), var(--card));
+  background: var(--card);
+  border: 1px solid var(--border);
   box-shadow: var(--shadow-soft);
 }
 
 .premium-shell {
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  background: color-mix(in srgb, var(--card) 94%, transparent);
+  background: var(--surface-strong);
+  color: var(--surface-strong-foreground);
+  border: 1px solid color-mix(in srgb, var(--surface-strong) 70%, white 8%);
   box-shadow: var(--shadow-strong);
 }
 
+/* Placeholder photo (véhicule / salle) — couleur unie selon le thème. */
 .asset-photo {
-  background:
-    linear-gradient(135deg, rgba(71, 198, 103, 0.18), rgba(17, 24, 18, 0.08)),
-    linear-gradient(135deg, #f5f7f3, #dde9df);
-}
-
-body.theme-dark .asset-photo {
-  background:
-    linear-gradient(135deg, rgba(71, 198, 103, 0.22), rgba(255, 255, 255, 0.06)),
-    linear-gradient(135deg, #172019, #0f1511);
+  background: var(--muted);
 }
 
 .data-row {
   border-bottom: 1px solid var(--border);
-  transition: background 160ms ease;
+  transition: background 140ms ease;
 }
 
 .data-row:hover {
-  background: color-mix(in srgb, var(--accent) 72%, transparent);
-}
-
-.mesh-panel {
-  background: var(--card);
-  box-shadow: var(--shadow-soft);
-}
-
-body.theme-dark .mesh-panel {
-  background: var(--card);
+  background: var(--accent);
 }
 
 .section-kicker {
@@ -153,14 +136,33 @@ body.theme-dark .mesh-panel {
   font-weight: 700;
 }
 
+/* Les inputs date/heure suivent le thème courant. */
+.theme-dark input[type="datetime-local"],
+.theme-dark input[type="date"],
+.theme-dark input[type="time"] {
+  color-scheme: dark;
+}
+
+/* Scrollbar fine et discrète (sélecteurs d'heure, listes). */
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--foreground) 22%, transparent) transparent;
+}
+.thin-scroll::-webkit-scrollbar { width: 6px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--foreground) 20%, transparent);
+  border-radius: 9999px;
+}
+
 .animate-enter {
-  animation: enter 220ms ease-out;
+  animation: enter 200ms ease-out;
 }
 
 @keyframes enter {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;

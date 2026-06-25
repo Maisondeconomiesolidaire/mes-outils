@@ -13,6 +13,26 @@ export function formatRelative(ts: number) {
   return formatDistanceToNow(new Date(ts), { addSuffix: true, locale: fr });
 }
 
+/**
+ * « il y a X heures / jours / mois / années » — jamais de date précise.
+ * Accepte un timestamp ou une chaîne ISO ; renvoie null si invalide.
+ */
+export function relativeUnits(input: number | string | null | undefined): string | null {
+  if (input == null) return null;
+  const ts = typeof input === "number" ? input : Date.parse(input);
+  if (Number.isNaN(ts)) return null;
+  const diff = Math.max(0, Date.now() - ts);
+  const hours = Math.floor(diff / 3_600_000);
+  if (hours < 1) return "il y a moins d'une heure";
+  if (hours < 24) return `il y a ${hours} heure${hours > 1 ? "s" : ""}`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `il y a ${days} jour${days > 1 ? "s" : ""}`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `il y a ${months} mois`;
+  const years = Math.floor(months / 12);
+  return `il y a ${years} an${years > 1 ? "s" : ""}`;
+}
+
 export function toLocalInputValue(ts: number) {
   return format(new Date(ts), "yyyy-MM-dd'T'HH:mm");
 }

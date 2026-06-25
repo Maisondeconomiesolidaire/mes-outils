@@ -70,55 +70,51 @@ async function getActiveCrmPermissionRecord(
 }
 
 /**
- * Détermine si une identité Clerk correspond à un membre du staff.
- *
- * Mécanisme principal : le rôle exposé par Clerk (`publicMetadata.role`),
- * disponible dans le token Convex si le template JWT « convex » inclut
- *   "role": "{{user.public_metadata.role}}".
- *
- * Filet de sécurité (« break-glass ») : la variable d'environnement Convex
- * STAFF_EMAILS (emails séparés par des virgules) évite que le staff soit
- * verrouillé hors du CRM tant que le claim de rôle n'est pas configuré.
+ * Amorçage « break-glass » du staff. Les rôles et droits réels sont gérés
+ * **côté Convex** (table `crmPermissions`, champ `role` + `grants`). Cette
+ * allowlist d'environnement (STAFF_EMAILS) sert uniquement à éviter qu'on soit
+ * verrouillé hors du CRM avant qu'un premier admin ne soit défini en base.
  */
 export function isStaffIdentity(identity: UserIdentity): boolean {
-  const role = (identity as { role?: unknown }).role;
-  if (role === "staff" || isAdminIdentity(identity)) return true;
-
+  if (isAdminIdentity(identity)) return true;
   const allow = allowedEmailsFromEnv("STAFF_EMAILS");
   const email = identity.email?.toLowerCase();
   return Boolean(email && allow.includes(email));
 }
 
+/**
+ * Amorçage « break-glass » de l'admin via ADMIN_EMAILS. Le rôle admin nominal
+ * est porté par la table `crmPermissions` (`role === "admin"`) côté Convex.
+ */
 export function isAdminIdentity(identity: UserIdentity): boolean {
-  const role = (identity as { role?: unknown }).role;
-  if (role === "admin") return true;
-
   const allow = allowedEmailsFromEnv("ADMIN_EMAILS");
   const email = identity.email?.toLowerCase();
   return Boolean(email && allow.includes(email));
 }
 
-/** Vérifie qu'une session Clerk *staff* est présente (CRM). */
+/** Vérifie un accès *staff* (rôle/grants Convex, repli env hors db). */
 export async function requireStaff(ctx: QueryCtx | MutationCtx | ActionCtx) {
   const identity = await requireUser(ctx);
-  if (isStaffIdentity(identity)) return identity;
-
-  const email = identity.email?.trim().toLowerCase();
-  if (email && hasDb(ctx)) {
-    const record = await getActiveCrmPermissionRecord(ctx, email);
-    if (record) return identity;
+  if (hasDb(ctx)) {
+    const access = await getCrmAccessForIdentity(ctx, identity);
+    if (access.staff) return identity;
+    throw new Error("Accès réservé au personnel.");
   }
-
+  // Contexte action (sans db) : repli sur l'allowlist d'amorçage.
+  if (isStaffIdentity(identity)) return identity;
   throw new Error("Accès réservé au personnel.");
 }
 
-/** Vérifie qu'une session Clerk admin est présente. */
+/** Vérifie un accès *admin* (rôle Convex, repli env hors db). */
 export async function requireAdmin(ctx: QueryCtx | MutationCtx | ActionCtx) {
   const identity = await requireUser(ctx);
-  if (!isAdminIdentity(identity)) {
+  if (hasDb(ctx)) {
+    const access = await getCrmAccessForIdentity(ctx, identity);
+    if (access.admin) return identity;
     throw new Error("Accès réservé aux administrateurs.");
   }
-  return identity;
+  if (isAdminIdentity(identity)) return identity;
+  throw new Error("Accès réservé aux administrateurs.");
 }
 
 export type CrmPermissionAction =
@@ -138,22 +134,21 @@ export async function getCrmAccessForIdentity(
   ctx: QueryCtx | MutationCtx,
   identity: UserIdentity,
 ) {
-  const admin = isAdminIdentity(identity);
   const email = identity.email?.trim().toLowerCase() ?? null;
+  const record = email ? await getActiveCrmPermissionRecord(ctx, email) : null;
 
+  // Source de vérité : la table Convex `crmPermissions`. L'allowlist
+  // d'environnement ne sert que d'amorçage tant qu'aucun admin n'existe en base.
+  const admin = isAdminIdentity(identity) || record?.role === "admin";
   if (admin) {
     return { staff: true, admin: true, email, bootstrapMode: false, grants: [] };
   }
 
-  const record = email ? await getActiveCrmPermissionRecord(ctx, email) : null;
-  const staff = isStaffIdentity(identity) || Boolean(record);
-
+  const staff =
+    isStaffIdentity(identity) ||
+    Boolean(record && (record.role === "staff" || record.grants.length > 0));
   if (!staff) {
     return { staff: false, admin: false, email, bootstrapMode: false, grants: [] };
-  }
-
-  if (!email) {
-    return { staff: true, admin: false, email, bootstrapMode: false, grants: [] };
   }
 
   return {

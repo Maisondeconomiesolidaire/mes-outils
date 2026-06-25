@@ -74,7 +74,13 @@ export const listRooms = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
-    return await ctx.db.query("rooms").order("asc").collect();
+    const rooms = await ctx.db.query("rooms").order("asc").collect();
+    return await Promise.all(
+      rooms.map(async (room) => ({
+        ...room,
+        photoUrl: room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl,
+      })),
+    );
   },
 });
 
@@ -132,6 +138,8 @@ export const bookRoom = mutation({
     start: v.number(),
     end: v.number(),
     notes: v.optional(v.string()),
+    forClerkId: v.optional(v.string()),
+    forName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -151,10 +159,13 @@ export const bookRoom = mutation({
       throw new Error("Ce créneau est déjà réservé pour cette salle.");
     }
 
+    const onBehalf = args.forName?.trim();
     return await ctx.db.insert("roomReservations", {
       roomId: args.roomId,
       clerkId: identity.subject,
-      userName: displayName(identity),
+      userName: onBehalf || displayName(identity),
+      bookedByName: onBehalf ? displayName(identity) : undefined,
+      bookedForClerkId: onBehalf ? args.forClerkId : undefined,
       title: args.title.trim(),
       start: args.start,
       end: args.end,
@@ -185,6 +196,122 @@ export const cancelRoomReservation = mutation({
       throw new Error("Annulation non autorisée.");
     }
     await ctx.db.delete(args.reservationId);
+  },
+});
+
+async function isVehicleFree(
+  ctx: QueryCtx | MutationCtx,
+  vehicleId: Id<"vehicles">,
+  start: number,
+  end: number,
+) {
+  const dayMs = 86_400_000;
+  for (let cursor = Math.floor(start / dayMs) * dayMs; cursor < end; cursor += dayMs) {
+    if (await vehicleBusyReason(ctx, vehicleId, cursor)) return false;
+  }
+  return true;
+}
+
+export const availableRooms = query({
+  args: { start: v.number(), end: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    ensureRange(args.start, args.end);
+    const rooms = (await ctx.db.query("rooms").collect()).filter((room) => room.active);
+    const reservations = await ctx.db.query("roomReservations").collect();
+    const available = rooms.filter(
+      (room) =>
+        !reservations.some(
+          (reservation) =>
+            reservation.roomId === room._id && overlaps(reservation.start, reservation.end, args.start, args.end),
+        ),
+    );
+    return await Promise.all(
+      available.map(async (room) => ({
+        ...room,
+        photoUrl: room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl,
+      })),
+    );
+  },
+});
+
+export const availableVehicles = query({
+  args: { start: v.number(), end: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    ensureRange(args.start, args.end);
+    const vehicles = (await ctx.db.query("vehicles").collect()).filter((vehicle) => vehicle.active);
+    const free: Doc<"vehicles">[] = [];
+    for (const vehicle of vehicles) {
+      if (await isVehicleFree(ctx, vehicle._id, args.start, args.end)) free.push(vehicle);
+    }
+    return await resolveVehiclePhotoUrls(ctx, free);
+  },
+});
+
+/** Réservations véhicules (approuvées + en attente) sur une plage, pour l'agenda. */
+export const listVehicleBookings = query({
+  args: { start: v.number(), end: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const reservations = await ctx.db.query("vehicleReservations").collect();
+    const vehicles = await ctx.db.query("vehicles").collect();
+    const nameById = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle.name]));
+    return reservations
+      .filter((reservation) => reservation.status !== "rejected" && overlaps(reservation.start, reservation.end, args.start, args.end))
+      .map((reservation) => ({
+        _id: reservation._id,
+        vehicleName: nameById.get(String(reservation.vehicleId)) ?? "Véhicule",
+        userName: reservation.userName,
+        start: reservation.start,
+        end: reservation.end,
+        status: reservation.status,
+      }))
+      .sort((a, b) => a.start - b.start);
+  },
+});
+
+/** Toutes les réservations de l'utilisateur courant (salles + véhicules). */
+export const listMyReservations = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await requireUser(ctx);
+    const me = identity.subject;
+
+    const [roomRes, vehicleRes, rooms, vehicles] = await Promise.all([
+      ctx.db.query("roomReservations").collect(),
+      ctx.db.query("vehicleReservations").collect(),
+      ctx.db.query("rooms").collect(),
+      ctx.db.query("vehicles").collect(),
+    ]);
+    const roomName = new Map(rooms.map((room) => [String(room._id), room.name]));
+    const vehicleName = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle.name]));
+
+    const mine = [
+      ...roomRes
+        .filter((reservation) => reservation.clerkId === me || reservation.bookedForClerkId === me)
+        .map((reservation) => ({
+          _id: String(reservation._id),
+          kind: "room" as const,
+          assetName: roomName.get(String(reservation.roomId)) ?? "Salle",
+          label: reservation.title,
+          start: reservation.start,
+          end: reservation.end,
+          status: "confirmed" as const,
+        })),
+      ...vehicleRes
+        .filter((reservation) => reservation.clerkId === me || reservation.bookedForClerkId === me)
+        .map((reservation) => ({
+          _id: String(reservation._id),
+          kind: "vehicle" as const,
+          assetName: vehicleName.get(String(reservation.vehicleId)) ?? "Véhicule",
+          label: reservation.purpose,
+          start: reservation.start,
+          end: reservation.end,
+          status: reservation.status,
+        })),
+    ];
+    return mine.sort((a, b) => b.start - a.start);
   },
 });
 
@@ -248,6 +375,8 @@ export const requestVehicle = mutation({
     purpose: v.string(),
     start: v.number(),
     end: v.number(),
+    forClerkId: v.optional(v.string()),
+    forName: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -266,10 +395,13 @@ export const requestVehicle = mutation({
       throw new Error("Ce véhicule est déjà réservé sur ce créneau.");
     }
 
+    const onBehalf = args.forName?.trim();
     return await ctx.db.insert("vehicleReservations", {
       vehicleId: args.vehicleId,
       clerkId: identity.subject,
-      userName: displayName(identity),
+      userName: onBehalf || displayName(identity),
+      bookedByName: onBehalf ? displayName(identity) : undefined,
+      bookedForClerkId: onBehalf ? args.forClerkId : undefined,
       purpose: args.purpose.trim(),
       start: args.start,
       end: args.end,

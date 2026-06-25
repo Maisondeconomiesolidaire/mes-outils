@@ -315,6 +315,7 @@ export default defineSchema({
     photo: v.optional(v.id("_storage")),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     active: v.boolean(),
+    recycappEnabled: v.optional(v.boolean()),
     sourceKey: v.optional(v.string()),
     model: v.optional(v.string()),
     statusLabel: v.optional(v.string()),
@@ -405,6 +406,7 @@ export default defineSchema({
     email: v.string(),
     name: v.optional(v.string()),
     active: v.boolean(),
+    role: v.optional(v.union(v.literal("client"), v.literal("staff"), v.literal("admin"))),
     grants: v.array(
       v.object({
         pageKey: v.string(),
@@ -755,6 +757,7 @@ export default defineSchema({
     capacity: v.optional(v.number()),
     color: v.optional(v.string()),
     sourceKey: v.optional(v.string()),
+    photo: v.optional(v.id("_storage")),
     photoUrl: v.optional(v.string()),
     siteLabel: v.optional(v.string()),
     buildingLabel: v.optional(v.string()),
@@ -771,6 +774,8 @@ export default defineSchema({
     roomId: v.id("rooms"),
     clerkId: v.string(),
     userName: v.string(),
+    bookedByName: v.optional(v.string()),
+    bookedForClerkId: v.optional(v.string()),
     title: v.string(),
     start: v.number(),
     end: v.number(),
@@ -789,6 +794,8 @@ export default defineSchema({
     vehicleId: v.id("vehicles"),
     clerkId: v.string(),
     userName: v.string(),
+    bookedByName: v.optional(v.string()),
+    bookedForClerkId: v.optional(v.string()),
     purpose: v.string(),
     start: v.number(),
     end: v.number(),
@@ -813,6 +820,7 @@ export default defineSchema({
     priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
     status: v.union(v.literal("todo"), v.literal("in_progress"), v.literal("done")),
     dueDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -820,4 +828,72 @@ export default defineSchema({
     .index("by_vehicleId", ["vehicleId"])
     .index("by_status", ["status"])
     .index("by_dueDate", ["dueDate"]),
+
+  /** Documents rattachés à un véhicule (carte grise, facture, devis, assurance...). */
+  vehicleDocuments: defineTable({
+    vehicleId: v.id("vehicles"),
+    name: v.string(),
+    category: v.union(
+      v.literal("carte_grise"),
+      v.literal("facture"),
+      v.literal("devis"),
+      v.literal("assurance"),
+      v.literal("controle_technique"),
+      v.literal("autre"),
+    ),
+    storageId: v.id("_storage"),
+    uploadedBy: v.string(),
+    createdAt: v.number(),
+  }).index("by_vehicleId", ["vehicleId"]),
+
+  /** Espace partage — événements internes. */
+  events: defineTable({
+    authorClerkId: v.string(),
+    authorName: v.string(),
+    authorImageUrl: v.optional(v.string()),
+    title: v.string(),
+    description: v.optional(v.string()),
+    location: v.optional(v.string()),
+    start: v.number(),
+    end: v.optional(v.number()),
+    images: v.array(v.id("_storage")),
+    createdAt: v.number(),
+  }).index("by_start", ["start"]),
+
+  /** Espace partage — bons plans internes (prêt, don, vente, échange). */
+  dealPosts: defineTable({
+    authorClerkId: v.string(),
+    authorName: v.string(),
+    authorImageUrl: v.optional(v.string()),
+    title: v.string(),
+    description: v.string(),
+    dealType: v.union(
+      v.literal("pret"),
+      v.literal("don"),
+      v.literal("vente"),
+      v.literal("echange"),
+    ),
+    price: v.optional(v.number()),
+    availableFrom: v.optional(v.number()),
+    availableTo: v.optional(v.number()),
+    images: v.array(v.id("_storage")),
+    status: v.union(v.literal("open"), v.literal("closed")),
+    createdAt: v.number(),
+  }).index("by_createdAt", ["createdAt"]),
+
+  /** Messagerie interne entre utilisateurs. */
+  directMessages: defineTable({
+    pairKey: v.string(),
+    fromClerkId: v.string(),
+    fromName: v.string(),
+    fromImageUrl: v.optional(v.string()),
+    toClerkId: v.string(),
+    toName: v.string(),
+    body: v.string(),
+    readAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_pair", ["pairKey", "createdAt"])
+    .index("by_to", ["toClerkId"])
+    .index("by_from", ["fromClerkId"]),
 });

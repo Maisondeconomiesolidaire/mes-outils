@@ -4,6 +4,7 @@ import { RequirePermission } from "./components/RequirePermission";
 import { Admin } from "./pages/Admin";
 import { Actualites } from "./pages/Actualites";
 import { Gotravaux } from "./pages/Gotravaux";
+import { Messagerie } from "./pages/Messagerie";
 import { Portail } from "./pages/Portail";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
@@ -42,6 +43,14 @@ export default function App() {
           element={
             <RequirePermission pageKey="mesoutils:salles">
               <Salles />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/messagerie"
+          element={
+            <RequirePermission>
+              <Messagerie />
             </RequirePermission>
           }
         />

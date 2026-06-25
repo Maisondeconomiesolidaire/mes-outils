@@ -5,7 +5,6 @@ import {
   getCrmAccessForIdentity,
   hasCrmPermission,
   isAdminIdentity,
-  isStaffIdentity,
   requireAdmin,
   requireUser,
 } from "./lib";
@@ -78,6 +77,7 @@ export const listManaged = query({
         .map((record) => ({
           email: record.email,
           name: record.name,
+          role: record.role ?? "staff",
           permissionActive: record.active,
           grants: record.grants,
           updatedAt: record.updatedAt,
@@ -262,6 +262,7 @@ export const upsert = mutation({
   args: {
     email: v.string(),
     name: v.optional(v.string()),
+    role: v.optional(roleValidator),
     active: v.boolean(),
     grants: v.array(grantValidator),
   },
@@ -277,6 +278,7 @@ export const upsert = mutation({
     const payload = {
       email,
       name: args.name?.trim() || undefined,
+      role: args.role ?? "staff",
       active: args.active,
       grants: normalizeGrants(args.grants),
       updatedAt: Date.now(),
@@ -312,10 +314,11 @@ export const debugRole = query({
   args: {},
   handler: async (ctx) => {
     const identity = await requireUser(ctx);
+    const access = await getCrmAccessForIdentity(ctx, identity);
     return {
-      email: identity.email ?? null,
-      isStaff: isStaffIdentity(identity),
-      isAdmin: isAdminIdentity(identity),
+      email: access.email,
+      isStaff: access.staff,
+      isAdmin: access.admin,
     };
   },
 });
