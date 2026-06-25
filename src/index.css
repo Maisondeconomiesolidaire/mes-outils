@@ -30,6 +30,10 @@
   --ring: rgba(71, 198, 103, 0.28);
   --shadow-soft: 0 18px 48px rgba(20, 45, 26, 0.08);
   --shadow-strong: 0 24px 70px rgba(20, 45, 26, 0.14);
+  --nav-bg: rgba(255, 255, 255, 0.92);
+  --nav-border: #e7eee8;
+  --nav-text: #17231a;
+  --nav-muted: #59665c;
 }
 
 body.theme-dark {
@@ -47,6 +51,10 @@ body.theme-dark {
   --ring: rgba(71, 198, 103, 0.24);
   --shadow-soft: 0 14px 38px rgba(0, 0, 0, 0.28);
   --shadow-strong: 0 20px 56px rgba(0, 0, 0, 0.35);
+  --nav-bg: rgba(17, 24, 18, 0.94);
+  --nav-border: rgba(255, 255, 255, 0.1);
+  --nav-text: #ffffff;
+  --nav-muted: rgba(255, 255, 255, 0.72);
 }
 
 html,
@@ -105,6 +113,18 @@ textarea {
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   background: color-mix(in srgb, var(--card) 94%, transparent);
   box-shadow: var(--shadow-strong);
+}
+
+.asset-photo {
+  background:
+    linear-gradient(135deg, rgba(71, 198, 103, 0.18), rgba(17, 24, 18, 0.08)),
+    linear-gradient(135deg, #f5f7f3, #dde9df);
+}
+
+body.theme-dark .asset-photo {
+  background:
+    linear-gradient(135deg, rgba(71, 198, 103, 0.22), rgba(255, 255, 255, 0.06)),
+    linear-gradient(135deg, #172019, #0f1511);
 }
 
 .data-row {

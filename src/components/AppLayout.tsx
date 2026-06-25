@@ -18,7 +18,7 @@ export function AppLayout() {
         <div className="flex min-h-screen items-center justify-center px-4 py-10">
           <div className="w-full max-w-md">
             <div className="mb-6 flex items-center justify-between">
-          <img src={logoSrc} alt="Mes Outils" className="h-20 w-auto" />
+              <img src={logoSrc} alt="Mes Outils" className="h-20 w-auto" />
               <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "dark" ? "light" : "dark")} />
             </div>
             <div className="glass-card rounded-xl border border-[var(--border)] p-4 sm:p-6">
@@ -104,9 +104,13 @@ function AuthenticatedShell({
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#111812]/95 shadow-[0_18px_40px_rgba(0,0,0,0.16)] backdrop-blur-xl">
+      <header className="sticky top-0 z-30 border-b border-[var(--nav-border)] bg-[var(--nav-bg)] shadow-[0_14px_36px_rgba(0,0,0,0.08)] backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <img src="/mesoutils-dark.png" alt="Mes Outils" className="h-16 w-auto sm:h-[4.5rem]" />
+          <img
+            src={theme === "dark" ? "/mesoutils-dark.png" : "/mesoutils-light.png"}
+            alt="Mes Outils"
+            className="h-16 w-auto sm:h-[4.5rem]"
+          />
 
           <nav className="ml-auto hidden items-center gap-2 md:flex">
             {navItems.map((item) => (
@@ -119,7 +123,7 @@ function AuthenticatedShell({
                     "rounded-full px-4 py-2 text-sm font-semibold transition",
                     isActive
                       ? "bg-brand-500 text-white shadow-[0_10px_24px_rgba(71,198,103,0.26)]"
-                      : "text-white/72 hover:bg-brand-500/18 hover:text-white",
+                      : "text-[var(--nav-muted)] hover:bg-brand-500/12 hover:text-[var(--nav-text)]",
                   )
                 }
               >

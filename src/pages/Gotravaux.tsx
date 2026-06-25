@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { Activity, CalendarClock, CarFront, CheckCircle2, Gauge, Plus, Wrench } from "lucide-react";
+import { CalendarClock, CarFront, CheckCircle2, Gauge, Plus, Search, Wrench } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Button } from "../components/ui/Button";
@@ -54,6 +54,7 @@ const emptyVehicleForm = {
   model: "",
   seats: "",
   assignedTo: "",
+  photoUrl: "",
   odometerKm: "",
   technicalControlDate: "",
   pollutionControlDate: "",
@@ -76,6 +77,8 @@ export function Gotravaux() {
   const [taskDescription, setTaskDescription] = useState("");
   const [taskPriority, setTaskPriority] = useState<TaskPriority>("medium");
   const [taskDueDate, setTaskDueDate] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusTab, setStatusTab] = useState<"active" | "inactive" | "all">("active");
 
   const selectedVehicle = vehicles?.find((vehicle) => vehicle._id === selectedVehicleId);
 
@@ -90,6 +93,7 @@ export function Gotravaux() {
       model: selectedVehicle.model ?? "",
       seats: selectedVehicle.seats ? String(selectedVehicle.seats) : "",
       assignedTo: selectedVehicle.assignedTo ?? "",
+      photoUrl: selectedVehicle.photoUrl ?? "",
       odometerKm: selectedVehicle.odometerKm ? String(selectedVehicle.odometerKm) : "",
       technicalControlDate: selectedVehicle.technicalControlDate ?? "",
       pollutionControlDate: selectedVehicle.pollutionControlDate ?? "",
@@ -99,10 +103,19 @@ export function Gotravaux() {
     });
   }, [selectedVehicle]);
 
-  const openTasks = useMemo(
-    () => (tasks ?? []).filter((task) => task.status !== "done"),
-    [tasks],
-  );
+  const filteredVehicles = useMemo(() => {
+    const normalized = search.trim().toLowerCase();
+    return (vehicles ?? []).filter((vehicle) => {
+      if (statusTab === "active" && !vehicle.active) return false;
+      if (statusTab === "inactive" && vehicle.active) return false;
+      if (!normalized) return true;
+      return [vehicle.name, vehicle.brand, vehicle.model, vehicle.plate, vehicle.kind]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(normalized);
+    });
+  }, [vehicles, search, statusTab]);
 
   if (vehicles === undefined || tasks === undefined) {
     return <FullSpinner label="Chargement de Gotravaux..." />;
@@ -119,6 +132,7 @@ export function Gotravaux() {
       model: form.model || undefined,
       seats: form.seats ? Number(form.seats) : undefined,
       assignedTo: form.assignedTo || undefined,
+      photoUrl: form.photoUrl || undefined,
       odometerKm: form.odometerKm ? Number(form.odometerKm) : undefined,
       technicalControlDate: form.technicalControlDate || undefined,
       pollutionControlDate: form.pollutionControlDate || undefined,
@@ -150,101 +164,125 @@ export function Gotravaux() {
   }
 
   return (
-    <div className="space-y-8">
-      <section className="premium-shell rounded-[2rem] bg-[#111812] p-7 text-white sm:p-10">
-        <p className="text-xs font-bold uppercase tracking-[0.18em] text-brand-300">Gotravaux</p>
-        <div className="mt-4 flex flex-wrap items-end justify-between gap-6">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">Gestion de flotte et maintenance.</h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-white/68">
-              Centralisez les informations vehicules, les affectations, les controles et les travaux a realiser.
-            </p>
-          </div>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <HeroStat icon={<CarFront className="h-5 w-5" />} value={vehicles.length} label="Vehicules" />
-            <HeroStat icon={<Wrench className="h-5 w-5" />} value={openTasks.length} label="Taches" />
-            <HeroStat icon={<Activity className="h-5 w-5" />} value={vehicles.filter((v) => v.active).length} label="Actifs" />
-          </div>
-        </div>
-      </section>
+    <div className="grid gap-7 lg:grid-cols-[220px_minmax(0,1fr)]">
+      <aside className="premium-panel h-fit rounded-[1.5rem] p-5 lg:sticky lg:top-32">
+        <p className="text-xl font-bold text-[var(--foreground)]">Go travaux</p>
+        <nav className="mt-8 space-y-2 text-sm font-semibold">
+          {["Planning", "Liste tâches", "Véhicules", "Réservations", "Equipements"].map((item) => (
+            <span
+              key={item}
+              className={`flex items-center gap-3 rounded-2xl px-3 py-3 ${
+                item === "Véhicules" ? "bg-brand-50 text-brand-700" : "text-[var(--muted-foreground)]"
+              }`}
+            >
+              <CarFront className="h-4 w-4" />
+              {item}
+            </span>
+          ))}
+        </nav>
+      </aside>
 
-      <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_430px]">
-        <section className="premium-panel overflow-hidden rounded-[1.5rem]">
-          <div className="flex items-center justify-between border-b border-[var(--border)] px-5 py-4">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--foreground)]">Parc vehicules</h2>
-              <p className="text-sm text-[var(--muted-foreground)]">Cliquez une ligne pour modifier ses informations.</p>
+      <main className="space-y-7">
+        <div className="flex flex-wrap items-end justify-between gap-5">
+          <div>
+            <h1 className="text-4xl font-semibold tracking-tight text-[var(--foreground)]">
+              Véhicules ({vehicles.length})
+            </h1>
+            <div className="mt-7 flex gap-8 text-xl font-medium">
+              <button
+                type="button"
+                onClick={() => setStatusTab("active")}
+                className={`border-b-2 pb-3 ${statusTab === "active" ? "border-brand-500 text-[var(--foreground)]" : "border-transparent text-[var(--muted-foreground)]"}`}
+              >
+                Actif
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusTab("inactive")}
+                className={`border-b-2 pb-3 ${statusTab === "inactive" ? "border-brand-500 text-[var(--foreground)]" : "border-transparent text-[var(--muted-foreground)]"}`}
+              >
+                Immobilisé
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusTab("all")}
+                className={`border-b-2 pb-3 ${statusTab === "all" ? "border-brand-500 text-[var(--foreground)]" : "border-transparent text-[var(--muted-foreground)]"}`}
+              >
+                Tous
+              </button>
             </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
             <Button
-              variant="secondary"
+              size="lg"
               onClick={() => {
                 setSelectedVehicleId("");
                 setForm(emptyVehicleForm);
               }}
             >
-              <Plus className="h-4 w-4" />
-              Nouveau
+              <Plus className="h-5 w-5" />
+              Ajouter un véhicule
             </Button>
+            <label className="flex h-12 min-w-72 items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--card)] px-4 shadow-sm">
+              <Search className="h-4 w-4 text-[var(--muted-foreground)]" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Marque, modèle, immatriculation..."
+                className="w-full bg-transparent text-sm text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]"
+              />
+            </label>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="bg-[var(--accent)] text-xs uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
-                <tr>
-                  <th className="px-5 py-3">Vehicule</th>
-                  <th className="px-5 py-3">Plaque</th>
-                  <th className="px-5 py-3">Site</th>
-                  <th className="px-5 py-3">Kilometrage</th>
-                  <th className="px-5 py-3">Maintenance</th>
-                  <th className="px-5 py-3">Statut</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vehicles.map((vehicle) => (
-                  <tr
-                    key={vehicle._id}
-                    className={`data-row cursor-pointer ${selectedVehicleId === vehicle._id ? "bg-brand-50" : ""}`}
-                    onClick={() => setSelectedVehicleId(vehicle._id)}
-                  >
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        {vehicle.photoUrl ? (
-                          <img src={vehicle.photoUrl} alt={vehicle.name} className="h-11 w-11 rounded-xl object-cover" />
-                        ) : (
-                          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#111812] text-white">
-                            <CarFront className="h-5 w-5" />
-                          </span>
-                        )}
-                        <div>
-                          <p className="font-semibold text-[var(--foreground)]">{vehicle.name}</p>
-                          <p className="text-xs text-[var(--muted-foreground)]">
-                            {[vehicle.brand, vehicle.model].filter(Boolean).join(" ") || vehicle.kind}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 text-[var(--foreground)]">{vehicle.plate ?? "-"}</td>
-                    <td className="px-5 py-4 text-[var(--muted-foreground)]">{vehicle.site ? `Site ${vehicle.site}` : "-"}</td>
-                    <td className="px-5 py-4 text-[var(--muted-foreground)]">
-                      {vehicle.odometerKm ? `${vehicle.odometerKm.toLocaleString("fr-FR")} km` : "-"}
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className="rounded-full bg-[var(--accent)] px-3 py-1 text-xs font-semibold text-[var(--foreground)]">
-                        {vehicle.openTasksCount} ouverte{vehicle.openTasksCount > 1 ? "s" : ""}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${vehicle.active ? "bg-brand-100 text-brand-800" : "bg-zinc-100 text-zinc-600"}`}>
-                        {vehicle.active ? "Actif" : "Inactif"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        </div>
 
-        <aside className="space-y-5">
+        <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_420px]">
+          <section className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
+            {filteredVehicles.map((vehicle) => (
+              <button
+                key={vehicle._id}
+                type="button"
+                onClick={() => setSelectedVehicleId(vehicle._id)}
+                className={`overflow-hidden rounded-[1.4rem] border bg-[var(--card)] text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-xl ${
+                  selectedVehicleId === vehicle._id ? "border-brand-500 ring-4 ring-brand-500/15" : "border-[var(--border)]"
+                }`}
+              >
+                <div className="asset-photo relative h-56">
+                  {vehicle.photoUrl ? (
+                    <img src={vehicle.photoUrl} alt={vehicle.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--muted-foreground)]">
+                      <CarFront className="h-12 w-12" />
+                      <span className="text-sm font-semibold">Photo à ajouter</span>
+                    </div>
+                  )}
+                  <span className="absolute left-4 top-4 rounded-full bg-brand-500 px-3 py-2 text-sm font-bold text-white">
+                    {vehicle.active ? "Actif" : "Inactif"}
+                  </span>
+                  {vehicle.plate ? (
+                    <span className="absolute right-4 top-4 rounded-lg border-2 border-black bg-white px-4 py-2 text-sm font-black text-black shadow">
+                      {vehicle.plate}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <h2 className="text-xl font-bold text-[var(--foreground)]">{vehicle.name}</h2>
+                    <span className="text-sm font-semibold text-[var(--muted-foreground)]">{vehicle.kind}</span>
+                  </div>
+                  <div className="mt-5 space-y-3 text-sm font-semibold text-[var(--foreground)]">
+                    <p>Année {vehicle.technicalControlDate?.slice(0, 4) || vehicle.pollutionControlDate?.slice(0, 4) || "non renseignée"}</p>
+                    <p>
+                      {vehicle.odometerKm ? `${vehicle.odometerKm.toLocaleString("fr-FR")} km` : "Kilométrage inconnu"}
+                    </p>
+                    <p>{vehicle.brand || "Marque non renseignée"}</p>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </section>
+
+          <aside className="space-y-5">
           <section className="premium-panel rounded-[1.5rem] p-5">
             <h2 className="text-lg font-semibold text-[var(--foreground)]">
               {selectedVehicleId ? "Modifier le vehicule" : "Nouveau vehicule"}
@@ -252,6 +290,9 @@ export function Gotravaux() {
             <div className="mt-5 grid gap-4">
               <Field label="Nom">
                 <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+              </Field>
+              <Field label="Photo">
+                <Input value={form.photoUrl} onChange={(event) => setForm({ ...form, photoUrl: event.target.value })} placeholder="URL de la photo" />
               </Field>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Marque">
@@ -351,8 +392,8 @@ export function Gotravaux() {
               </Button>
             </div>
           </section>
-        </aside>
-      </div>
+          </aside>
+        </div>
 
       <section className="premium-panel overflow-hidden rounded-[1.5rem]">
         <div className="border-b border-[var(--border)] px-5 py-4">
@@ -406,18 +447,7 @@ export function Gotravaux() {
           </div>
         )}
       </section>
-    </div>
-  );
-}
-
-function HeroStat({ icon, value, label }: { icon: React.ReactNode; value: number; label: string }) {
-  return (
-    <div className="min-w-24 rounded-2xl bg-white/[0.08] px-4 py-4">
-      <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-full bg-brand-500 text-white">
-        {icon}
-      </div>
-      <p className="mt-3 text-2xl font-semibold">{value}</p>
-      <p className="mt-1 text-xs uppercase tracking-[0.14em] text-white/52">{label}</p>
+      </main>
     </div>
   );
 }

@@ -68,6 +68,7 @@ export const createVehicle = mutation({
     model: v.optional(v.string()),
     seats: v.optional(v.number()),
     assignedTo: v.optional(v.string()),
+    photoUrl: v.optional(v.string()),
     active: v.boolean(),
   },
   handler: async (ctx, args) => {
@@ -79,6 +80,7 @@ export const createVehicle = mutation({
       brand: args.brand?.trim() || undefined,
       model: args.model?.trim() || undefined,
       assignedTo: args.assignedTo?.trim() || undefined,
+      photoUrl: args.photoUrl?.trim() || undefined,
       createdAt: Date.now(),
     });
   },
@@ -95,6 +97,7 @@ export const updateVehicle = mutation({
     model: v.optional(v.string()),
     seats: v.optional(v.number()),
     assignedTo: v.optional(v.string()),
+    photoUrl: v.optional(v.string()),
     odometerKm: v.optional(v.number()),
     technicalControlDate: v.optional(v.string()),
     pollutionControlDate: v.optional(v.string()),
@@ -111,6 +114,7 @@ export const updateVehicle = mutation({
       brand: patch.brand?.trim() || undefined,
       model: patch.model?.trim() || undefined,
       assignedTo: patch.assignedTo?.trim() || undefined,
+      photoUrl: patch.photoUrl?.trim() || undefined,
       insuranceCompany: patch.insuranceCompany?.trim() || undefined,
       insurancePolicy: patch.insurancePolicy?.trim() || undefined,
     });
@@ -195,6 +199,7 @@ export const createRoom = mutation({
     capacity: v.optional(v.number()),
     color: v.optional(v.string()),
     buildingLabel: v.optional(v.string()),
+    photoUrl: v.optional(v.string()),
     services: v.optional(v.array(v.string())),
     reservable: v.optional(v.boolean()),
     active: v.boolean(),
@@ -205,6 +210,7 @@ export const createRoom = mutation({
       ...args,
       name: args.name.trim(),
       buildingLabel: args.buildingLabel?.trim() || undefined,
+      photoUrl: args.photoUrl?.trim() || undefined,
       createdAt: Date.now(),
     });
   },
@@ -218,6 +224,7 @@ export const updateRoom = mutation({
     capacity: v.optional(v.number()),
     color: v.optional(v.string()),
     buildingLabel: v.optional(v.string()),
+    photoUrl: v.optional(v.string()),
     services: v.optional(v.array(v.string())),
     reservable: v.optional(v.boolean()),
     unavailabilityNotes: v.optional(v.string()),
@@ -229,6 +236,7 @@ export const updateRoom = mutation({
       ...patch,
       name: patch.name.trim(),
       buildingLabel: patch.buildingLabel?.trim() || undefined,
+      photoUrl: patch.photoUrl?.trim() || undefined,
       unavailabilityNotes: patch.unavailabilityNotes?.trim() || undefined,
     });
   },

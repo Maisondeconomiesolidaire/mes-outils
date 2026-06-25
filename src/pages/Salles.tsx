@@ -13,6 +13,7 @@ type Room = {
   site?: "60" | "76";
   capacity?: number;
   color?: string;
+  photoUrl?: string;
   siteLabel?: string;
   buildingLabel?: string;
   services?: string[];
@@ -26,6 +27,7 @@ const emptyRoomForm = {
   site: "" as "" | "60" | "76",
   capacity: "",
   color: "#47c667",
+  photoUrl: "",
   buildingLabel: "",
   services: "",
   reservable: true,
@@ -50,6 +52,7 @@ export function Salles() {
       site: selectedRoom.site ?? "",
       capacity: selectedRoom.capacity ? String(selectedRoom.capacity) : "",
       color: selectedRoom.color ?? "#47c667",
+      photoUrl: selectedRoom.photoUrl ?? "",
       buildingLabel: selectedRoom.buildingLabel ?? "",
       services: (selectedRoom.services ?? []).join(", "),
       reservable: selectedRoom.reservable ?? true,
@@ -69,6 +72,7 @@ export function Salles() {
       site: form.site || undefined,
       capacity: form.capacity ? Number(form.capacity) : undefined,
       color: form.color || undefined,
+      photoUrl: form.photoUrl || undefined,
       buildingLabel: form.buildingLabel || undefined,
       services: form.services
         .split(",")
@@ -201,6 +205,13 @@ export function Salles() {
             </div>
             <Field label="Batiment / zone">
               <Input value={form.buildingLabel} onChange={(event) => setForm({ ...form, buildingLabel: event.target.value })} />
+            </Field>
+            <Field label="Photo">
+              <Input
+                value={form.photoUrl}
+                onChange={(event) => setForm({ ...form, photoUrl: event.target.value })}
+                placeholder="URL de la photo"
+              />
             </Field>
             <Field label="Services">
               <Input
