@@ -17,7 +17,7 @@
 
 :root {
   color-scheme: light;
-  --background: #f7f9f7;
+  --background: #f4f7f3;
   --foreground: #17231a;
   --card: #ffffff;
   --card-foreground: #17231a;
@@ -28,8 +28,8 @@
   --border: #dfe8e1;
   --input: #ffffff;
   --ring: rgba(71, 198, 103, 0.28);
-  --shadow-soft: 0 10px 30px rgba(20, 45, 26, 0.06);
-  --shadow-strong: 0 16px 44px rgba(20, 45, 26, 0.1);
+  --shadow-soft: 0 18px 48px rgba(20, 45, 26, 0.08);
+  --shadow-strong: 0 24px 70px rgba(20, 45, 26, 0.14);
 }
 
 body.theme-dark {
@@ -59,14 +59,18 @@ body {
   margin: 0;
   font-family: var(--font-sans);
   color: var(--foreground);
-  background: var(--background);
+  background:
+    radial-gradient(circle at top left, rgba(71, 198, 103, 0.13), transparent 34rem),
+    linear-gradient(180deg, #fbfdfb 0%, var(--background) 38%, var(--background) 100%);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   transition: background 180ms ease, color 180ms ease;
 }
 
 body.theme-dark {
-  background: var(--background);
+  background:
+    radial-gradient(circle at top left, rgba(71, 198, 103, 0.16), transparent 34rem),
+    linear-gradient(180deg, #111a13 0%, var(--background) 48%, #0b100d 100%);
 }
 
 a {
@@ -88,6 +92,28 @@ textarea {
 .glass-card {
   background: var(--card);
   box-shadow: var(--shadow-soft);
+}
+
+.premium-panel {
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--card) 98%, white 2%), var(--card));
+  box-shadow: var(--shadow-soft);
+}
+
+.premium-shell {
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
+  box-shadow: var(--shadow-strong);
+}
+
+.data-row {
+  border-bottom: 1px solid var(--border);
+  transition: background 160ms ease;
+}
+
+.data-row:hover {
+  background: color-mix(in srgb, var(--accent) 72%, transparent);
 }
 
 .mesh-panel {

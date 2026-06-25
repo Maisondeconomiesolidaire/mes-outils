@@ -805,4 +805,19 @@ export default defineSchema({
     .index("by_vehicleId", ["vehicleId"])
     .index("by_status", ["status"])
     .index("by_start", ["start"]),
+
+  vehicleMaintenanceTasks: defineTable({
+    vehicleId: v.id("vehicles"),
+    title: v.string(),
+    description: v.optional(v.string()),
+    priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
+    status: v.union(v.literal("todo"), v.literal("in_progress"), v.literal("done")),
+    dueDate: v.optional(v.number()),
+    createdBy: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_vehicleId", ["vehicleId"])
+    .index("by_status", ["status"])
+    .index("by_dueDate", ["dueDate"]),
 });

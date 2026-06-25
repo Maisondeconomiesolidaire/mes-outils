@@ -196,6 +196,20 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
   },
   {
     app: "mesoutils",
+    key: "mesoutils:gotravaux",
+    label: "Gotravaux",
+    description: "Gestion des vehicules, informations de flotte et maintenance.",
+    actions: ["read", "create", "update", "manage"],
+  },
+  {
+    app: "mesoutils",
+    key: "mesoutils:salles",
+    label: "Salles",
+    description: "Gestion des salles, capacites, services et disponibilites.",
+    actions: ["read", "create", "update", "manage"],
+  },
+  {
+    app: "mesoutils",
     key: "mesoutils:admin",
     label: "Admin Mes Outils",
     description: "Gestion transverse des droits Mes Outils et recyclerie.",
@@ -223,6 +237,8 @@ export const PORTAL_NAV = [
   { to: "/", label: "Portail" },
   { to: "/actualites", label: "Espace partage", pageKey: "mesoutils:actualites" },
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations" },
+  { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux" },
+  { to: "/salles", label: "Salles", pageKey: "mesoutils:salles" },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },
 ] as const;
 

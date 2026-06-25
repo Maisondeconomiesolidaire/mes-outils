@@ -18,6 +18,7 @@ import type * as documents from "../documents.js";
 import type * as emails from "../emails.js";
 import type * as files from "../files.js";
 import type * as fleet from "../fleet.js";
+import type * as gotravaux from "../gotravaux.js";
 import type * as http from "../http.js";
 import type * as lib from "../lib.js";
 import type * as livraison from "../livraison.js";
@@ -52,6 +53,7 @@ declare const fullApi: ApiFromModules<{
   emails: typeof emails;
   files: typeof files;
   fleet: typeof fleet;
+  gotravaux: typeof gotravaux;
   http: typeof http;
   lib: typeof lib;
   livraison: typeof livraison;
