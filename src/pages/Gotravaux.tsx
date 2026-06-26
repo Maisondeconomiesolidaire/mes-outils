@@ -11,7 +11,6 @@ import {
   Plus,
   Search,
   Trash2,
-  Upload,
   Users,
   Wrench,
   X,
@@ -229,14 +228,15 @@ const emptyVehicleForm = {
   odometerKm: "", technicalControlDate: "", pollutionControlDate: "", status: "active" as VehicleStatus,
   recycappEnabled: false,
 };
+type VehicleFormState = typeof emptyVehicleForm;
 
 function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicle | null; onSaved: () => void; canSave?: boolean }) {
   const createVehicle = useMutation(api.gotravaux.createVehicle);
   const updateVehicle = useMutation(api.gotravaux.updateVehicle);
-  const [form, setForm] = useState(() =>
+  const [form, setForm] = useState<VehicleFormState>(() =>
     vehicle
       ? {
-          name: vehicle.name, plate: vehicle.plate ?? "", kind: normalizeVehicleKind(vehicle.kind), site: vehicle.site ?? "",
+          name: vehicle.name, plate: vehicle.plate ?? "", kind: normalizeVehicleKind(vehicle.kind), site: vehicle.site ?? ("" as "" | "60" | "76"),
           brand: vehicle.brand ?? "", model: vehicle.model ?? "", seats: vehicle.seats ? String(vehicle.seats) : "",
           assignedTo: vehicle.assignedTo ?? "", photo: vehicle.photo ?? null, photoUrl: vehicle.photoUrl ?? "",
           odometerKm: vehicle.odometerKm ? String(vehicle.odometerKm) : "",
@@ -248,68 +248,78 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
   );
   const [saving, setSaving] = useState(false);
 
-  async function save() {
-    if (!form.name.trim()) return;
+  function payloadFromForm(nextForm: VehicleFormState) {
+    return {
+      name: nextForm.name, plate: nextForm.plate || undefined, kind: nextForm.kind,
+      site: (nextForm.site || undefined) as "60" | "76" | undefined,
+      brand: nextForm.brand || undefined, model: nextForm.model || undefined, seats: nextForm.seats ? Number(nextForm.seats) : undefined,
+      assignedTo: nextForm.assignedTo || undefined, photo: nextForm.photo ?? undefined, photoUrl: nextForm.photoUrl || undefined,
+      odometerKm: nextForm.odometerKm ? Number(nextForm.odometerKm) : undefined,
+      technicalControlDate: nextForm.technicalControlDate || undefined, pollutionControlDate: nextForm.pollutionControlDate || undefined,
+      active: nextForm.status === "active",
+      recycappEnabled: nextForm.recycappEnabled,
+    };
+  }
+
+  async function persist(nextForm: VehicleFormState, closeAfterSave = false) {
+    if (!nextForm.name.trim()) return;
     setSaving(true);
     try {
-      const payload = {
-        name: form.name, plate: form.plate || undefined, kind: form.kind,
-        site: (form.site || undefined) as "60" | "76" | undefined,
-        brand: form.brand || undefined, model: form.model || undefined, seats: form.seats ? Number(form.seats) : undefined,
-        assignedTo: form.assignedTo || undefined, photo: form.photo ?? undefined, photoUrl: form.photoUrl || undefined,
-        odometerKm: form.odometerKm ? Number(form.odometerKm) : undefined,
-        technicalControlDate: form.technicalControlDate || undefined, pollutionControlDate: form.pollutionControlDate || undefined,
-        active: form.status === "active",
-        recycappEnabled: form.recycappEnabled,
-      };
-      const saleDate = form.status === "sold" ? (vehicle?.saleDate || new Date().toISOString().slice(0, 10)) : undefined;
+      const payload = payloadFromForm(nextForm);
+      const saleDate = nextForm.status === "sold" ? (vehicle?.saleDate || new Date().toISOString().slice(0, 10)) : undefined;
       if (vehicle) await updateVehicle({ vehicleId: vehicle._id, ...payload, saleDate });
       else await createVehicle(payload);
-      onSaved();
+      if (closeAfterSave) onSaved();
     } finally {
       setSaving(false);
     }
   }
 
+  function updateForm(patch: Partial<VehicleFormState>) {
+    const nextForm = { ...form, ...patch };
+    setForm(nextForm);
+    if (vehicle && canSave) void persist(nextForm);
+  }
+
   return (
     <fieldset disabled={!canSave} className="grid gap-4">
-      <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => setForm({ ...form, photo: id })} />
-      <Field label="Nom" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+      <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => updateForm({ photo: id })} />
+      <Field label="Nom" required><Input value={form.name} onChange={(e) => updateForm({ name: e.target.value })} /></Field>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Marque"><Input value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /></Field>
-        <Field label="Modèle"><Input value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></Field>
+        <Field label="Marque"><Input value={form.brand} onChange={(e) => updateForm({ brand: e.target.value })} /></Field>
+        <Field label="Modèle"><Input value={form.model} onChange={(e) => updateForm({ model: e.target.value })} /></Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Plaque"><Input value={form.plate} onChange={(e) => setForm({ ...form, plate: e.target.value })} /></Field>
+        <Field label="Plaque"><Input value={form.plate} onChange={(e) => updateForm({ plate: e.target.value })} /></Field>
         <Field label="Type">
-          <Select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as VehicleKind })}>
+          <Select value={form.kind} onChange={(e) => updateForm({ kind: e.target.value as VehicleKind })}>
             <option value="utilitaire">Utilitaire</option><option value="voiture">Voiture</option>
           </Select>
         </Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Site">
-          <Select value={form.site} onChange={(e) => setForm({ ...form, site: e.target.value as "" | "60" | "76" })}>
+          <Select value={form.site} onChange={(e) => updateForm({ site: e.target.value as "" | "60" | "76" })}>
             <option value="">Non renseigné</option><option value="60">Site 60</option><option value="76">Site 76</option>
           </Select>
         </Field>
-        <Field label="Places"><Input type="number" value={form.seats} onChange={(e) => setForm({ ...form, seats: e.target.value })} /></Field>
+        <Field label="Places"><Input type="number" value={form.seats} onChange={(e) => updateForm({ seats: e.target.value })} /></Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
           label="Kilométrage"
           hint={vehicle?.odometerUpdatedAt ? `Dernier relevé : ${formatDateTime(Date.parse(vehicle.odometerUpdatedAt))}` : "Aucun relevé enregistré."}
         >
-          <Input type="number" value={form.odometerKm} onChange={(e) => setForm({ ...form, odometerKm: e.target.value })} />
+          <Input type="number" value={form.odometerKm} onChange={(e) => updateForm({ odometerKm: e.target.value })} />
         </Field>
-        <Field label="Attribué à"><Input value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })} /></Field>
+        <Field label="Attribué à"><Input value={form.assignedTo} onChange={(e) => updateForm({ assignedTo: e.target.value })} /></Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Contrôle technique"><DatePicker value={form.technicalControlDate} onChange={(value) => setForm({ ...form, technicalControlDate: value })} /></Field>
-        <Field label="Contrôle pollution"><DatePicker value={form.pollutionControlDate} onChange={(value) => setForm({ ...form, pollutionControlDate: value })} /></Field>
+        <Field label="Contrôle technique"><DatePicker value={form.technicalControlDate} onChange={(value) => updateForm({ technicalControlDate: value })} /></Field>
+        <Field label="Contrôle pollution"><DatePicker value={form.pollutionControlDate} onChange={(value) => updateForm({ pollutionControlDate: value })} /></Field>
       </div>
       <Field label="Statut">
-        <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as VehicleStatus })}>
+        <Select value={form.status} onChange={(e) => updateForm({ status: e.target.value as VehicleStatus })}>
           <option value="active">Actif</option>
           <option value="immobilized">Immobilisé</option>
           <option value="sold">Vendu</option>
@@ -320,24 +330,25 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
           <input
             type="checkbox"
             checked={form.recycappEnabled}
-            onChange={(e) => setForm({ ...form, recycappEnabled: e.target.checked })}
+            onChange={(e) => updateForm({ recycappEnabled: e.target.checked })}
             className="mt-1 h-4 w-4 accent-brand-500"
           />
           <span>
             <span className="block text-sm font-semibold text-[var(--foreground)]">
-              Visible dans Recycapp
+              Disponible pour la Recyclerie
             </span>
             <span className="mt-1 block text-xs leading-5 text-[var(--muted-foreground)]">
-              Si activé, ce véhicule apparaît dans la flotte et les affectations Recycapp.
+              Si activé, ce véhicule apparaît dans la flotte et les affectations de la Recyclerie.
             </span>
           </span>
         </span>
       </label>
-      {canSave ? (
+      {canSave && !vehicle ? (
         <div className="flex justify-end border-t border-[var(--border)] pt-4">
-          <Button size="lg" onClick={save} disabled={saving || !form.name.trim()}>{saving ? "Enregistrement..." : "Enregistrer"}</Button>
+          <Button size="lg" onClick={() => persist(form, true)} disabled={saving || !form.name.trim()}>{saving ? "Enregistrement..." : "Enregistrer"}</Button>
         </div>
       ) : null}
+      {canSave && vehicle ? <p className="border-t border-[var(--border)] pt-3 text-right text-xs font-medium text-[var(--muted-foreground)]">{saving ? "Enregistrement..." : "Modifications enregistrées automatiquement"}</p> : null}
     </fieldset>
   );
 }
@@ -422,7 +433,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
           </div>
         </div>
       ) : canCreate ? (
-        <Button onClick={() => setAdding(true)}><Plus className="h-4 w-4" />Nouvelle maintenance</Button>
+        <Button className="w-full" onClick={() => setAdding(true)}><Plus className="h-4 w-4" />Nouvelle maintenance</Button>
       ) : null}
 
       {tasks === undefined ? (
@@ -455,34 +466,45 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
   const addDocument = useMutation(api.gotravaux.addVehicleDocument);
   const removeDocument = useMutation(api.gotravaux.removeVehicleDocument);
   const upload = useUpload();
-  const [category, setCategory] = useState<DocCategory>("carte_grise");
-  const [uploading, setUploading] = useState(false);
+  const [uploadingCategory, setUploadingCategory] = useState<DocCategory | null>(null);
 
-  async function handleFile(file: File | undefined) {
+  async function handleFile(category: DocCategory, file: File | undefined) {
     if (!file) return;
-    setUploading(true);
+    setUploadingCategory(category);
     try {
       const storageId = await upload(file);
       await addDocument({ vehicleId, name: file.name, category, storageId });
     } finally {
-      setUploading(false);
+      setUploadingCategory(null);
     }
   }
 
   return (
     <div className="space-y-4">
       {canEdit ? (
-        <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 sm:grid-cols-[1fr_auto] sm:items-end">
-          <Field label="Catégorie">
-            <Select value={category} onChange={(e) => setCategory(e.target.value as DocCategory)}>
-              {DOC_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-            </Select>
-          </Field>
-          <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600">
-            <Upload className="h-4 w-4" />
-            {uploading ? "Import..." : "Importer"}
-            <input type="file" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} disabled={uploading} />
-          </label>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {DOC_CATEGORIES.map((category) => (
+            <label key={category.key} className="flex min-h-24 cursor-pointer flex-col justify-between rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 transition hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10">
+              <span className="flex items-center gap-3">
+                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--card)] text-brand-600">
+                  <FileText className="h-5 w-5" />
+                </span>
+                <span className="text-sm font-bold text-[var(--foreground)]">{category.label}</span>
+              </span>
+              <span className="mt-3 text-xs font-medium text-[var(--muted-foreground)]">
+                {uploadingCategory === category.key ? "Import en cours..." : "Cliquer pour importer"}
+              </span>
+              <input
+                type="file"
+                className="hidden"
+                onChange={(e) => {
+                  void handleFile(category.key, e.target.files?.[0]);
+                  e.currentTarget.value = "";
+                }}
+                disabled={uploadingCategory !== null}
+              />
+            </label>
+          ))}
         </div>
       ) : null}
 

@@ -40,6 +40,7 @@ const emptyRoomForm = {
   reservable: true,
   active: true,
 };
+type RoomFormState = typeof emptyRoomForm;
 
 export function Salles() {
   const access = usePermissionsAccess();
@@ -90,29 +91,39 @@ export function Salles() {
     setModalOpen(true);
   }
 
-  async function saveRoom() {
-    if (!form.name.trim()) return;
+  function roomPayload(nextForm: RoomFormState) {
+    return {
+      name: nextForm.name,
+      site: nextForm.site || undefined,
+      capacity: nextForm.capacity ? Number(nextForm.capacity) : undefined,
+      photo: nextForm.photo ?? undefined,
+      photoUrl: nextForm.photoUrl || undefined,
+      buildingLabel: nextForm.buildingLabel || undefined,
+      reservable: nextForm.reservable,
+      active: nextForm.active,
+    };
+  }
+
+  async function persistRoom(nextForm: RoomFormState, closeAfterSave = false) {
+    if (!nextForm.name.trim()) return;
     setSaving(true);
     try {
-      const payload = {
-        name: form.name,
-        site: form.site || undefined,
-        capacity: form.capacity ? Number(form.capacity) : undefined,
-        photo: form.photo ?? undefined,
-        photoUrl: form.photoUrl || undefined,
-        buildingLabel: form.buildingLabel || undefined,
-        reservable: form.reservable,
-        active: form.active,
-      };
+      const payload = roomPayload(nextForm);
       if (editingId) {
         await updateRoom({ roomId: editingId, ...payload });
       } else {
         await createRoom(payload);
       }
-      setModalOpen(false);
+      if (closeAfterSave) setModalOpen(false);
     } finally {
       setSaving(false);
     }
+  }
+
+  function updateRoomForm(patch: Partial<RoomFormState>) {
+    const nextForm = { ...form, ...patch };
+    setForm(nextForm);
+    if (editingId && canEdit) void persistRoom(nextForm);
   }
 
   const actions =
@@ -175,38 +186,42 @@ export function Salles() {
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? "Modifier la salle" : "Nouvelle salle"} className="max-w-2xl">
         <div className="grid gap-4">
-          <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => setForm({ ...form, photo: id })} />
+          <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => updateRoomForm({ photo: id })} />
           <Field label="Nom" required>
-            <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />
+            <Input value={form.name} onChange={(event) => updateRoomForm({ name: event.target.value })} />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Site">
-              <Select value={form.site} onChange={(event) => setForm({ ...form, site: event.target.value as "" | "60" | "76" })}>
+              <Select value={form.site} onChange={(event) => updateRoomForm({ site: event.target.value as "" | "60" | "76" })}>
                 <option value="">Non renseigné</option>
                 <option value="60">Site 60</option>
                 <option value="76">Site 76</option>
               </Select>
             </Field>
             <Field label="Capacité">
-              <Input type="number" value={form.capacity} onChange={(event) => setForm({ ...form, capacity: event.target.value })} />
+              <Input type="number" value={form.capacity} onChange={(event) => updateRoomForm({ capacity: event.target.value })} />
             </Field>
           </div>
           <Field label="Bâtiment / zone">
-            <Input value={form.buildingLabel} onChange={(event) => setForm({ ...form, buildingLabel: event.target.value })} />
+            <Input value={form.buildingLabel} onChange={(event) => updateRoomForm({ buildingLabel: event.target.value })} />
           </Field>
           <Field label="Statut">
-            <Select value={form.active ? "active" : "inactive"} onChange={(event) => setForm({ ...form, active: event.target.value === "active" })}>
+            <Select value={form.active ? "active" : "inactive"} onChange={(event) => updateRoomForm({ active: event.target.value === "active" })}>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
             </Select>
           </Field>
-          <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
-            <Button variant="ghost" onClick={() => setModalOpen(false)}>Annuler</Button>
-            <Button size="lg" onClick={saveRoom} disabled={saving || !form.name.trim()}>
-              <Save className="h-4 w-4" />
-              {saving ? "Enregistrement..." : "Enregistrer"}
-            </Button>
-          </div>
+          {editingId ? (
+            <p className="border-t border-[var(--border)] pt-3 text-right text-xs font-medium text-[var(--muted-foreground)]">{saving ? "Enregistrement..." : "Modifications enregistrées automatiquement"}</p>
+          ) : (
+            <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
+              <Button variant="ghost" onClick={() => setModalOpen(false)}>Annuler</Button>
+              <Button size="lg" onClick={() => persistRoom(form, true)} disabled={saving || !form.name.trim()}>
+                <Save className="h-4 w-4" />
+                {saving ? "Enregistrement..." : "Enregistrer"}
+              </Button>
+            </div>
+          )}
         </div>
       </Modal>
     </>
