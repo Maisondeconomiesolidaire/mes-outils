@@ -186,7 +186,7 @@ export function Salles() {
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? "Modifier la salle" : "Nouvelle salle"}>
         <div className="grid gap-4">
-          <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => updateRoomForm({ photo: id })} />
+          <SinglePhotoUpload className="mx-auto w-full max-w-3xl" value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => updateRoomForm({ photo: id })} />
           <Field label="Nom" required>
             <Input value={form.name} onChange={(event) => updateRoomForm({ name: event.target.value })} />
           </Field>

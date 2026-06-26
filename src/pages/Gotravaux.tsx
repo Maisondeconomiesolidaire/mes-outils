@@ -283,7 +283,7 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
 
   return (
     <fieldset disabled={!canSave} className="grid gap-4">
-      <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => updateForm({ photo: id })} />
+      <SinglePhotoUpload className="mx-auto w-full max-w-3xl" value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => updateForm({ photo: id })} />
       <Field label="Nom" required><Input value={form.name} onChange={(e) => updateForm({ name: e.target.value })} /></Field>
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Marque"><Input value={form.brand} onChange={(e) => updateForm({ brand: e.target.value })} /></Field>
