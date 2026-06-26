@@ -170,14 +170,6 @@ function keywordOverlap(a: string[], b: string[]) {
   return a.filter((word) => bSet.has(word));
 }
 
-function areLotCompatible(a: Doc<"articles">, b: Doc<"articles">) {
-  const aTheme = deriveThemeKey(a);
-  const bTheme = deriveThemeKey(b);
-  if (aTheme && bTheme) return aTheme === bTheme;
-  if (a.subcategory !== b.subcategory) return false;
-  return keywordOverlap(deriveKeywords(a), deriveKeywords(b)).length >= 2;
-}
-
 function discountedBundlePrice(total: number) {
   const discountRate = total >= 40 ? 0.82 : 0.85;
   return Math.max(10, Math.round(total * discountRate));
@@ -412,7 +404,7 @@ export const listForLotAnalysis = query({
     );
 
     return Promise.all(
-      candidates.slice(0, 80).map(async (article) => {
+      candidates.slice(0, 160).map(async (article) => {
         const enriched = await withImageUrls(ctx, article);
         return {
           _id: enriched._id,
@@ -491,23 +483,20 @@ export const publishLot = mutation({
       throw new Error("Un lot doit contenir au moins 2 articles.");
     }
 
+    // On accepte tous les articles encore vendables, quel que soit leur statut
+    // (en ligne « disponible », « attente », etc.) tant qu'ils ne sont pas déjà
+    // un lot, déjà vendus ou déjà inclus dans un autre lot. La cohérence du lot
+    // a été décidée à l'étape d'analyse / par l'équipe : on ne refuse plus la
+    // publication sur un critère de thème.
     const articles: Doc<"articles">[] = [];
     for (const articleId of args.articleIds) {
       const article = await ctx.db.get(articleId);
-      if (article && !article.isLot && article.status !== "vendu") {
+      if (article && !article.isLot && article.status !== "vendu" && !article.bundleKey) {
         articles.push(article);
       }
     }
     if (articles.length < 2) {
-      throw new Error("Aucun lot publiable avec ces articles.");
-    }
-    const compatible = articles.every((article, index) =>
-      index === 0 ? true : areLotCompatible(articles[0], article),
-    );
-    if (!compatible) {
-      throw new Error(
-        "Ce lot n'est pas assez cohérent : les articles ne partagent pas le même thème ou assez de mots-clés.",
-      );
+      throw new Error("Aucun lot publiable avec ces articles (déjà vendus ou déjà dans un lot ?).");
     }
 
     const first = articles[0];

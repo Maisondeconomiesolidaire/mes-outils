@@ -328,24 +328,30 @@ function sanitizeLotGroups(
   }>,
 ) {
   const articleById = new Map(articles.map((article) => [article._id, article]));
+  const used = new Set<string>();
   return groups
     .map((group) => {
+      // On garde l'ordre proposé par l'IA mais sans réutiliser un article déjà
+      // placé dans un lot précédent (un article ne peut appartenir qu'à un lot).
       const uniqueIds = Array.from(new Set(group.articleIds));
       const groupArticles = uniqueIds
         .map((id) => articleById.get(id))
-        .filter((article): article is NonNullable<typeof article> => Boolean(article));
-      const themeKeys = Array.from(
-        new Set(groupArticles.map((article) => article.themeKey).filter(Boolean)),
-      );
+        .filter((article): article is NonNullable<typeof article> => Boolean(article))
+        .filter((article) => !used.has(article._id));
       const total = groupArticles.reduce((sum, article) => sum + article.price, 0);
+      // On fait confiance au regroupement sémantique de l'IA : il suffit d'avoir
+      // au moins deux articles existants (peu importe le statut ou le thème
+      // dérivé). L'équipe valide ensuite avant publication.
+      const valid = groupArticles.length >= 2;
+      if (valid) for (const article of groupArticles) used.add(article._id);
       return {
         ...group,
         articleIds: groupArticles.map((article) => article._id),
         suggestedPrice: Math.min(
-          Math.max(10, Number(group.suggestedPrice) || 10),
+          Math.max(8, Number(group.suggestedPrice) || 10),
           discountedBundlePrice(total),
         ),
-        _valid: groupArticles.length >= 2 && themeKeys.length === 1,
+        _valid: valid,
       };
     })
     .filter((group) => group._valid)
