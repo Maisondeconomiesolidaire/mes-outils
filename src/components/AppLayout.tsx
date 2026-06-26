@@ -1,8 +1,11 @@
 import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router-dom";
-import { SignedIn, SignedOut, SignIn, UserButton, useUser } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignIn, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth } from "convex/react";
-import { Moon, Sun } from "lucide-react";
+import { LogOut, Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
+
+/** Style "bouton primaire" appliqué à l'élément de navigation actif. */
+const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
 import { PORTAL_NAV, SECTION_SUBNAV, canAccess, sectionForPath } from "../lib/permissions";
 import { cn } from "../lib/cn";
 import { usePermissionsAccess } from "./RequirePermission";
@@ -67,8 +70,14 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
 
   if (access === undefined) return <FullSpinner label="Chargement du portail..." />;
 
+  const hasMesoutilsAccess =
+    access.isAdmin || access.grants.some((grant) => grant.pageKey.startsWith("mesoutils:"));
+
   const navItems = PORTAL_NAV.filter((item) => {
     if ("adminOnly" in item && item.adminOnly) return access.isAdmin;
+    // La messagerie interne n'est visible que pour les utilisateurs ayant au
+    // moins un droit « Mes Outils » (ou les admins).
+    if (item.to === "/messagerie") return hasMesoutilsAccess;
     if ("pageKey" in item && item.pageKey) return canAccess(access, item.pageKey);
     return true;
   });
@@ -83,8 +92,8 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     <div className="min-h-screen">
       {/* Sidebar persistante (desktop) */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[var(--border)] bg-[var(--card)] lg:flex">
-        <div className="flex h-20 items-center border-b border-[var(--border)] px-5">
-          <Link to="/"><img src={logoSrc} alt="Mes Outils" className="h-12 w-auto" /></Link>
+        <div className="flex h-20 items-center overflow-hidden border-b border-[var(--border)] px-5">
+          <Link to="/"><img src={logoSrc} alt="Mes Outils" className="h-16 w-auto" /></Link>
         </div>
 
         <nav className="flex min-h-0 flex-1 flex-col p-3">
@@ -106,7 +115,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
                     to={{ pathname: section!.to, search: `?v=${item.key}` }}
                     className={cn(
                       "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
-                      isActive ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                      isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
                     )}
                   >
                     <Icon className="h-[18px] w-[18px] shrink-0" />
@@ -124,7 +133,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
                 className={({ isActive }) =>
                   cn(
                     "flex items-center rounded-xl px-3 py-2.5 text-sm font-semibold transition",
-                    isActive ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                    isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
                   )
                 }
               >
@@ -145,12 +154,18 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             {theme === "dark" ? "Mode clair" : "Mode sombre"}
           </button>
-          <div className="flex items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2">
-            <UserButton afterSignOutUrl="/" />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-[var(--foreground)]">{user?.fullName ?? user?.primaryEmailAddress?.emailAddress}</p>
-              <p className="truncate text-xs text-[var(--muted-foreground)]">{user?.primaryEmailAddress?.emailAddress}</p>
-            </div>
+          <div className="flex items-center gap-1.5">
+            <Link
+              to="/compte"
+              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2 transition hover:bg-[var(--selected)]"
+            >
+              <UserAvatar name={user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"} src={user?.imageUrl} />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-[var(--foreground)]">{user?.fullName ?? user?.primaryEmailAddress?.emailAddress}</p>
+                <p className="truncate text-xs text-[var(--muted-foreground)]">{user?.primaryEmailAddress?.emailAddress}</p>
+              </div>
+            </Link>
+            <SignOutButton />
           </div>
         </div>
       </aside>
@@ -158,9 +173,9 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
       <div className="lg:pl-64">
         {/* Navbar : sections principales */}
         <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--nav-bg)]">
-          <div className="flex items-center gap-3 px-4 py-3 sm:px-6">
-            <Link to="/" className="lg:hidden"><img src={logoSrc} alt="Mes Outils" className="h-10 w-auto" /></Link>
-            <nav className="flex flex-1 items-center gap-1 overflow-x-auto">
+          <div className="flex h-20 items-center gap-3 px-4 sm:px-6">
+            <Link to="/" className="lg:hidden"><img src={logoSrc} alt="Mes Outils" className="h-12 w-auto" /></Link>
+            <nav className="flex flex-1 items-center gap-1.5 overflow-x-auto">
               {navItems.map((item) => (
                 <NavLink
                   key={item.to}
@@ -169,7 +184,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
                   className={({ isActive }) =>
                     cn(
                       "whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
-                      isActive ? "bg-brand-500 text-white" : "text-[var(--nav-muted)] hover:bg-brand-500/10 hover:text-brand-700",
+                      isActive ? NAV_ACTIVE : "text-[var(--nav-muted)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
                     )
                   }
                 >
@@ -177,9 +192,9 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
                 </NavLink>
               ))}
             </nav>
-            <div className="lg:hidden">
-              <UserButton afterSignOutUrl="/" />
-            </div>
+            <Link to="/compte" className="lg:hidden">
+              <UserAvatar name={user?.fullName ?? "Moi"} src={user?.imageUrl} />
+            </Link>
           </div>
 
           {/* Sous-navigation (mobile uniquement — la sidebar la porte en desktop) */}
@@ -193,7 +208,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
                     to={{ pathname: section!.to, search: `?v=${item.key}` }}
                     className={cn(
                       "flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-semibold transition",
-                      isActive ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                      isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
                     )}
                   >
                     <item.icon className="h-4 w-4" />
@@ -206,7 +221,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
         </header>
 
         {isMessagerie ? (
-          <main className="h-[calc(100vh-3.75rem)] overflow-hidden p-0 sm:p-3 lg:p-4">
+          <main className="h-[calc(100vh-5rem)] overflow-hidden p-0 sm:p-3 lg:p-4">
             <Outlet />
           </main>
         ) : (
@@ -216,6 +231,29 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
         )}
       </div>
     </div>
+  );
+}
+
+function UserAvatar({ name, src }: { name: string; src?: string | null }) {
+  return (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-xs font-semibold text-white">
+      {src ? <img src={src} alt="" className="h-full w-full object-cover" /> : name.slice(0, 2).toUpperCase()}
+    </span>
+  );
+}
+
+function SignOutButton() {
+  const { signOut } = useClerk();
+  return (
+    <button
+      type="button"
+      onClick={() => void signOut({ redirectUrl: "/" })}
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--muted-foreground)] transition hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+      aria-label="Se déconnecter"
+      title="Se déconnecter"
+    >
+      <LogOut className="h-4 w-4" />
+    </button>
   );
 }
 

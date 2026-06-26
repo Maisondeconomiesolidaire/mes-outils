@@ -43,6 +43,8 @@ const emptyRoomForm = {
 export function Salles() {
   const access = usePermissionsAccess();
   const canSeeReservations = canAccess(access, "mesoutils:reservations", "read");
+  const canCreate = canAccess(access, "mesoutils:salles", "create");
+  const canEdit = canAccess(access, "mesoutils:salles", "update");
   const rooms = useQuery(api.gotravaux.listRooms) as Room[] | undefined;
   const createRoom = useMutation(api.gotravaux.createRoom);
   const updateRoom = useMutation(api.gotravaux.updateRoom);
@@ -113,7 +115,7 @@ export function Salles() {
   }
 
   const actions =
-    sub === "rooms" ? (
+    sub === "rooms" && canCreate ? (
       <Button size="lg" onClick={openCreate}>
         <Plus className="h-5 w-5" />
         Nouvelle salle
@@ -152,10 +154,12 @@ export function Salles() {
                       <Users className="h-4 w-4" />
                       {room.capacity ? `${room.capacity} personnes` : "Capacité —"}
                     </div>
-                    <Button variant="secondary" size="sm" className="mt-4 w-full" onClick={() => openEdit(room._id)}>
-                      <Pencil className="h-4 w-4" />
-                      Modifier la salle
-                    </Button>
+                    {canEdit ? (
+                      <Button variant="secondary" size="sm" className="mt-4 w-full" onClick={() => openEdit(room._id)}>
+                        <Pencil className="h-4 w-4" />
+                        Modifier la salle
+                      </Button>
+                    ) : null}
                   </div>
                 </article>
               ))}

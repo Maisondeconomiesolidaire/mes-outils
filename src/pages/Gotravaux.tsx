@@ -89,6 +89,8 @@ type DocCategory = (typeof DOC_CATEGORIES)[number]["key"];
 export function Gotravaux() {
   const access = usePermissionsAccess();
   const canSeeReservations = canAccess(access, "mesoutils:reservations", "read");
+  const canCreate = canAccess(access, "mesoutils:gotravaux", "create");
+  const canEdit = canAccess(access, "mesoutils:gotravaux", "update");
   const vehicles = useQuery(api.gotravaux.listVehicles) as Vehicle[] | undefined;
   const tasks = useQuery(api.gotravaux.listVehicleTasks, {}) as VehicleTask[] | undefined;
   const updateTask = useMutation(api.gotravaux.updateVehicleTask);
@@ -119,9 +121,9 @@ export function Gotravaux() {
   const detailsVehicle = vehicles.find((vehicle) => vehicle._id === detailsVehicleId) ?? null;
 
   const actions =
-    sub === "vehicles" ? (
+    sub === "vehicles" && canCreate ? (
       <Button size="lg" onClick={() => setCreateOpen(true)}><Plus className="h-5 w-5" />Ajouter un véhicule</Button>
-    ) : sub === "tasks" ? (
+    ) : sub === "tasks" && canCreate ? (
       <Button size="lg" onClick={() => setTaskModalOpen(true)}><Plus className="h-5 w-5" />Nouvelle maintenance</Button>
     ) : undefined;
 
@@ -195,7 +197,7 @@ export function Gotravaux() {
           </div>
         ) : null}
 
-        {sub === "tasks" ? <TaskList tasks={tasks} onUpdate={updateTask} /> : null}
+        {sub === "tasks" ? <TaskList tasks={tasks} onUpdate={updateTask} canEdit={canEdit} /> : null}
         {sub === "reservations" && canSeeReservations ? <VehicleReservationsPanel /> : null}
         {sub === "calendar" ? <FleetCalendar vehicles={vehicles} tasks={tasks} canSeeReservations={canSeeReservations} /> : null}
       </div>
@@ -205,7 +207,7 @@ export function Gotravaux() {
 
       {/* Détails d'un véhicule existant : 3 onglets */}
       {detailsVehicle ? (
-        <VehicleDetailsModal vehicle={detailsVehicle} onClose={() => setDetailsVehicleId(null)} />
+        <VehicleDetailsModal vehicle={detailsVehicle} onClose={() => setDetailsVehicleId(null)} canCreate={canCreate} canEdit={canEdit} />
       ) : null}
 
       {/* Maintenance globale (avec sélecteur de véhicule) */}
@@ -225,7 +227,7 @@ const emptyVehicleForm = {
   recycappEnabled: false,
 };
 
-function VehicleInfoForm({ vehicle, onSaved }: { vehicle: Vehicle | null; onSaved: () => void }) {
+function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicle | null; onSaved: () => void; canSave?: boolean }) {
   const createVehicle = useMutation(api.gotravaux.createVehicle);
   const updateVehicle = useMutation(api.gotravaux.updateVehicle);
   const [form, setForm] = useState(() =>
@@ -267,7 +269,7 @@ function VehicleInfoForm({ vehicle, onSaved }: { vehicle: Vehicle | null; onSave
   }
 
   return (
-    <div className="grid gap-4">
+    <fieldset disabled={!canSave} className="grid gap-4">
       <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => setForm({ ...form, photo: id })} />
       <Field label="Nom" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -323,10 +325,12 @@ function VehicleInfoForm({ vehicle, onSaved }: { vehicle: Vehicle | null; onSave
           </span>
         </span>
       </label>
-      <div className="flex justify-end border-t border-[var(--border)] pt-4">
-        <Button size="lg" onClick={save} disabled={saving || !form.name.trim()}>{saving ? "Enregistrement..." : "Enregistrer"}</Button>
-      </div>
-    </div>
+      {canSave ? (
+        <div className="flex justify-end border-t border-[var(--border)] pt-4">
+          <Button size="lg" onClick={save} disabled={saving || !form.name.trim()}>{saving ? "Enregistrement..." : "Enregistrer"}</Button>
+        </div>
+      ) : null}
+    </fieldset>
   );
 }
 
@@ -341,7 +345,7 @@ function CreateVehicleModal({ open, onClose }: { open: boolean; onClose: () => v
 
 /* ─── Modal détails véhicule (3 onglets) ─────────────────────────────────── */
 
-function VehicleDetailsModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: () => void }) {
+function VehicleDetailsModal({ vehicle, onClose, canCreate, canEdit }: { vehicle: Vehicle; onClose: () => void; canCreate: boolean; canEdit: boolean }) {
   const [tab, setTab] = useState<"info" | "maintenance" | "documents">("info");
   const tabs = [
     { key: "info" as const, label: "Informations", icon: Info },
@@ -362,14 +366,14 @@ function VehicleDetailsModal({ vehicle, onClose }: { vehicle: Vehicle; onClose: 
         })}
       </div>
 
-      {tab === "info" ? <VehicleInfoForm vehicle={vehicle} onSaved={onClose} /> : null}
-      {tab === "maintenance" ? <VehicleMaintenanceTab vehicleId={vehicle._id} /> : null}
-      {tab === "documents" ? <VehicleDocumentsTab vehicleId={vehicle._id} /> : null}
+      {tab === "info" ? <VehicleInfoForm vehicle={vehicle} onSaved={onClose} canSave={canEdit} /> : null}
+      {tab === "maintenance" ? <VehicleMaintenanceTab vehicleId={vehicle._id} canCreate={canCreate} canEdit={canEdit} /> : null}
+      {tab === "documents" ? <VehicleDocumentsTab vehicleId={vehicle._id} canEdit={canEdit} /> : null}
     </Modal>
   );
 }
 
-function VehicleMaintenanceTab({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
+function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: Id<"vehicles">; canCreate: boolean; canEdit: boolean }) {
   const tasks = useQuery(api.gotravaux.listVehicleTasks, { vehicleId }) as VehicleTask[] | undefined;
   const createTask = useMutation(api.gotravaux.createVehicleTask);
   const updateTask = useMutation(api.gotravaux.updateVehicleTask);
@@ -409,9 +413,9 @@ function VehicleMaintenanceTab({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
             <Button size="sm" onClick={add} disabled={saving || !title.trim() || !range.start}>{saving ? "Ajout..." : "Ajouter"}</Button>
           </div>
         </div>
-      ) : (
+      ) : canCreate ? (
         <Button onClick={() => setAdding(true)}><Plus className="h-4 w-4" />Nouvelle maintenance</Button>
-      )}
+      ) : null}
 
       {tasks === undefined ? (
         <FullSpinner label="Chargement..." />
@@ -423,7 +427,7 @@ function VehicleMaintenanceTab({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
             <div key={task._id} className="rounded-2xl border border-[var(--border)] p-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2"><p className="font-semibold text-[var(--foreground)]">{task.title}</p><PriorityBadge priority={task.priority} /></div>
-                <Select value={task.status} onChange={(e) => updateTask({ taskId: task._id, status: e.target.value as TaskStatus, priority: task.priority })} className="h-9 w-auto">
+                <Select value={task.status} disabled={!canEdit} onChange={(e) => updateTask({ taskId: task._id, status: e.target.value as TaskStatus, priority: task.priority })} className="h-9 w-auto">
                   <option value="todo">À faire</option><option value="in_progress">En cours</option><option value="done">Terminée</option>
                 </Select>
               </div>
@@ -438,7 +442,7 @@ function VehicleMaintenanceTab({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
   );
 }
 
-function VehicleDocumentsTab({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
+function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">; canEdit: boolean }) {
   const documents = useQuery(api.gotravaux.listVehicleDocuments, { vehicleId });
   const addDocument = useMutation(api.gotravaux.addVehicleDocument);
   const removeDocument = useMutation(api.gotravaux.removeVehicleDocument);
@@ -459,18 +463,20 @@ function VehicleDocumentsTab({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 sm:grid-cols-[1fr_auto] sm:items-end">
-        <Field label="Catégorie">
-          <Select value={category} onChange={(e) => setCategory(e.target.value as DocCategory)}>
-            {DOC_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
-          </Select>
-        </Field>
-        <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600">
-          <Upload className="h-4 w-4" />
-          {uploading ? "Import..." : "Importer"}
-          <input type="file" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} disabled={uploading} />
-        </label>
-      </div>
+      {canEdit ? (
+        <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 sm:grid-cols-[1fr_auto] sm:items-end">
+          <Field label="Catégorie">
+            <Select value={category} onChange={(e) => setCategory(e.target.value as DocCategory)}>
+              {DOC_CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+            </Select>
+          </Field>
+          <label className="inline-flex h-11 cursor-pointer items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 text-sm font-semibold text-white transition hover:bg-brand-600">
+            <Upload className="h-4 w-4" />
+            {uploading ? "Import..." : "Importer"}
+            <input type="file" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} disabled={uploading} />
+          </label>
+        </div>
+      ) : null}
 
       {documents === undefined ? (
         <FullSpinner label="Chargement..." />
@@ -485,7 +491,7 @@ function VehicleDocumentsTab({ vehicleId }: { vehicleId: Id<"vehicles"> }) {
                 <p className="truncate text-sm font-semibold text-[var(--foreground)] hover:underline">{document.name}</p>
                 <p className="text-xs text-[var(--muted-foreground)]">{DOC_CATEGORIES.find((c) => c.key === document.category)?.label} · {document.uploadedBy}</p>
               </a>
-              <button type="button" onClick={() => removeDocument({ documentId: document._id })} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button>
+              {canEdit ? <button type="button" onClick={() => removeDocument({ documentId: document._id })} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button> : null}
             </div>
           ))}
         </div>
@@ -544,7 +550,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   );
 }
 
-function TaskList({ tasks, onUpdate }: { tasks: VehicleTask[]; onUpdate: ReturnType<typeof useMutation> }) {
+function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate: ReturnType<typeof useMutation>; canEdit: boolean }) {
   if (tasks.length === 0) return <EmptyState icon={<Wrench className="h-8 w-8" />} title="Aucune maintenance" description="Les maintenances apparaîtront ici." />;
   return (
     <section className="premium-panel overflow-hidden rounded-2xl">
@@ -560,7 +566,7 @@ function TaskList({ tasks, onUpdate }: { tasks: VehicleTask[]; onUpdate: ReturnT
               <CalendarClock className="h-4 w-4" />
               {task.dueDate ? formatDate(task.dueDate) : "Sans date"}{task.endDate && task.endDate !== task.dueDate ? ` → ${formatDate(task.endDate)}` : ""}
             </div>
-            <Select value={task.status} onChange={(e) => onUpdate({ taskId: task._id, status: e.target.value as TaskStatus, priority: task.priority })}>
+            <Select value={task.status} disabled={!canEdit} onChange={(e) => onUpdate({ taskId: task._id, status: e.target.value as TaskStatus, priority: task.priority })}>
               <option value="todo">À faire</option><option value="in_progress">En cours</option><option value="done">Terminée</option>
             </Select>
           </div>

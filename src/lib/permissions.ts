@@ -210,14 +210,14 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
     key: "mesoutils:gotravaux",
     label: "Gotravaux",
     description: "Gestion des vehicules, informations de flotte et maintenance.",
-    actions: ["read", "create", "update", "manage"],
+    actions: ["read", "create", "update"],
   },
   {
     app: "mesoutils",
     key: "mesoutils:salles",
     label: "Salles",
     description: "Gestion des salles, capacites, services et disponibilites.",
-    actions: ["read", "create", "update", "manage"],
+    actions: ["read", "create", "update"],
   },
   {
     app: "mesoutils",

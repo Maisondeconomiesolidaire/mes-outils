@@ -146,6 +146,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             currentName={user?.fullName ?? access?.email ?? "Moi"}
             currentImage={user?.imageUrl}
             canManage={canManage}
+            canCreate={canCreate}
             onToggleLike={() => toggleLike({ postId: post._id })}
             onPin={() => pinPost({ postId: post._id, pinned: !post.pinned })}
             onRemove={() => removePost({ postId: post._id })}
@@ -159,9 +160,9 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 }
 
 function PostCard({
-  post, currentName, currentImage, canManage, onToggleLike, onPin, onRemove, onAddComment, onRemoveComment,
+  post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onAddComment, onRemoveComment,
 }: {
-  post: Post; currentName: string; currentImage?: string; canManage: boolean;
+  post: Post; currentName: string; currentImage?: string; canManage: boolean; canCreate: boolean;
   onToggleLike: () => void; onPin: () => void; onRemove: () => void;
   onAddComment: (text: string) => Promise<unknown>; onRemoveComment: (commentId: Id<"postComments">) => void;
 }) {
@@ -231,14 +232,22 @@ function PostCard({
         </div>
       ) : null}
 
-      <div className="mx-2 grid grid-cols-2 border-t border-[var(--border)]">
-        <SocialButton active={post.likedByMe} onClick={onToggleLike}>
-          <ThumbsUp className={`h-[18px] w-[18px] ${post.likedByMe ? "fill-current" : ""}`} /> J'aime
-        </SocialButton>
-        <SocialButton onClick={() => setShowComments((c) => !c)}>
-          <MessageCircle className="h-[18px] w-[18px]" /> Commenter
-        </SocialButton>
-      </div>
+      {canCreate ? (
+        <div className="mx-2 grid grid-cols-2 border-t border-[var(--border)]">
+          <SocialButton active={post.likedByMe} onClick={onToggleLike}>
+            <ThumbsUp className={`h-[18px] w-[18px] ${post.likedByMe ? "fill-current" : ""}`} /> J'aime
+          </SocialButton>
+          <SocialButton onClick={() => setShowComments((c) => !c)}>
+            <MessageCircle className="h-[18px] w-[18px]" /> Commenter
+          </SocialButton>
+        </div>
+      ) : (
+        <div className="mx-2 border-t border-[var(--border)]">
+          <SocialButton onClick={() => setShowComments((c) => !c)}>
+            <MessageCircle className="h-[18px] w-[18px]" /> {showComments ? "Masquer les commentaires" : "Voir les commentaires"}
+          </SocialButton>
+        </div>
+      )}
 
       {showComments ? (
         <div className="space-y-3 border-t border-[var(--border)] bg-[var(--accent)] p-4">
@@ -259,19 +268,21 @@ function PostCard({
               </div>
             </div>
           ))}
-          <div className="flex gap-2.5">
-            <Avatar name={currentName} src={currentImage} size="sm" />
-            <div className="flex flex-1 gap-2">
-              <Input
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitComment(); } }}
-                placeholder="Écrire un commentaire..."
-                className="rounded-full bg-[var(--card)]"
-              />
-              <Button onClick={submitComment} disabled={!draft.trim()}><Send className="h-4 w-4" /></Button>
+          {canCreate ? (
+            <div className="flex gap-2.5">
+              <Avatar name={currentName} src={currentImage} size="sm" />
+              <div className="flex flex-1 gap-2">
+                <Input
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void submitComment(); } }}
+                  placeholder="Écrire un commentaire..."
+                  className="rounded-full bg-[var(--card)]"
+                />
+                <Button onClick={submitComment} disabled={!draft.trim()}><Send className="h-4 w-4" /></Button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       ) : null}
     </article>

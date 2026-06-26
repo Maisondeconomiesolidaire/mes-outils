@@ -3,6 +3,7 @@ import { AppLayout } from "./components/AppLayout";
 import { RequirePermission } from "./components/RequirePermission";
 import { Admin } from "./pages/Admin";
 import { Actualites } from "./pages/Actualites";
+import { Compte } from "./pages/Compte";
 import { Gotravaux } from "./pages/Gotravaux";
 import { Messagerie } from "./pages/Messagerie";
 import { Portail } from "./pages/Portail";
@@ -14,6 +15,7 @@ export default function App() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<Portail />} />
+        <Route path="/compte" element={<Compte />} />
         <Route
           path="/actualites"
           element={

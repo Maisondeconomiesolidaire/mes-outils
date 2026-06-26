@@ -112,7 +112,7 @@ export const addComment = mutation({
     body: v.string(),
   },
   handler: async (ctx, args) => {
-    await requireCrmPermission(ctx, POSTS_PAGE_KEY, "read");
+    await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
     const post = await ctx.db.get(args.postId);
     if (!post) throw new Error("Post introuvable.");
@@ -163,7 +163,7 @@ export const toggleLike = mutation({
     postId: v.id("posts"),
   },
   handler: async (ctx, args) => {
-    await requireCrmPermission(ctx, POSTS_PAGE_KEY, "read");
+    await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
     const existing = await ctx.db
       .query("postLikes")

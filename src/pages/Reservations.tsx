@@ -6,6 +6,8 @@ import { CalendarCheck, CarFront, DoorOpen, MapPin, MessagesSquare, Search, User
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
+import { usePermissionsAccess } from "../components/RequirePermission";
+import { canAccess } from "../lib/permissions";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
@@ -55,6 +57,8 @@ export function Reservations() {
 }
 
 function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
+  const access = usePermissionsAccess();
+  const canCreate = canAccess(access, "mesoutils:reservations", "create");
   const [range, setRange] = useState<DateRange>(defaultSlot);
   const [query, setQuery] = useState("");
   const [minSeats, setMinSeats] = useState("");
@@ -187,7 +191,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                   <h2 className="text-lg font-bold text-[var(--foreground)]">{room.name}</h2>
                   <p className="mt-1 text-sm text-[var(--muted-foreground)]">{room.buildingLabel || room.siteLabel || (room.site ? `Site ${room.site}` : "Site —")}</p>
                   <div className="mt-3 flex items-center gap-1.5 text-sm text-[var(--muted-foreground)]"><Users className="h-4 w-4" />{room.capacity ? `${room.capacity} personnes` : "Capacité —"}</div>
-                  <Button className="mt-4 w-full" onClick={() => openBooking(room, null)}>Réserver</Button>
+                  {canCreate ? <Button className="mt-4 w-full" onClick={() => openBooking(room, null)}>Réserver</Button> : null}
                 </div>
               </article>
             ))}
@@ -207,7 +211,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                   <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" />{vehicle.seats ?? "—"} places</span>
                   <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4" />{vehicle.siteLabel ?? (vehicle.site ? `Site ${vehicle.site}` : "—")}</span>
                 </div>
-                <Button className="mt-4 w-full" onClick={() => openBooking(null, vehicle)}>Réserver</Button>
+                {canCreate ? <Button className="mt-4 w-full" onClick={() => openBooking(null, vehicle)}>Réserver</Button> : null}
               </div>
             </article>
           ))}
