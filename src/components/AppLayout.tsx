@@ -26,7 +26,16 @@ export function AppLayout() {
               <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "dark" ? "light" : "dark")} />
             </div>
             <div className="glass-card rounded-xl border border-[var(--border)] p-4 sm:p-6">
-              <SignIn routing="virtual" appearance={{ variables: { colorPrimary: "#47c667" } }} />
+              {/* Routing « hash » (et non « virtual ») : un formulaire monté en
+                  pleine page doit gérer ses étapes (email → code/mot de passe →
+                  2FA) via l'URL, sinon le bouton « Continuer » ne fait rien et
+                  les clics répétés déclenchent un 429 « too many requests ». */}
+              <SignIn
+                routing="hash"
+                fallbackRedirectUrl="/"
+                signUpFallbackRedirectUrl="/"
+                appearance={{ variables: { colorPrimary: "#47c667" } }}
+              />
             </div>
           </div>
         </div>
