@@ -29,13 +29,10 @@ export function AppLayout() {
               {/* Routing « hash » (et non « virtual ») : un formulaire monté en
                   pleine page doit gérer ses étapes (email → code/mot de passe →
                   2FA) via l'URL, sinon le bouton « Continuer » ne fait rien et
-                  les clics répétés déclenchent un 429 « too many requests ». */}
-              <SignIn
-                routing="hash"
-                fallbackRedirectUrl="/"
-                signUpFallbackRedirectUrl="/"
-                appearance={{ variables: { colorPrimary: "#47c667" } }}
-              />
+                  les clics répétés déclenchent un 429 « too many requests ».
+                  Configuration identique à celle de recycapp (qui fonctionne)
+                  avec la même clé Clerk. */}
+              <SignIn routing="hash" appearance={{ variables: { colorPrimary: "#47c667" } }} />
             </div>
           </div>
         </div>
