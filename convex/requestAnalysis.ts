@@ -46,22 +46,6 @@ function displayedStage(request: {
   return doneStep ?? "Nouveau";
 }
 
-function responseText(data: {
-  output_text?: string;
-  output?: Array<{
-    content?: Array<{ text?: string; type?: string }>;
-  }>;
-}) {
-  if (data.output_text) return data.output_text;
-  return (
-    data.output
-      ?.flatMap((item) => item.content ?? [])
-      .map((part) => part.text ?? "")
-      .join("")
-      .trim() ?? ""
-  );
-}
-
 function compactSnapshot(snapshotData: AnalysisSnapshot): AnalysisSnapshot {
   const now = Date.now();
   const ninetyDaysAgo = now - 90 * 24 * 60 * 60 * 1000;
@@ -203,50 +187,65 @@ export const chat = action({
     }
 
     const snapshotData = compactSnapshot(await ctx.runQuery(api.requestAnalysis.snapshot, {}));
-    const model = env.OPENAI_REQUEST_ANALYSIS_MODEL ?? "gpt-5.4-mini";
     const compactMessages = messages.slice(-10);
 
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
+    const chatMessages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content:
+          "Voici les demandes du CRM (données métier, dates au format AAAA-MM-JJ). Priorise : demandes à planifier, journées chargées, regroupements par ville/date/type, assignations d'encadrants, risques et prochaines actions.\n\n" +
+          JSON.stringify(humanizeSnapshot(snapshotData)),
       },
-      body: JSON.stringify({
-        model,
-        input: [
-          {
-            role: "system",
-            content: SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content:
-              "Voici les demandes du CRM (données métier, dates au format AAAA-MM-JJ). Priorise : demandes à planifier, journées chargées, regroupements par ville/date/type, assignations d'encadrants, risques et prochaines actions.\n\n" +
-              JSON.stringify(humanizeSnapshot(snapshotData)),
-          },
-          ...compactMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
-        ],
-        reasoning: { effort: "low" },
-        text: { verbosity: "low" },
-      }),
-    });
+      ...compactMessages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      })),
+    ];
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Erreur OpenAI (${response.status}) : ${errorBody.slice(0, 300)}`);
+    // On respecte le modèle configuré (OPENAI_REQUEST_ANALYSIS_MODEL) mais on
+    // bascule automatiquement sur gpt-4o si ce modèle est indisponible/invalide,
+    // pour que l'assistant reste fonctionnel quel que soit l'état du compte.
+    const preferred = env.OPENAI_REQUEST_ANALYSIS_MODEL?.trim();
+    const candidates = Array.from(new Set([preferred, "gpt-4o"].filter(Boolean))) as string[];
+
+    let answer = "";
+    let usedModel = "";
+    let lastError = "";
+    for (const model of candidates) {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: chatMessages,
+          temperature: 0.2,
+          max_tokens: 1200,
+        }),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as {
+          choices?: Array<{ message?: { content?: string } }>;
+        };
+        answer = sanitizeAnswer(data.choices?.[0]?.message?.content ?? "");
+        usedModel = model;
+        break;
+      }
+      lastError = `(${response.status}) ${(await response.text()).slice(0, 200)}`;
     }
 
-    const data = await response.json();
-    const answer = sanitizeAnswer(responseText(data));
-    if (!answer) throw new Error("OpenAI n'a pas renvoyé de réponse exploitable.");
+    if (!answer) {
+      throw new Error(
+        `L'assistant IA n'a pas pu répondre. Dernière erreur OpenAI : ${lastError || "réponse vide"}`,
+      );
+    }
 
     return {
       answer,
-      model,
+      model: usedModel,
       requestRefs: snapshotData.requests.map((request) => ({
         id: request.id,
         reference: request.reference,

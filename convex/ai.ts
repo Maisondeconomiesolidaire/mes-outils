@@ -491,15 +491,31 @@ IMPORTANT : applique toutes les décotes selon l'état "${identification.estimat
 
 Produis l'évaluation JSON complète basée sur les résultats trouvés.`;
 
-    const result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
-      model: "gpt-4o-search-preview",
-      max_tokens: 1600,
-      web_search_options: { search_context_size: "medium" },
-      messages: [
-        { role: "system", content: VALUATION_PROMPT },
-        { role: "user", content: searchUserPrompt },
-      ],
-    });
+    // Étape 2 : on tente d'abord le modèle avec recherche web (prix réels) ;
+    // s'il est indisponible (modèle preview retiré, etc.), on retombe sur
+    // gpt-4o pour produire l'évaluation à partir des connaissances du modèle.
+    let result: ArticleAIAnalysis;
+    try {
+      result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
+        model: "gpt-4o-search-preview",
+        max_tokens: 1600,
+        web_search_options: { search_context_size: "medium" },
+        messages: [
+          { role: "system", content: VALUATION_PROMPT },
+          { role: "user", content: searchUserPrompt },
+        ],
+      });
+    } catch {
+      result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
+        model: "gpt-4o",
+        max_tokens: 1600,
+        temperature: 0.2,
+        messages: [
+          { role: "system", content: VALUATION_PROMPT },
+          { role: "user", content: searchUserPrompt },
+        ],
+      });
+    }
 
     // Sanity checks
     if (!Object.keys(CATEGORIES).includes(result.category)) {
