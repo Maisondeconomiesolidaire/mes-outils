@@ -6,10 +6,12 @@ import { requireAnyCrmPermission, requireCrmPermission } from "./lib";
 
 const vehicleKind = v.union(
   v.literal("utilitaire"),
-  v.literal("camionnette"),
-  v.literal("camion"),
   v.literal("voiture"),
 );
+
+function normalizeVehicleKind(kind: string) {
+  return kind === "voiture" ? "voiture" : "utilitaire";
+}
 
 /** Deux timestamps tombent-ils le même jour (UTC) ? */
 function sameUtcDay(a: number, b: number): boolean {
@@ -117,7 +119,7 @@ export const list = query({
         const photoUrl = vehicle.photo
           ? await ctx.storage.getUrl(vehicle.photo)
           : null;
-        return { ...vehicle, status, reason, photoUrl };
+        return { ...vehicle, kind: normalizeVehicleKind(vehicle.kind), status, reason, photoUrl };
       }),
     );
   },
@@ -154,7 +156,7 @@ export const availableOn = query({
         _id: vehicle._id,
         name: vehicle.name,
         plate: vehicle.plate ?? null,
-        kind: vehicle.kind,
+        kind: normalizeVehicleKind(vehicle.kind),
         photoUrl,
       });
     }

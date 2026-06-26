@@ -47,6 +47,10 @@ function displayName(identity: {
   return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
 }
 
+function normalizeVehicleKind(kind: string) {
+  return kind === "voiture" ? "voiture" : "utilitaire";
+}
+
 async function resolveVehiclePhotoUrls(
   ctx: QueryCtx | MutationCtx,
   vehicles: Doc<"vehicles">[],
@@ -54,6 +58,7 @@ async function resolveVehiclePhotoUrls(
   return await Promise.all(
     vehicles.map(async (vehicle) => ({
       ...vehicle,
+      kind: normalizeVehicleKind(vehicle.kind),
       photoUrl: vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : null,
     })),
   );

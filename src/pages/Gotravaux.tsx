@@ -33,7 +33,7 @@ import { useUpload } from "../lib/useUpload";
 import { formatDate, formatDateTime, relativeUnits } from "../lib/format";
 import { canAccess } from "../lib/permissions";
 
-type VehicleKind = "utilitaire" | "camionnette" | "camion" | "voiture";
+type VehicleKind = "utilitaire" | "voiture";
 type TaskPriority = "low" | "medium" | "high";
 type TaskStatus = "todo" | "in_progress" | "done";
 
@@ -71,6 +71,10 @@ type VehicleTask = {
   endDate?: number;
   createdBy: string;
 };
+
+function normalizeVehicleKind(kind: string): VehicleKind {
+  return kind === "voiture" ? "voiture" : "utilitaire";
+}
 
 const DOC_CATEGORIES = [
   { key: "carte_grise", label: "Carte grise" },
@@ -227,7 +231,7 @@ function VehicleInfoForm({ vehicle, onSaved }: { vehicle: Vehicle | null; onSave
   const [form, setForm] = useState(() =>
     vehicle
       ? {
-          name: vehicle.name, plate: vehicle.plate ?? "", kind: vehicle.kind, site: vehicle.site ?? "",
+          name: vehicle.name, plate: vehicle.plate ?? "", kind: normalizeVehicleKind(vehicle.kind), site: vehicle.site ?? "",
           brand: vehicle.brand ?? "", model: vehicle.model ?? "", seats: vehicle.seats ? String(vehicle.seats) : "",
           assignedTo: vehicle.assignedTo ?? "", photo: vehicle.photo ?? null, photoUrl: vehicle.photoUrl ?? "",
           odometerKm: vehicle.odometerKm ? String(vehicle.odometerKm) : "",
@@ -274,7 +278,7 @@ function VehicleInfoForm({ vehicle, onSaved }: { vehicle: Vehicle | null; onSave
         <Field label="Plaque"><Input value={form.plate} onChange={(e) => setForm({ ...form, plate: e.target.value })} /></Field>
         <Field label="Type">
           <Select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as VehicleKind })}>
-            <option value="utilitaire">Utilitaire</option><option value="camionnette">Camionnette</option><option value="camion">Camion</option><option value="voiture">Voiture</option>
+            <option value="utilitaire">Utilitaire</option><option value="voiture">Voiture</option>
           </Select>
         </Field>
       </div>

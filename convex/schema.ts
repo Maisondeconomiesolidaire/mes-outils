@@ -308,8 +308,6 @@ export default defineSchema({
     plate: v.optional(v.string()),
     kind: v.union(
       v.literal("utilitaire"),
-      v.literal("camionnette"),
-      v.literal("camion"),
       v.literal("voiture"),
     ),
     photo: v.optional(v.id("_storage")),
