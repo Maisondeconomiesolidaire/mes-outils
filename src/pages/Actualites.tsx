@@ -51,7 +51,7 @@ export function Actualites() {
 
   return (
     <div className="space-y-6">
-      <SectionHeader title="Espace partage" subtitle="Le fil interne de l'équipe" />
+      <SectionHeader title="Espace partage" />
       <SectionTabs />
       {sub === "publications" ? <Publications canCreate={canCreate} canManage={canManage} /> : null}
       {sub === "evenements" ? <Evenements canCreate={canCreate} /> : null}

@@ -74,7 +74,7 @@ export function Compte() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <SectionHeader title="Mon compte" subtitle="Gérez votre photo et vos informations personnelles" />
+      <SectionHeader title="Mon compte" />
 
       <section className="premium-panel rounded-2xl p-5">
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">

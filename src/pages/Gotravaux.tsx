@@ -131,7 +131,7 @@ export function Gotravaux() {
   return (
     <>
       <div className="space-y-6">
-        <SectionHeader title="Gotravaux" subtitle="Suivi complet de la flotte" actions={actions} />
+        <SectionHeader title="Gotravaux" actions={actions} />
         <SectionTabs />
 
         {sub === "vehicles" ? (

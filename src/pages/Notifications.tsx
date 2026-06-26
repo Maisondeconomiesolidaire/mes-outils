@@ -33,7 +33,6 @@ export function Notifications() {
     <div className="space-y-6">
       <SectionHeader
         title="Notifications"
-        subtitle="Messages, réservations et activité de vos publications"
         actions={
           unread > 0 ? (
             <Button variant="secondary" onClick={() => markAllRead()}>

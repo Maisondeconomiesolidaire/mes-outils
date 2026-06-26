@@ -48,10 +48,7 @@ export function Reservations() {
 
   return (
     <div className="space-y-6">
-      <SectionHeader
-        title="Réservations"
-        subtitle={tab === "rooms" ? "Salles disponibles sur votre créneau" : tab === "vehicles" ? "Véhicules disponibles sur votre créneau" : "Vos réservations"}
-      />
+      <SectionHeader title="Réservations" />
       <SectionTabs />
       {tab === "mine" ? <MyReservations /> : <BrowseAndBook tab={tab} />}
     </div>
