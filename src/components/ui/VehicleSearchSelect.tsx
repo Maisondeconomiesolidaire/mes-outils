@@ -105,7 +105,7 @@ export function VehicleSearchSelect({
                     }}
                     className={cn(
                       "flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition",
-                      isActive ? "bg-brand-50" : "hover:bg-[var(--accent)]",
+                      isActive ? "bg-[var(--selected)]" : "hover:bg-[var(--accent)]",
                     )}
                   >
                     <Thumb photoUrl={vehicle.photoUrl} />

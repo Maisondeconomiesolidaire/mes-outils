@@ -775,6 +775,10 @@ export default defineSchema({
     bookedByName: v.optional(v.string()),
     bookedForClerkId: v.optional(v.string()),
     title: v.string(),
+    // Type d'usage de la salle (réunion, atelier, formation…).
+    usageType: v.optional(v.string()),
+    // Nombre de personnes attendues (plafonné à la capacité de la salle).
+    attendees: v.optional(v.number()),
     start: v.number(),
     end: v.number(),
     notes: v.optional(v.string()),
@@ -795,6 +799,10 @@ export default defineSchema({
     bookedByName: v.optional(v.string()),
     bookedForClerkId: v.optional(v.string()),
     purpose: v.string(),
+    // Usage professionnel ou personnel (selon les droits du véhicule).
+    usageType: v.optional(v.union(v.literal("pro"), v.literal("personal"))),
+    // Kilométrage estimé par le demandeur.
+    expectedKm: v.optional(v.number()),
     start: v.number(),
     end: v.number(),
     status: v.union(

@@ -407,11 +407,28 @@ type Deal = {
   isMine: boolean;
 };
 
+/** Lien vers la messagerie pré-remplie façon "leboncoin" pour un bon plan. */
+function contactDealHref(deal: Deal) {
+  const priceLabel = deal.dealType === "vente" && deal.price ? ` (${deal.price} €)` : "";
+  const prefill = `Bonjour, je suis intéressé(e) par votre annonce « ${deal.title} »${priceLabel}. Est-elle toujours disponible ?`;
+  const params = new URLSearchParams({
+    to: deal.authorClerkId,
+    name: deal.authorName,
+    prefill,
+    ctxTitle: deal.title,
+  });
+  if (deal.imageUrls[0]) params.set("ctxImage", deal.imageUrls[0]);
+  const typeLabel = DEAL_TYPES.find((t) => t.key === deal.dealType)?.label;
+  if (typeLabel) params.set("ctxType", typeLabel);
+  if (deal.dealType === "vente" && deal.price) params.set("ctxPrice", String(deal.price));
+  return `/messagerie?${params.toString()}`;
+}
+
 const DEAL_BADGE: Record<DealType, string> = {
-  pret: "bg-sky-100 text-sky-800",
-  don: "bg-brand-100 text-brand-800",
-  vente: "bg-amber-100 text-amber-800",
-  echange: "bg-violet-100 text-violet-800",
+  pret: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200",
+  don: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
+  vente: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
+  echange: "bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-200",
 };
 
 function BonsPlans({ canCreate }: { canCreate: boolean }) {
@@ -494,7 +511,7 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
                       <Button variant="ghost" size="sm" onClick={() => removeDeal({ dealId: deal._id })}><Trash2 className="h-4 w-4" /></Button>
                     </>
                   ) : (
-                    <Button size="sm" className="flex-1" onClick={() => navigate(`/messagerie?to=${encodeURIComponent(deal.authorClerkId)}&name=${encodeURIComponent(deal.authorName)}`)}>
+                    <Button size="sm" className="flex-1" onClick={() => navigate(contactDealHref(deal))}>
                       <MessagesSquare className="h-4 w-4" /> Contacter
                     </Button>
                   )}

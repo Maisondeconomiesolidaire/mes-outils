@@ -607,7 +607,7 @@ function FleetCalendar({ vehicles, tasks, canSeeReservations }: { vehicles: Vehi
               <div key={index} className={`flex items-center gap-4 border-l-4 px-5 py-3 ${toneStyles[entry.tone]}`}>
                 <span className="w-14 shrink-0 text-sm font-semibold text-[var(--foreground)]">{formatDateTime(entry.date).slice(-5)}</span>
                 <div className="min-w-0"><p className="truncate text-sm font-semibold text-[var(--foreground)]">{entry.label}</p><p className="truncate text-xs text-[var(--muted-foreground)]">{entry.sublabel}</p></div>
-                {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">En attente</span> : null}
+                {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente</span> : null}
               </div>
             ))}
           </div>
@@ -689,13 +689,13 @@ function ReservationRow({ reservation, canManage, onApprove, onReject, onCancel 
 }
 
 function StatusBadge({ status }: { status: ReservationItem["status"] }) {
-  const styles = { approved: "bg-brand-100 text-brand-800", pending: "bg-amber-100 text-amber-800", rejected: "bg-rose-100 text-rose-800" };
+  const styles = { approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200", pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200", rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200" };
   const labels = { approved: "Approuvée", pending: "En attente", rejected: "Refusée" };
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}>{labels[status]}</span>;
 }
 
 function PriorityBadge({ priority }: { priority: TaskPriority }) {
-  const map = { low: "bg-zinc-200 text-zinc-700", medium: "bg-amber-100 text-amber-800", high: "bg-rose-100 text-rose-800" };
+  const map = { low: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200", medium: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200", high: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200" };
   const label = { low: "Basse", medium: "Moyenne", high: "Haute" };
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${map[priority]}`}>{label[priority]}</span>;
 }

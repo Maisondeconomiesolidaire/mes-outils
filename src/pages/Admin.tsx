@@ -367,10 +367,10 @@ export function Admin() {
                 className={cn(
                   "flex h-11 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition",
                   draftRole !== "staff"
-                    ? "cursor-not-allowed border-[var(--border)] bg-zinc-100 text-zinc-500"
+                    ? "cursor-not-allowed border-[var(--border)] bg-[var(--muted)] text-[var(--muted-foreground)]"
                     : active
-                      ? "border-brand-200 bg-brand-50 text-brand-800"
-                      : "border-red-200 bg-red-50 text-red-700",
+                      ? "border-brand-200 bg-[var(--selected)] text-[var(--selected-foreground)]"
+                      : "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300",
                 )}
               >
                 {active ? <ShieldCheck className="h-4 w-4" /> : <ShieldOff className="h-4 w-4" />}
@@ -462,7 +462,7 @@ export function Admin() {
                           type="button"
                           disabled={draftRole !== "staff"}
                           onClick={() => setGrants((current) => setPageAll(current, page.key, page.actions, !allChecked))}
-                          className="rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-800"
+                          className="rounded-full bg-[var(--selected)] px-3 py-1 text-xs font-medium text-[var(--selected-foreground)] disabled:opacity-50"
                         >
                           {allChecked ? "Tout retire" : "Tout activer"}
                         </button>
@@ -480,7 +480,7 @@ export function Admin() {
                                 "rounded-full px-3 py-2 text-sm font-medium transition",
                                 checked
                                   ? "bg-brand-500 text-white"
-                                  : "bg-brand-50 text-[var(--foreground)]",
+                                  : "bg-[var(--selected)] text-[var(--selected-foreground)]",
                               )}
                             >
                               {ACTION_LABELS[action]}

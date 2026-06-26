@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @import "@fontsource-variable/inter";
 
+/* Le thème sombre est piloté par la classe `body.theme-dark` (et non la
+   préférence système). On remappe donc la variante `dark:` de Tailwind. */
+@custom-variant dark (&:where(body.theme-dark, body.theme-dark *));
+
 @theme {
   --color-brand-50: #f0fbf3;
   --color-brand-100: #dcf6e2;
@@ -28,6 +32,9 @@
   --border: #e2e8e4;
   --border-strong: #d2dcd5;
   --input: #ffffff;
+  /* Surface "sélectionnée / active" douce, qui s'adapte au thème. */
+  --selected: #e6f6ec;
+  --selected-foreground: #1d5931;
   --ring: rgba(71, 198, 103, 0.28);
   --shadow-soft: 0 1px 2px rgba(20, 45, 26, 0.04), 0 8px 24px rgba(20, 45, 26, 0.05);
   --shadow-strong: 0 12px 40px rgba(20, 45, 26, 0.10);
@@ -54,6 +61,8 @@ body.theme-dark {
   --border: #28332b;
   --border-strong: #36443a;
   --input: #131a15;
+  --selected: rgba(71, 198, 103, 0.16);
+  --selected-foreground: #8fde9f;
   --ring: rgba(71, 198, 103, 0.32);
   --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.28);
   --shadow-strong: 0 16px 48px rgba(0, 0, 0, 0.4);

@@ -72,7 +72,7 @@ export function PersonSelect({
             <button
               type="button"
               onClick={() => { onChange(null); setOpen(false); setQuery(""); }}
-              className={cn("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", value === null ? "bg-brand-50" : "hover:bg-[var(--accent)]")}
+              className={cn("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", value === null ? "bg-[var(--selected)]" : "hover:bg-[var(--accent)]")}
             >
               <Avatar name={selfLabel} />
               <span className="flex-1 text-sm font-semibold text-[var(--foreground)]">{selfLabel}</span>
@@ -85,7 +85,7 @@ export function PersonSelect({
                   key={person.clerkId}
                   type="button"
                   onClick={() => { onChange(person); setOpen(false); setQuery(""); }}
-                  className={cn("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", isActive ? "bg-brand-50" : "hover:bg-[var(--accent)]")}
+                  className={cn("flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left transition", isActive ? "bg-[var(--selected)]" : "hover:bg-[var(--accent)]")}
                 >
                   <Avatar name={person.name} src={person.imageUrl} />
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--foreground)]">{person.name}</span>

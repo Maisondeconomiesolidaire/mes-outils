@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
-import { ArrowLeft, MessagesSquare, Send } from "lucide-react";
+import { ArrowLeft, MessagesSquare, Send, Tag, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -132,10 +132,24 @@ export function MessagerieSidebar() {
   );
 }
 
+type DealContext = { title: string; image?: string; type?: string; price?: string };
+
 export function Messagerie() {
   const { user } = useUser();
   const conversations = useConversations();
   const { activeId, activeName, select, clear } = useActiveConversation(conversations);
+  const [searchParams] = useSearchParams();
+
+  const prefill = searchParams.get("prefill") ?? undefined;
+  const ctxTitle = searchParams.get("ctxTitle");
+  const dealContext: DealContext | null = ctxTitle
+    ? {
+        title: ctxTitle,
+        image: searchParams.get("ctxImage") ?? undefined,
+        type: searchParams.get("ctxType") ?? undefined,
+        price: searchParams.get("ctxPrice") ?? undefined,
+      }
+    : null;
 
   if (conversations === undefined) {
     return <FullSpinner label="Chargement de la messagerie..." />;
@@ -162,6 +176,8 @@ export function Messagerie() {
             meName={user?.fullName ?? "Moi"}
             meImage={user?.imageUrl}
             onBack={clear}
+            prefill={prefill}
+            dealContext={dealContext}
           />
         ) : (
           <div className="flex flex-1 items-center justify-center p-10">
@@ -183,18 +199,30 @@ function Thread({
   meName,
   meImage,
   onBack,
+  prefill,
+  dealContext,
 }: {
   otherClerkId: string;
   otherName: string;
   meName: string;
   meImage?: string;
   onBack: () => void;
+  prefill?: string;
+  dealContext?: DealContext | null;
 }) {
   const messages = useQuery(api.community.listThread, { otherClerkId });
   const send = useMutation(api.community.sendMessage);
   const markRead = useMutation(api.community.markThreadRead);
   const [draft, setDraft] = useState("");
+  const [context, setContext] = useState<DealContext | null>(dealContext ?? null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Pré-remplit le message (façon "leboncoin") une seule fois par conversation/annonce.
+  useEffect(() => {
+    if (prefill) setDraft(prefill);
+    setContext(dealContext ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otherClerkId, prefill, dealContext?.title]);
 
   useEffect(() => {
     if (messages && messages.length > 0) {
@@ -209,6 +237,7 @@ function Thread({
     const body = draft.trim();
     if (!body) return;
     setDraft("");
+    setContext(null);
     await send({ toClerkId: otherClerkId, toName: otherName, body });
   }
 
@@ -253,6 +282,33 @@ function Thread({
         )}
         <div ref={bottomRef} />
       </div>
+
+      {context ? (
+        <div className="flex items-center gap-3 border-t border-[var(--border)] bg-[var(--accent)] px-3 py-2.5">
+          {context.image ? (
+            <img src={context.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+          ) : (
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--card)]">
+              <Tag className="h-5 w-5 text-[var(--muted-foreground)]" />
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-brand-600">
+              {context.type ? `Bon plan · ${context.type}` : "Bon plan"}
+            </p>
+            <p className="truncate text-sm font-semibold text-[var(--foreground)]">{context.title}</p>
+          </div>
+          {context.price ? <span className="shrink-0 text-sm font-bold text-[var(--foreground)]">{context.price} €</span> : null}
+          <button
+            type="button"
+            onClick={() => setContext(null)}
+            className="shrink-0 rounded-full p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--card)]"
+            aria-label="Retirer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex items-center gap-2 border-t border-[var(--border)] p-3">
         <Avatar name={meName} src={meImage} size="sm" />

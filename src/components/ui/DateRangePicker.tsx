@@ -30,7 +30,7 @@ export function DateRangePicker({
   const [step, setStep] = useState<"start" | "end">("start");
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ top: 0, left: 0, width: 720 });
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 780 });
 
   const [startDay, setStartDay] = useState<Date | null>(value.start ? new Date(value.start) : null);
   const [endDay, setEndDay] = useState<Date | null>(value.end ? new Date(value.end) : null);
@@ -46,7 +46,7 @@ export function DateRangePicker({
   useLayoutEffect(() => {
     if (!open || !buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
-    const width = Math.min(720, window.innerWidth - 24);
+    const width = Math.min(780, window.innerWidth - 24);
     const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
     const top = Math.min(rect.bottom + 8, window.innerHeight - 620);
     setPosition({ top: Math.max(12, top), left, width });
@@ -145,7 +145,7 @@ export function DateRangePicker({
             </div>
           </div>
 
-          <div className="grid transition-transform duration-300 lg:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="grid transition-transform duration-300 lg:grid-cols-[minmax(0,1fr)_280px]">
             <div className="p-4">
               <CalendarBoard
                 selected={(step === "start" ? startDay : endDay)?.getTime() ?? null}
@@ -250,17 +250,17 @@ function StepButton({ active, label, value, onClick }: { active: boolean; label:
 function TimeGrid({ value, onChange }: { value: TimeValue; onChange: (value: TimeValue) => void }) {
   const current = formatTime(value);
   return (
-    <div className="grid max-h-[360px] grid-cols-3 gap-2 overflow-y-auto pr-1">
+    <div className="thin-scroll grid max-h-[360px] grid-cols-2 gap-2.5 overflow-y-auto pr-1">
       {TIME_OPTIONS.map((option) => (
         <button
           key={option}
           type="button"
           onClick={() => onChange(parseTime(option))}
           className={cn(
-            "rounded-xl px-2 py-2 text-sm font-bold transition",
+            "rounded-xl px-3 py-2.5 text-[15px] font-bold tracking-wide transition",
             option === current
               ? "bg-brand-500 text-white shadow-sm"
-              : "bg-[var(--card)] text-[var(--foreground)] hover:bg-brand-50 hover:text-brand-800",
+              : "bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--selected)] hover:text-[var(--selected-foreground)]",
           )}
         >
           {option}

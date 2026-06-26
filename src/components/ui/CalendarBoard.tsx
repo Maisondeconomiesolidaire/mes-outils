@@ -33,6 +33,7 @@ export function CalendarBoard({
   rangeEnd,
   events = [],
   onSelect,
+  onEventClick,
   compact = false,
 }: {
   selected?: number | null;
@@ -40,6 +41,7 @@ export function CalendarBoard({
   rangeEnd?: number | null;
   events?: CalendarEvent[];
   onSelect?: (day: Date) => void;
+  onEventClick?: (id: string) => void;
   compact?: boolean;
 }) {
   const [viewMonth, setViewMonth] = useState(() => new Date(selected ?? rangeStart ?? Date.now()));
@@ -117,8 +119,8 @@ export function CalendarBoard({
                 "min-h-16 bg-[var(--card)] p-1.5 text-left transition hover:bg-[var(--accent)]",
                 compact ? "min-h-12" : "sm:min-h-24",
                 outside && "text-[var(--muted-foreground)]/45",
-                isSelected && "bg-brand-50 ring-2 ring-inset ring-brand-500",
-                !isSelected && inRange && "bg-brand-50/70",
+                isSelected && "bg-[var(--selected)] ring-2 ring-inset ring-brand-500",
+                !isSelected && inRange && "bg-[var(--selected)]",
               )}
             >
               <span
@@ -134,9 +136,31 @@ export function CalendarBoard({
                   {dayEvents.slice(0, compact ? 2 : 3).map((event) => (
                     <span
                       key={event.id}
+                      role={onEventClick ? "button" : undefined}
+                      tabIndex={onEventClick ? 0 : undefined}
+                      onClick={
+                        onEventClick
+                          ? (e) => {
+                              e.stopPropagation();
+                              onEventClick(event.id);
+                            }
+                          : undefined
+                      }
+                      onKeyDown={
+                        onEventClick
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onEventClick(event.id);
+                              }
+                            }
+                          : undefined
+                      }
                       className={cn(
                         "block truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
                         toneClass(event.tone),
+                        onEventClick && "cursor-pointer hover:opacity-80",
                       )}
                     >
                       {event.title}
@@ -159,11 +183,11 @@ export function CalendarBoard({
 
 function toneClass(tone: CalendarEvent["tone"] = "brand") {
   const map = {
-    brand: "bg-brand-100 text-brand-800",
-    amber: "bg-amber-100 text-amber-800",
-    rose: "bg-rose-100 text-rose-800",
-    sky: "bg-sky-100 text-sky-800",
-    zinc: "bg-zinc-100 text-zinc-700",
+    brand: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
+    amber: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
+    rose: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
+    sky: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200",
+    zinc: "bg-zinc-100 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200",
   };
   return map[tone];
 }

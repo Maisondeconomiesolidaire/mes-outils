@@ -140,6 +140,8 @@ export const bookRoom = mutation({
   args: {
     roomId: v.id("rooms"),
     title: v.string(),
+    usageType: v.optional(v.string()),
+    attendees: v.optional(v.number()),
     start: v.number(),
     end: v.number(),
     notes: v.optional(v.string()),
@@ -152,6 +154,15 @@ export const bookRoom = mutation({
     ensureRange(args.start, args.end);
     const room = await ctx.db.get(args.roomId);
     if (!room || !room.active) throw new Error("Salle indisponible.");
+
+    if (args.attendees !== undefined) {
+      if (!Number.isFinite(args.attendees) || args.attendees < 1) {
+        throw new Error("Nombre de personnes invalide.");
+      }
+      if (room.capacity && args.attendees > room.capacity) {
+        throw new Error(`Cette salle accueille ${room.capacity} personnes maximum.`);
+      }
+    }
 
     const existing = await ctx.db
       .query("roomReservations")
@@ -172,6 +183,8 @@ export const bookRoom = mutation({
       bookedByName: onBehalf ? displayName(identity) : undefined,
       bookedForClerkId: onBehalf ? args.forClerkId : undefined,
       title: args.title.trim(),
+      usageType: args.usageType?.trim() || undefined,
+      attendees: args.attendees,
       start: args.start,
       end: args.end,
       notes: args.notes?.trim() || undefined,
@@ -267,7 +280,11 @@ export const listVehicleBookings = query({
       .map((reservation) => ({
         _id: reservation._id,
         vehicleName: nameById.get(String(reservation.vehicleId)) ?? "Véhicule",
+        clerkId: reservation.clerkId,
         userName: reservation.userName,
+        purpose: reservation.purpose,
+        usageType: reservation.usageType,
+        expectedKm: reservation.expectedKm,
         start: reservation.start,
         end: reservation.end,
         status: reservation.status,
@@ -378,6 +395,8 @@ export const requestVehicle = mutation({
   args: {
     vehicleId: v.id("vehicles"),
     purpose: v.string(),
+    usageType: v.optional(v.union(v.literal("pro"), v.literal("personal"))),
+    expectedKm: v.optional(v.number()),
     start: v.number(),
     end: v.number(),
     forClerkId: v.optional(v.string()),
@@ -389,6 +408,16 @@ export const requestVehicle = mutation({
     ensureRange(args.start, args.end);
     const vehicle = await ctx.db.get(args.vehicleId);
     if (!vehicle || !vehicle.active) throw new Error("Véhicule indisponible.");
+
+    if (args.usageType === "pro" && vehicle.reservablePro === false) {
+      throw new Error("Ce véhicule n'est pas réservable pour un usage professionnel.");
+    }
+    if (args.usageType === "personal" && vehicle.reservablePersonal !== true) {
+      throw new Error("Ce véhicule n'est pas réservable pour un usage personnel.");
+    }
+    if (args.expectedKm !== undefined && (!Number.isFinite(args.expectedKm) || args.expectedKm < 0)) {
+      throw new Error("Kilométrage estimé invalide.");
+    }
 
     await ensureVehicleAvailable(ctx, args.vehicleId, args.start, args.end);
 
@@ -408,6 +437,8 @@ export const requestVehicle = mutation({
       bookedByName: onBehalf ? displayName(identity) : undefined,
       bookedForClerkId: onBehalf ? args.forClerkId : undefined,
       purpose: args.purpose.trim(),
+      usageType: args.usageType,
+      expectedKm: args.expectedKm,
       start: args.start,
       end: args.end,
       status: "pending",

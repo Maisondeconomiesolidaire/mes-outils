@@ -1,19 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useSearchParams } from "react-router-dom";
-import { CalendarCheck, CarFront, DoorOpen, MapPin, Search, Users } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
+import { CalendarCheck, CarFront, DoorOpen, MapPin, MessagesSquare, Search, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Field, Input, Textarea } from "../components/ui/Field";
+import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { DateRangePicker, type DateRange } from "../components/ui/DateRangePicker";
 import { Modal } from "../components/ui/Modal";
 import { PersonSelect, type Person } from "../components/ui/PersonSelect";
 import { FullSpinner } from "../components/ui/Spinner";
 import { formatDate, formatDateTime } from "../lib/format";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
+
+const ROOM_USAGES = [
+  "Réunion",
+  "Atelier",
+  "Animation",
+  "Vente",
+  "Déjeuner",
+  "Evenement personnel",
+  "Formation",
+  "Travail",
+  "Autre",
+] as const;
 
 type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: string; buildingLabel?: string; capacity?: number; photoUrl?: string | null };
 type Vehicle = { _id: Id<"vehicles">; name: string; plate?: string; kind: string; brand?: string; model?: string; seats?: number; reservablePro?: boolean; reservablePersonal?: boolean; site?: "60" | "76"; siteLabel?: string; photoUrl?: string | null };
@@ -66,21 +79,33 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const [bookingVehicle, setBookingVehicle] = useState<Vehicle | null>(null);
   const [label, setLabel] = useState("");
   const [notes, setNotes] = useState("");
+  const [roomUsage, setRoomUsage] = useState<string>(ROOM_USAGES[0]);
+  const [attendees, setAttendees] = useState("");
+  const [vehicleUsage, setVehicleUsage] = useState<"pro" | "personal">("pro");
+  const [expectedKm, setExpectedKm] = useState("");
   const [forUser, setForUser] = useState<Person | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   function openBooking(room: Room | null, vehicle: Vehicle | null) {
-    setBookingRoom(room); setBookingVehicle(vehicle); setLabel(""); setNotes(""); setForUser(null); setError(null);
+    setBookingRoom(room); setBookingVehicle(vehicle);
+    setLabel(""); setNotes(""); setForUser(null); setError(null);
+    setRoomUsage(ROOM_USAGES[0]); setAttendees("");
+    setExpectedKm("");
+    setVehicleUsage(vehicle && vehicle.reservablePro === false && vehicle.reservablePersonal === true ? "personal" : "pro");
   }
   function closeBooking() { setBookingRoom(null); setBookingVehicle(null); }
 
+  const attendeesValue = Number(attendees) || 0;
+  const overCapacity = Boolean(bookingRoom?.capacity && attendeesValue > bookingRoom.capacity);
+  const canSubmit = Boolean(label.trim()) && (!bookingRoom || (attendeesValue >= 1 && !overCapacity));
+
   async function submitBooking() {
-    if (!range.start || !range.end || !label.trim()) return;
+    if (!range.start || !range.end || !canSubmit) return;
     setSubmitting(true); setError(null);
     try {
-      if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
-      else if (bookingVehicle) await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
+      if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
+      else if (bookingVehicle) await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: expectedKm ? Number(expectedKm) : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
       closeBooking();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Réservation impossible.");
@@ -194,16 +219,69 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           <div className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--foreground)]">
             {range.start && range.end ? `${formatDateTime(range.start)} → ${formatDateTime(range.end)}` : "Créneau non défini"}
           </div>
-          <Field label={bookingRoom ? "Objet de la réservation" : "Motif de la demande"} required>
+          <Field label={bookingRoom ? "Objet de la réservation" : "Motif de la réservation"} required>
             {bookingRoom ? <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Réunion équipe..." /> : <Textarea value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Collecte, déménagement..." />}
           </Field>
-          {bookingRoom ? <Field label="Notes"><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></Field> : null}
+
+          {bookingRoom ? (
+            <>
+              <Field label="Type d'usage" required>
+                <Select value={roomUsage} onChange={(e) => setRoomUsage(e.target.value)}>
+                  {ROOM_USAGES.map((usage) => <option key={usage} value={usage}>{usage}</option>)}
+                </Select>
+              </Field>
+              <Field
+                label="Nombre de personnes attendues"
+                required
+                hint={bookingRoom.capacity ? `Capacité de la salle : ${bookingRoom.capacity} personnes.` : undefined}
+                error={overCapacity ? `Maximum ${bookingRoom.capacity} personnes pour cette salle.` : undefined}
+              >
+                <Input
+                  type="number"
+                  min={1}
+                  max={bookingRoom.capacity ?? undefined}
+                  value={attendees}
+                  onChange={(e) => setAttendees(e.target.value)}
+                  placeholder="0"
+                />
+              </Field>
+              <Field label="Commentaire (facultatif)"><Textarea value={notes} onChange={(e) => setNotes(e.target.value)} /></Field>
+            </>
+          ) : bookingVehicle ? (
+            <>
+              <Field label="Type d'usage" required>
+                <div className="inline-flex w-full rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
+                  {([
+                    { key: "pro" as const, label: "Professionnel", allowed: bookingVehicle.reservablePro !== false },
+                    { key: "personal" as const, label: "Personnel", allowed: bookingVehicle.reservablePersonal === true },
+                  ]).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      disabled={!opt.allowed}
+                      onClick={() => setVehicleUsage(opt.key)}
+                      className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${vehicleUsage === opt.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="Kilométrage estimé" hint="Nombre de kilomètres que vous pensez réaliser.">
+                <div className="flex items-center gap-2">
+                  <Input type="number" min={0} value={expectedKm} onChange={(e) => setExpectedKm(e.target.value)} placeholder="0" />
+                  <span className="text-sm font-medium text-[var(--muted-foreground)]">km</span>
+                </div>
+              </Field>
+            </>
+          ) : null}
+
           <Field label="Réserver pour"><PersonSelect people={directory} value={forUser?.clerkId ?? null} onChange={setForUser} /></Field>
           {bookingVehicle ? <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">La réservation d'un véhicule est soumise à l'approbation d'un responsable.</p> : null}
-          {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+          {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
           <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
             <Button variant="ghost" onClick={closeBooking}>Annuler</Button>
-            <Button size="lg" onClick={submitBooking} disabled={submitting || !label.trim()}>{submitting ? "Envoi..." : bookingRoom ? "Réserver" : "Demander"}</Button>
+            <Button size="lg" onClick={submitBooking} disabled={submitting || !canSubmit}>{submitting ? "Envoi..." : bookingRoom ? "Réserver" : "Demander"}</Button>
           </div>
         </div>
       </Modal>
@@ -211,7 +289,23 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   );
 }
 
+type ReservationDetail = {
+  id: string;
+  date: number;
+  endDate: number;
+  assetName: string;
+  reason: string;
+  personName: string;
+  personClerkId: string;
+  pending?: boolean;
+};
+
 function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange }) {
+  const navigate = useNavigate();
+  const { user } = useUser();
+  const meId = user?.id ?? null;
+  const [detailId, setDetailId] = useState<string | null>(null);
+
   const selected = new Date(range.start ?? Date.now());
   const start = new Date(selected);
   start.setHours(0, 0, 0, 0);
@@ -225,22 +319,40 @@ function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange })
 
   const roomName = useMemo(() => new Map((rooms ?? []).map((r) => [String(r._id), r.name])), [rooms]);
 
-  type Entry = { id: string; date: number; title: string; sub: string };
-  let entries: Entry[] = [];
-  if (tab === "rooms") {
-    entries = (roomReservations ?? []).map((r) => ({ id: String(r._id), date: r.start, title: `${roomName.get(String(r.roomId)) ?? "Salle"} · ${r.title}`, sub: `${formatDateTime(r.start).slice(-5)}–${formatDateTime(r.end).slice(-5)} · ${r.userName}` }));
-  } else {
-    entries = (vehicleBookings ?? []).map((r) => ({ id: String(r._id), date: r.start, title: `${r.vehicleName} · ${r.userName}`, sub: `${formatDateTime(r.start).slice(-5)}–${formatDateTime(r.end).slice(-5)}${r.status === "pending" ? " · en attente" : ""}` }));
-  }
-  entries = entries.sort((a, b) => a.date - b.date);
+  const details: ReservationDetail[] = useMemo(() => {
+    const list: ReservationDetail[] = tab === "rooms"
+      ? (roomReservations ?? []).map((r) => ({
+          id: String(r._id),
+          date: r.start,
+          endDate: r.end,
+          assetName: roomName.get(String(r.roomId)) ?? "Salle",
+          reason: r.title,
+          personName: r.userName,
+          personClerkId: r.bookedForClerkId ?? r.clerkId,
+        }))
+      : (vehicleBookings ?? []).map((r) => ({
+          id: String(r._id),
+          date: r.start,
+          endDate: r.end,
+          assetName: r.vehicleName,
+          reason: r.purpose,
+          personName: r.userName,
+          personClerkId: r.clerkId,
+          pending: r.status === "pending",
+        }));
+    return list.sort((a, b) => a.date - b.date);
+  }, [tab, roomReservations, vehicleBookings, roomName]);
 
-  const calendarEvents: CalendarEvent[] = entries.map((entry) => ({
+  const calendarEvents: CalendarEvent[] = details.map((entry) => ({
     id: entry.id,
     start: entry.date,
-    title: entry.title,
-    subtitle: entry.sub,
-    tone: tab === "rooms" ? "brand" : entry.sub.includes("en attente") ? "amber" : "sky",
+    title: tab === "rooms" ? `${entry.assetName} · ${entry.reason}` : `${entry.assetName} · ${entry.personName}`,
+    subtitle: `${formatDateTime(entry.date).slice(-5)}–${formatDateTime(entry.endDate).slice(-5)} · ${entry.personName}`,
+    tone: tab === "rooms" ? "brand" : entry.pending ? "amber" : "sky",
   }));
+
+  const active = details.find((entry) => entry.id === detailId) ?? null;
+  const isMine = active ? active.personClerkId === meId : false;
 
   return (
     <div className="space-y-3 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
@@ -252,11 +364,54 @@ function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange })
         selected={dayStart}
         events={calendarEvents}
         onSelect={() => undefined}
+        onEventClick={(id) => setDetailId(id)}
         compact
       />
-      {entries.length === 0 ? (
+      {details.length === 0 ? (
         <p className="px-1 pb-1 text-sm text-[var(--muted-foreground)]">Rien de réservé sur cette journée.</p>
-      ) : null}
+      ) : (
+        <p className="px-1 pb-1 text-xs text-[var(--muted-foreground)]">Cliquez sur une réservation pour voir les détails.</p>
+      )}
+
+      <Modal open={Boolean(active)} onClose={() => setDetailId(null)} title="Détail de la réservation">
+        {active ? (
+          <div className="grid gap-4">
+            <div className="flex items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--card)] text-brand-600">
+                {tab === "rooms" ? <DoorOpen className="h-5 w-5" /> : <CarFront className="h-5 w-5" />}
+              </span>
+              <div className="min-w-0">
+                <p className="font-semibold text-[var(--foreground)]">{active.assetName}</p>
+                <p className="truncate text-sm text-[var(--muted-foreground)]">{active.reason}</p>
+              </div>
+            </div>
+            <dl className="grid gap-3 text-sm">
+              <div className="flex justify-between gap-4">
+                <dt className="text-[var(--muted-foreground)]">Réservé par</dt>
+                <dd className="font-semibold text-[var(--foreground)]">{active.personName}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-[var(--muted-foreground)]">Début</dt>
+                <dd className="font-medium text-[var(--foreground)]">{formatDateTime(active.date)}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-[var(--muted-foreground)]">Fin</dt>
+                <dd className="font-medium text-[var(--foreground)]">{formatDateTime(active.endDate)}</dd>
+              </div>
+            </dl>
+            {!isMine ? (
+              <Button
+                size="lg"
+                onClick={() => navigate(`/messagerie?to=${encodeURIComponent(active.personClerkId)}&name=${encodeURIComponent(active.personName)}`)}
+              >
+                <MessagesSquare className="h-4 w-4" /> Envoyer un message à cette personne
+              </Button>
+            ) : (
+              <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-sm text-[var(--muted-foreground)]">C'est votre réservation.</p>
+            )}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
@@ -283,10 +438,10 @@ function MyReservations() {
 
   const statusLabel: Record<MyReservation["status"], string> = { confirmed: "Confirmée", pending: "En attente", approved: "Approuvée", rejected: "Refusée" };
   const statusStyle: Record<MyReservation["status"], string> = {
-    confirmed: "bg-brand-100 text-brand-800",
-    approved: "bg-brand-100 text-brand-800",
-    pending: "bg-amber-100 text-amber-800",
-    rejected: "bg-rose-100 text-rose-800",
+    confirmed: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
+    approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
+    pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
+    rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
   };
 
   return (
