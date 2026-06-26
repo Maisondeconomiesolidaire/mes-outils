@@ -111,27 +111,6 @@ function ConversationList({
   );
 }
 
-/** Liste des conversations affichée dans la sidebar persistante de l'application. */
-export function MessagerieSidebar() {
-  const conversations = useConversations();
-  const { activeId, select } = useActiveConversation(conversations);
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-        Conversations
-      </p>
-      <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-        {conversations === undefined ? (
-          <div className="p-4 text-sm text-[var(--muted-foreground)]">Chargement...</div>
-        ) : (
-          <ConversationList conversations={conversations} activeId={activeId} onSelect={select} />
-        )}
-      </div>
-    </div>
-  );
-}
-
 type DealContext = { title: string; image?: string; type?: string; price?: string };
 
 export function Messagerie() {
@@ -156,9 +135,15 @@ export function Messagerie() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden border-[var(--border)] bg-[var(--card)] lg:rounded-2xl lg:border">
-      {/* Liste mobile : visible uniquement quand aucune conversation n'est ouverte. */}
-      <div className={cn("flex min-h-0 flex-1 flex-col lg:hidden", activeId && "hidden")}>
+    <div className="flex h-full min-h-0 overflow-hidden border-[var(--border)] bg-[var(--card)] lg:rounded-2xl lg:border">
+      {/* Liste des conversations : colonne fixe en desktop, plein écran en
+          mobile tant qu'aucune conversation n'est ouverte. */}
+      <div
+        className={cn(
+          "flex min-h-0 w-full flex-col border-[var(--border)] lg:w-80 lg:border-r",
+          activeId ? "hidden lg:flex" : "flex",
+        )}
+      >
         <div className="border-b border-[var(--border)] px-4 py-3">
           <h1 className="text-lg font-semibold text-[var(--foreground)]">Messagerie</h1>
         </div>
@@ -167,8 +152,8 @@ export function Messagerie() {
         </div>
       </div>
 
-      {/* Chat plein écran. */}
-      <div className={cn("min-h-0 flex-1 flex-col lg:flex", activeId ? "flex" : "hidden lg:flex")}>
+      {/* Chat. */}
+      <div className={cn("min-h-0 flex-1 flex-col", activeId ? "flex" : "hidden lg:flex")}>
         {activeId ? (
           <Thread
             otherClerkId={activeId}

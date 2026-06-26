@@ -1,16 +1,15 @@
-import { Link, NavLink, Outlet, useLocation, useSearchParams } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth } from "convex/react";
-import { LogOut, Moon, Sun } from "lucide-react";
+import { LogOut, Menu, Moon, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 /** Style "bouton primaire" appliqué à l'élément de navigation actif. */
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
-import { PORTAL_NAV, SECTION_SUBNAV, canAccess, sectionForPath } from "../lib/permissions";
+import { PORTAL_NAV, canAccess } from "../lib/permissions";
 import { cn } from "../lib/cn";
 import { usePermissionsAccess } from "./RequirePermission";
 import { FullSpinner } from "./ui/Spinner";
-import { MessagerieSidebar } from "../pages/Messagerie";
 
 export function AppLayout() {
   const [theme, setTheme] = useTheme();
@@ -72,7 +71,12 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
   const access = usePermissionsAccess();
   const { user } = useUser();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Ferme le tiroir mobile à chaque changement de page.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname, location.search]);
 
   if (access === undefined) return <FullSpinner label="Chargement du portail..." />;
 
@@ -88,155 +92,140 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     return true;
   });
 
-  const section = sectionForPath(location.pathname);
-  const subnav = (section && SECTION_SUBNAV[section.to]) ?? [];
-  const activeV = searchParams.get("v") ?? subnav[0]?.key ?? "";
   const isMessagerie = location.pathname.startsWith("/messagerie");
   const logoSrc = theme === "dark" ? "/mesoutils-dark.png" : "/mesoutils-light.png";
 
+  const sidebar = (
+    <SidebarContent
+      navItems={navItems}
+      logoSrc={logoSrc}
+      theme={theme}
+      setTheme={setTheme}
+      userName={user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"}
+      userEmail={user?.primaryEmailAddress?.emailAddress}
+      userImage={user?.imageUrl}
+    />
+  );
+
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen lg:pl-64">
       {/* Sidebar persistante (desktop) */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-[var(--border)] bg-[var(--card)] lg:flex">
-        <div className="flex h-20 items-center overflow-hidden border-b border-[var(--border)] px-5">
-          <Link to="/"><img src={logoSrc} alt="Mes Outils" className="h-16 w-auto" /></Link>
-        </div>
-
-        <nav className="flex min-h-0 flex-1 flex-col p-3">
-          {isMessagerie ? (
-            <MessagerieSidebar />
-          ) : (
-          <div className="space-y-1 overflow-y-auto">
-          {subnav.length > 0 ? (
-            <>
-              <p className="px-3 pb-1 pt-2 text-[11px] font-bold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-                {section?.label}
-              </p>
-              {subnav.map((item) => {
-                const Icon = item.icon;
-                const isActive = activeV === item.key;
-                return (
-                  <Link
-                    key={item.key}
-                    to={{ pathname: section!.to, search: `?v=${item.key}` }}
-                    className={cn(
-                      "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
-                      isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-                    )}
-                  >
-                    <Icon className="h-[18px] w-[18px] shrink-0" />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </>
-          ) : (
-            navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center rounded-xl px-3 py-2.5 text-sm font-semibold transition",
-                    isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-                  )
-                }
-              >
-                {item.label}
-              </NavLink>
-            ))
-          )}
-          </div>
-          )}
-        </nav>
-
-        <div className="space-y-2 border-t border-[var(--border)] p-3">
-          <button
-            type="button"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[var(--muted-foreground)] transition hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            {theme === "dark" ? "Mode clair" : "Mode sombre"}
-          </button>
-          <div className="flex items-center gap-1.5">
-            <Link
-              to="/compte"
-              className="flex min-w-0 flex-1 items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2 transition hover:bg-[var(--selected)]"
-            >
-              <UserAvatar name={user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"} src={user?.imageUrl} />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-[var(--foreground)]">{user?.fullName ?? user?.primaryEmailAddress?.emailAddress}</p>
-                <p className="truncate text-xs text-[var(--muted-foreground)]">{user?.primaryEmailAddress?.emailAddress}</p>
-              </div>
-            </Link>
-            <SignOutButton />
-          </div>
-        </div>
+        {sidebar}
       </aside>
 
-      <div className="lg:pl-64">
-        {/* Navbar : sections principales */}
-        <header className="sticky top-0 z-20 border-b border-[var(--border)] bg-[var(--nav-bg)]">
-          <div className="flex h-20 items-center gap-3 px-4 sm:px-6">
-            <Link to="/" className="lg:hidden"><img src={logoSrc} alt="Mes Outils" className="h-12 w-auto" /></Link>
-            <nav className="flex flex-1 items-center gap-1.5 overflow-x-auto">
-              {navItems.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  end={item.to === "/"}
-                  className={({ isActive }) =>
-                    cn(
-                      "whitespace-nowrap rounded-full px-4 py-2 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500",
-                      isActive ? NAV_ACTIVE : "text-[var(--nav-muted)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-                    )
-                  }
-                >
-                  {item.label}
-                </NavLink>
-              ))}
-            </nav>
-            <Link to="/compte" className="lg:hidden">
-              <UserAvatar name={user?.fullName ?? "Moi"} src={user?.imageUrl} />
-            </Link>
-          </div>
+      {/* Barre supérieure minimale (mobile) : seulement le bouton menu. */}
+      <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-[var(--border)] bg-[var(--nav-bg)] px-4 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileOpen(true)}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-[var(--foreground)] hover:bg-[var(--accent)]"
+          aria-label="Ouvrir le menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <Link to="/"><img src={logoSrc} alt="Mes Outils" className="h-8 w-auto" /></Link>
+        <Link to="/compte" className="ml-auto">
+          <UserAvatar name={user?.fullName ?? "Moi"} src={user?.imageUrl} />
+        </Link>
+      </header>
 
-          {/* Sous-navigation (mobile uniquement — la sidebar la porte en desktop) */}
-          {subnav.length > 0 ? (
-            <div className="flex gap-1 overflow-x-auto border-t border-[var(--border)] px-4 py-2 lg:hidden">
-              {subnav.map((item) => {
-                const isActive = activeV === item.key;
-                return (
-                  <Link
-                    key={item.key}
-                    to={{ pathname: section!.to, search: `?v=${item.key}` }}
-                    className={cn(
-                      "flex shrink-0 items-center gap-2 rounded-full px-3.5 py-1.5 text-sm font-semibold transition",
-                      isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
-                    )}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    {item.label}
-                  </Link>
-                );
-              })}
-            </div>
-          ) : null}
-        </header>
+      {/* Tiroir mobile */}
+      {mobileOpen ? (
+        <div className="lg:hidden">
+          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setMobileOpen(false)} />
+          <aside className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-[var(--border)] bg-[var(--card)]">
+            <button
+              type="button"
+              onClick={() => setMobileOpen(false)}
+              className="absolute right-3 top-4 inline-flex h-9 w-9 items-center justify-center rounded-lg text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
+              aria-label="Fermer le menu"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            {sidebar}
+          </aside>
+        </div>
+      ) : null}
 
-        {isMessagerie ? (
-          <main className="h-[calc(100vh-5rem)] overflow-hidden p-0 sm:p-3 lg:p-4">
-            <Outlet />
-          </main>
-        ) : (
-          <main className="mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
-            <Outlet />
-          </main>
-        )}
-      </div>
+      {isMessagerie ? (
+        <main className="h-[calc(100dvh-3.5rem)] overflow-hidden p-0 sm:p-3 lg:h-screen lg:p-4">
+          <Outlet />
+        </main>
+      ) : (
+        <main className="mx-auto max-w-7xl px-4 py-7 sm:px-6 lg:px-8">
+          <Outlet />
+        </main>
+      )}
     </div>
+  );
+}
+
+function SidebarContent({
+  navItems,
+  logoSrc,
+  theme,
+  setTheme,
+  userName,
+  userEmail,
+  userImage,
+}: {
+  navItems: ReadonlyArray<{ to: string; label: string }>;
+  logoSrc: string;
+  theme: "light" | "dark";
+  setTheme: (t: "light" | "dark") => void;
+  userName: string;
+  userEmail?: string;
+  userImage?: string | null;
+}) {
+  return (
+    <>
+      <div className="flex h-20 items-center overflow-hidden border-b border-[var(--border)] px-5">
+        <Link to="/"><img src={logoSrc} alt="Mes Outils" className="h-16 w-auto" /></Link>
+      </div>
+
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === "/"}
+            className={({ isActive }) =>
+              cn(
+                "flex items-center rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+                isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+              )
+            }
+          >
+            {item.label}
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="space-y-2 border-t border-[var(--border)] p-3">
+        <button
+          type="button"
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[var(--muted-foreground)] transition hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+        >
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {theme === "dark" ? "Mode clair" : "Mode sombre"}
+        </button>
+        <div className="flex items-center gap-1.5">
+          <Link
+            to="/compte"
+            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2 transition hover:bg-[var(--selected)]"
+          >
+            <UserAvatar name={userName} src={userImage} />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-[var(--foreground)]">{userName}</p>
+              <p className="truncate text-xs text-[var(--muted-foreground)]">{userEmail}</p>
+            </div>
+          </Link>
+          <SignOutButton />
+        </div>
+      </div>
+    </>
   );
 }
 

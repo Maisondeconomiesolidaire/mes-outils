@@ -21,6 +21,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
 import { SectionHeader } from "../components/SectionHeader";
+import { SectionTabs } from "../components/ui/SectionTabs";
 import { usePermissionsAccess } from "../components/RequirePermission";
 import { Button } from "../components/ui/Button";
 import { DateRangePicker } from "../components/ui/DateRangePicker";
@@ -51,6 +52,7 @@ export function Actualites() {
   return (
     <div className="space-y-6">
       <SectionHeader title="Espace partage" subtitle="Le fil interne de l'équipe" />
+      <SectionTabs />
       {sub === "publications" ? <Publications canCreate={canCreate} canManage={canManage} /> : null}
       {sub === "evenements" ? <Evenements canCreate={canCreate} /> : null}
       {sub === "bonsplans" ? <BonsPlans canCreate={canCreate} /> : null}

@@ -15,6 +15,7 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { formatDate, formatDateTime } from "../lib/format";
 import { canAccess } from "../lib/permissions";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
+import { SectionTabs } from "../components/ui/SectionTabs";
 
 type Room = {
   _id: Id<"rooms">;
@@ -126,6 +127,7 @@ export function Salles() {
     <>
       <div className="space-y-6">
         <SectionHeader title="Gestion des salles" actions={actions} />
+        <SectionTabs />
         {sub === "rooms" ? (
           rooms.length === 0 ? (
             <EmptyState icon={<DoorOpen className="h-8 w-8" />} title="Aucune salle" description="Ajoutez votre première salle réservable." />
@@ -167,7 +169,8 @@ export function Salles() {
           )
         ) : null}
 
-        {sub === "reservations" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} /> : null}
+        {sub === "reservations" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} mode="agenda" /> : null}
+        {sub === "calendar" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} mode="calendar" /> : null}
       </div>
 
       <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? "Modifier la salle" : "Nouvelle salle"} className="max-w-2xl">
@@ -210,7 +213,7 @@ export function Salles() {
   );
 }
 
-function RoomReservationsAgenda({ rooms }: { rooms: Room[] }) {
+function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda" | "calendar" }) {
   const now = Date.now();
   const reservations = useQuery(api.reservations.listRoomReservations, {
     start: now - 86_400_000,
@@ -231,10 +234,6 @@ function RoomReservationsAgenda({ rooms }: { rooms: Room[] }) {
   if (reservations === undefined) return <FullSpinner label="Chargement du planning..." />;
 
   const upcoming = [...reservations].sort((a, b) => a.start - b.start);
-  if (upcoming.length === 0) {
-    return <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Aucune réservation" description="Le planning des salles à venir s'affichera ici." />;
-  }
-
   const events: CalendarEvent[] = upcoming.map((reservation) => {
     const room = roomName.get(String(reservation.roomId));
     return {
@@ -247,6 +246,21 @@ function RoomReservationsAgenda({ rooms }: { rooms: Room[] }) {
     };
   });
 
+  if (mode === "calendar") {
+    return (
+      <div className="space-y-3">
+        <CalendarBoard events={events} selected={now} />
+        {upcoming.length === 0 ? (
+          <p className="text-sm text-[var(--muted-foreground)]">Aucune réservation de salle sur la période affichée.</p>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (upcoming.length === 0) {
+    return <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Aucune réservation" description="Le planning des salles à venir s'affichera ici." />;
+  }
+
   const byDay = new Map<string, typeof upcoming>();
   for (const reservation of upcoming) {
     const key = formatDate(reservation.start);
@@ -255,7 +269,6 @@ function RoomReservationsAgenda({ rooms }: { rooms: Room[] }) {
 
   return (
     <div className="space-y-5">
-      <CalendarBoard events={events} selected={now} />
       {Array.from(byDay.entries()).map(([day, items]) => (
         <section key={day} className="premium-panel overflow-hidden rounded-2xl">
           <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-2.5">

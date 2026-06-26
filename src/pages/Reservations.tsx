@@ -17,6 +17,7 @@ import { PersonSelect, type Person } from "../components/ui/PersonSelect";
 import { FullSpinner } from "../components/ui/Spinner";
 import { formatDateTime } from "../lib/format";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
+import { SectionTabs } from "../components/ui/SectionTabs";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -51,6 +52,7 @@ export function Reservations() {
         title="Réservations"
         subtitle={tab === "rooms" ? "Salles disponibles sur votre créneau" : tab === "vehicles" ? "Véhicules disponibles sur votre créneau" : "Vos réservations"}
       />
+      <SectionTabs />
       {tab === "mine" ? <MyReservations /> : <BrowseAndBook tab={tab} />}
     </div>
   );
@@ -137,42 +139,43 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
 
   return (
     <div className="space-y-5">
-      <div className="premium-panel rounded-2xl p-4">
+      {/* Calendrier / mini-agenda tout en haut. */}
+      <Agenda tab={tab} range={range} />
+
+      {/* Créneau + filtres regroupés juste en dessous. */}
+      <div className="premium-panel space-y-4 rounded-2xl p-4">
         <Field label="Votre créneau">
           <DateRangePicker value={range} onChange={setRange} withTime />
         </Field>
-      </div>
-
-      <Agenda tab={tab} range={range} />
-
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
-          <Search className="h-4 w-4 text-brand-600" />
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "rooms" ? "Rechercher une salle" : "Rechercher un véhicule"} className="w-full bg-transparent text-sm font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]" />
-        </label>
-        {tab === "vehicles" ? (
-          <>
-            <FilterField label="Places min.">
-              <select value={minSeats} onChange={(e) => setMinSeats(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
-                <option value="">Toutes</option>{[2, 3, 5, 7, 9].map((n) => <option key={n} value={n}>{n}+</option>)}
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
+            <Search className="h-4 w-4 text-brand-600" />
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "rooms" ? "Rechercher une salle" : "Rechercher un véhicule"} className="w-full bg-transparent text-sm font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]" />
+          </label>
+          {tab === "vehicles" ? (
+            <>
+              <FilterField label="Places min.">
+                <select value={minSeats} onChange={(e) => setMinSeats(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
+                  <option value="">Toutes</option>{[2, 3, 5, 7, 9].map((n) => <option key={n} value={n}>{n}+</option>)}
+                </select>
+              </FilterField>
+              <FilterField label="Usage">
+                <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
+                  {([{ key: "all", label: "Tous" }, { key: "pro", label: "Pro" }, { key: "personal", label: "Perso" }] as const).map((o) => (
+                    <button key={o.key} type="button" onClick={() => setUsage(o.key)} className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${usage === o.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}>{o.label}</button>
+                  ))}
+                </div>
+              </FilterField>
+            </>
+          ) : (
+            <FilterField label="Capacité min.">
+              <select value={minCapacity} onChange={(e) => setMinCapacity(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
+                <option value="">Toutes</option>{[2, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n}+ pers.</option>)}
               </select>
             </FilterField>
-            <FilterField label="Usage">
-              <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
-                {([{ key: "all", label: "Tous" }, { key: "pro", label: "Pro" }, { key: "personal", label: "Perso" }] as const).map((o) => (
-                  <button key={o.key} type="button" onClick={() => setUsage(o.key)} className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${usage === o.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}>{o.label}</button>
-                ))}
-              </div>
-            </FilterField>
-          </>
-        ) : (
-          <FilterField label="Capacité min.">
-            <select value={minCapacity} onChange={(e) => setMinCapacity(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
-              <option value="">Toutes</option>{[2, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n}+ pers.</option>)}
-            </select>
-          </FilterField>
-        )}
-        <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{count} disponible{count > 1 ? "s" : ""}</span>
+          )}
+          <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{count} disponible{count > 1 ? "s" : ""}</span>
+        </div>
       </div>
 
       {!hasRange ? (

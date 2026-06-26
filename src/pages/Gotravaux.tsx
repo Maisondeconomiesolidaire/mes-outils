@@ -32,6 +32,8 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { useUpload } from "../lib/useUpload";
 import { formatDate, formatDateTime, relativeUnits } from "../lib/format";
 import { canAccess } from "../lib/permissions";
+import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
+import { SectionTabs } from "../components/ui/SectionTabs";
 
 type VehicleKind = "utilitaire" | "voiture";
 type TaskPriority = "low" | "medium" | "high";
@@ -131,6 +133,7 @@ export function Gotravaux() {
     <>
       <div className="space-y-6">
         <SectionHeader title="Gotravaux" subtitle="Suivi complet de la flotte" actions={actions} />
+        <SectionTabs />
 
         {sub === "vehicles" ? (
           <div className="space-y-5">
@@ -293,7 +296,12 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
         <Field label="Places"><Input type="number" value={form.seats} onChange={(e) => setForm({ ...form, seats: e.target.value })} /></Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Kilométrage"><Input type="number" value={form.odometerKm} onChange={(e) => setForm({ ...form, odometerKm: e.target.value })} /></Field>
+        <Field
+          label="Kilométrage"
+          hint={vehicle?.odometerUpdatedAt ? `Dernier relevé : ${formatDateTime(Date.parse(vehicle.odometerUpdatedAt))}` : "Aucun relevé enregistré."}
+        >
+          <Input type="number" value={form.odometerKm} onChange={(e) => setForm({ ...form, odometerKm: e.target.value })} />
+        </Field>
         <Field label="Attribué à"><Input value={form.assignedTo} onChange={(e) => setForm({ ...form, assignedTo: e.target.value })} /></Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -576,7 +584,7 @@ function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate
   );
 }
 
-type AgendaEntry = { date: number; label: string; sublabel: string; tone: "reservation" | "maintenance" | "pending" };
+type AgendaEntry = { id: string; date: number; endDate?: number; label: string; sublabel: string; tone: "reservation" | "maintenance" | "pending" };
 
 function FleetCalendar({ vehicles, tasks, canSeeReservations }: { vehicles: Vehicle[]; tasks: VehicleTask[]; canSeeReservations: boolean }) {
   const reservations = useQuery(api.reservations.listVehicleReservations, canSeeReservations ? {} : "skip");
@@ -585,11 +593,11 @@ function FleetCalendar({ vehicles, tasks, canSeeReservations }: { vehicles: Vehi
 
   for (const task of tasks) {
     if (task.status === "done" || !task.dueDate) continue;
-    entries.push({ date: task.dueDate, label: `Maintenance · ${task.vehicle?.name ?? vehicleName.get(String(task.vehicleId)) ?? "Véhicule"}`, sublabel: task.title, tone: "maintenance" });
+    entries.push({ id: `task-${task._id}`, date: task.dueDate, endDate: task.endDate, label: `Maintenance · ${task.vehicle?.name ?? vehicleName.get(String(task.vehicleId)) ?? "Véhicule"}`, sublabel: task.title, tone: "maintenance" });
   }
   for (const reservation of reservations ?? []) {
     if (reservation.status === "rejected") continue;
-    entries.push({ date: reservation.start, label: `${reservation.vehicle?.name ?? "Véhicule"} · ${reservation.userName}`, sublabel: reservation.purpose, tone: reservation.status === "approved" ? "reservation" : "pending" });
+    entries.push({ id: `reservation-${reservation._id}`, date: reservation.start, endDate: reservation.end, label: `${reservation.vehicle?.name ?? "Véhicule"} · ${reservation.userName}`, sublabel: reservation.purpose, tone: reservation.status === "approved" ? "reservation" : "pending" });
   }
 
   const upcoming = entries.filter((entry) => entry.date > Date.now() - 86_400_000).sort((a, b) => a.date - b.date);
@@ -599,12 +607,22 @@ function FleetCalendar({ vehicles, tasks, canSeeReservations }: { vehicles: Vehi
     byDay.set(key, [...(byDay.get(key) ?? []), entry]);
   }
 
-  if (upcoming.length === 0) return <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Réservations et maintenances à venir s'afficheront ici." />;
-
   const toneStyles = { reservation: "border-l-brand-500", maintenance: "border-l-amber-500", pending: "border-l-sky-500" };
+  const calendarEvents: CalendarEvent[] = entries.map((entry) => ({
+    id: entry.id,
+    start: entry.date,
+    end: entry.endDate,
+    title: entry.label,
+    subtitle: entry.sublabel,
+    tone: entry.tone === "maintenance" ? "amber" : entry.tone === "pending" ? "sky" : "brand",
+  }));
 
   return (
     <div className="space-y-5">
+      <CalendarBoard events={calendarEvents} selected={Date.now()} />
+      {upcoming.length === 0 ? (
+        <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Réservations et maintenances à venir s'afficheront ici." />
+      ) : null}
       {Array.from(byDay.entries()).map(([day, dayEntries]) => (
         <section key={day} className="premium-panel overflow-hidden rounded-2xl">
           <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-2.5"><p className="text-sm font-bold capitalize text-[var(--foreground)]">{day}</p></div>
@@ -626,15 +644,22 @@ function FleetCalendar({ vehicles, tasks, canSeeReservations }: { vehicles: Vehi
 function VehicleReservationsPanel() {
   const access = usePermissionsAccess();
   const canManage = canAccess(access, "mesoutils:reservations", "manage");
-  const reservations = useQuery(api.reservations.listVehicleReservations, {});
+  const reservations = useQuery(api.reservations.listVehicleReservations, {}) as ReservationItem[] | undefined;
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
+  const [selectedId, setSelectedId] = useState<Id<"vehicleReservations"> | null>(null);
 
   if (reservations === undefined) return <FullSpinner label="Chargement des réservations..." />;
   if (reservations.length === 0) return <EmptyState icon={<CalendarClock className="h-8 w-8" />} title="Aucune réservation" description="Les demandes de réservation apparaîtront ici." />;
 
   const pending = reservations.filter((r) => r.status === "pending");
   const others = reservations.filter((r) => r.status !== "pending");
+  const selected = reservations.find((reservation) => reservation._id === selectedId) ?? null;
+
+  async function decideAndClose(reservationId: Id<"vehicleReservations">, decision: "approved" | "rejected") {
+    await decide({ reservationId, decision });
+    setSelectedId(null);
+  }
 
   return (
     <div className="space-y-6">
@@ -643,7 +668,7 @@ function VehicleReservationsPanel() {
           <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">À traiter ({pending.length})</h2></div>
           <div className="divide-y divide-[var(--border)]">
             {pending.map((r) => (
-              <ReservationRow key={r._id} reservation={r} canManage={canManage} onApprove={() => decide({ reservationId: r._id, decision: "approved" })} onReject={() => decide({ reservationId: r._id, decision: "rejected" })} onCancel={() => cancel({ reservationId: r._id })} />
+              <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancel({ reservationId: r._id })} />
             ))}
           </div>
         </section>
@@ -651,26 +676,44 @@ function VehicleReservationsPanel() {
       <section className="premium-panel overflow-hidden rounded-2xl">
         <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">Historique</h2></div>
         <div className="divide-y divide-[var(--border)]">
-          {others.map((r) => <ReservationRow key={r._id} reservation={r} canManage={canManage} onCancel={() => cancel({ reservationId: r._id })} />)}
+          {others.map((r) => <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancel({ reservationId: r._id })} />)}
         </div>
       </section>
+
+      <ReservationDetailsModal
+        reservation={selected}
+        canManage={canManage}
+        onClose={() => setSelectedId(null)}
+        onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
+        onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
+        onCancel={(reservationId) => {
+          void cancel({ reservationId });
+          setSelectedId(null);
+        }}
+      />
     </div>
   );
 }
 
 type ReservationItem = {
   _id: Id<"vehicleReservations">;
-  vehicle?: { name?: string } | null;
+  vehicle?: { name?: string; brand?: string; model?: string; plate?: string } | null;
   vehiclePhotoUrl?: string | null;
+  clerkId: string;
   userName: string;
   bookedByName?: string;
   purpose: string;
+  usageType?: "pro" | "personal";
+  expectedKm?: number;
   start: number;
   end: number;
   status: "pending" | "approved" | "rejected";
+  decisionNote?: string;
+  decidedBy?: string;
+  decidedAt?: number;
 };
 
-function ReservationRow({ reservation, canManage, onApprove, onReject, onCancel }: { reservation: ReservationItem; canManage: boolean; onApprove?: () => void; onReject?: () => void; onCancel: () => void }) {
+function ReservationRow({ reservation, canManage, onOpen, onCancel }: { reservation: ReservationItem; canManage: boolean; onOpen: () => void; onCancel: () => void }) {
   return (
     <div className="data-row flex flex-wrap items-center gap-4 p-5">
       <div className="h-14 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--muted)]">
@@ -682,14 +725,104 @@ function ReservationRow({ reservation, canManage, onApprove, onReject, onCancel 
         <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}</p>
       </div>
       <div className="flex items-center gap-2">
-        {canManage && reservation.status === "pending" && onApprove && onReject ? (
-          <>
-            <Button size="sm" onClick={onApprove}><Check className="h-4 w-4" />Approuver</Button>
-            <Button variant="outline" size="sm" onClick={onReject}><X className="h-4 w-4" />Refuser</Button>
-          </>
-        ) : null}
+        <Button size="sm" variant={reservation.status === "pending" && canManage ? "primary" : "secondary"} onClick={onOpen}>
+          <Info className="h-4 w-4" />Détails
+        </Button>
         <button type="button" onClick={onCancel} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600" title="Annuler"><Trash2 className="h-4 w-4" /></button>
       </div>
+    </div>
+  );
+}
+
+function ReservationDetailsModal({
+  reservation,
+  canManage,
+  onClose,
+  onApprove,
+  onReject,
+  onCancel,
+}: {
+  reservation: ReservationItem | null;
+  canManage: boolean;
+  onClose: () => void;
+  onApprove: (reservationId: Id<"vehicleReservations">) => Promise<void>;
+  onReject: (reservationId: Id<"vehicleReservations">) => Promise<void>;
+  onCancel: (reservationId: Id<"vehicleReservations">) => void;
+}) {
+  const [saving, setSaving] = useState<"approved" | "rejected" | null>(null);
+  if (!reservation) return null;
+  const current = reservation;
+
+  async function decide(decision: "approved" | "rejected") {
+    setSaving(decision);
+    try {
+      if (decision === "approved") await onApprove(current._id);
+      else await onReject(current._id);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  const usageLabel = reservation.usageType === "personal" ? "Personnel" : reservation.usageType === "pro" ? "Professionnel" : "Non renseigné";
+  const vehicleDetails = [reservation.vehicle?.brand, reservation.vehicle?.model, reservation.vehicle?.plate].filter(Boolean).join(" · ");
+
+  return (
+    <Modal open onClose={onClose} title="Détail de la réservation véhicule" className="max-w-2xl">
+      <div className="grid gap-4">
+        <div className="flex items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-3">
+          <div className="h-16 w-24 shrink-0 overflow-hidden rounded-xl bg-[var(--muted)]">
+            {reservation.vehiclePhotoUrl ? <img src={reservation.vehiclePhotoUrl} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-[var(--muted-foreground)]"><CarFront className="h-6 w-6" /></div>}
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-semibold text-[var(--foreground)]">{reservation.vehicle?.name ?? "Véhicule"}</p>
+              <StatusBadge status={reservation.status} />
+            </div>
+            {vehicleDetails ? <p className="mt-1 truncate text-sm text-[var(--muted-foreground)]">{vehicleDetails}</p> : null}
+          </div>
+        </div>
+
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <DetailItem label="Demandeur" value={reservation.userName} />
+          <DetailItem label="Réservé par" value={reservation.bookedByName ?? reservation.userName} />
+          <DetailItem label="Début" value={formatDateTime(reservation.start)} />
+          <DetailItem label="Fin" value={formatDateTime(reservation.end)} />
+          <DetailItem label="Usage" value={usageLabel} />
+          <DetailItem label="Km estimés" value={reservation.expectedKm !== undefined ? `${reservation.expectedKm.toLocaleString("fr-FR")} km` : "Non renseigné"} />
+        </dl>
+
+        <div className="rounded-xl border border-[var(--border)] p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Motif</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{reservation.purpose}</p>
+        </div>
+
+        {reservation.decidedBy || reservation.decisionNote ? (
+          <div className="rounded-xl bg-[var(--accent)] p-3 text-sm text-[var(--muted-foreground)]">
+            {reservation.decidedBy ? <p>Décision par {reservation.decidedBy}{reservation.decidedAt ? ` · ${formatDateTime(reservation.decidedAt)}` : ""}</p> : null}
+            {reservation.decisionNote ? <p className="mt-1">{reservation.decisionNote}</p> : null}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
+          <Button variant="ghost" onClick={onClose}>Fermer</Button>
+          <Button variant="outline" onClick={() => onCancel(reservation._id)}><Trash2 className="h-4 w-4" />Annuler</Button>
+          {canManage && reservation.status === "pending" ? (
+            <>
+              <Button variant="outline" onClick={() => decide("rejected")} disabled={saving !== null}><X className="h-4 w-4" />{saving === "rejected" ? "Refus..." : "Refuser"}</Button>
+              <Button onClick={() => decide("approved")} disabled={saving !== null}><Check className="h-4 w-4" />{saving === "approved" ? "Approbation..." : "Approuver"}</Button>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] px-3 py-2">
+      <dt className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">{label}</dt>
+      <dd className="mt-1 font-semibold text-[var(--foreground)]">{value}</dd>
     </div>
   );
 }

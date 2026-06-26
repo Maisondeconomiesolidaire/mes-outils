@@ -269,7 +269,7 @@ export const APPS: AppDefinition[] = [
     description: "CRM operationnel: demandes, flotte, tournees, boutique, stock et clients.",
     icon: ShieldCheck,
     logoSrc: "/recyclerie-logo.png",
-    href: import.meta.env.VITE_RECYCAPP_URL ?? "https://mesrecycleries.vercel.app",
+    href: "https://mesrecycleries.vercel.app",
     external: true,
     accent: "from-brand-500 to-brand-600",
   },
@@ -318,7 +318,8 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
   ],
   "/salles": [
     { key: "rooms", label: "Salles", icon: DoorOpen },
-    { key: "reservations", label: "Réservations", icon: CalendarDays },
+    { key: "reservations", label: "Réservations", icon: CalendarClock },
+    { key: "calendar", label: "Calendrier", icon: CalendarDays },
   ],
 };
 
