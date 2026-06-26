@@ -68,7 +68,7 @@ function ConversationList({
         <EmptyState
           icon={<MessagesSquare className="h-7 w-7" />}
           title="Aucune conversation"
-          description="Contactez un collègue depuis un bon plan ou répondez à un message reçu."
+          description="Envoyez votre premier message."
         />
       </div>
     );
