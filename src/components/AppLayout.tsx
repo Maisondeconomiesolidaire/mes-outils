@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useQuery } from "convex/react";
-import { LogOut, Menu, Moon, Sun, X } from "lucide-react";
+import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../../convex/_generated/api";
 
@@ -188,7 +188,7 @@ function SidebarContent({
   userImage,
   currentPath,
 }: {
-  navItems: ReadonlyArray<{ to: string; label: string; badge?: number }>;
+  navItems: ReadonlyArray<{ to: string; label: string; icon?: LucideIcon; badge?: number }>;
   logoSrc: string;
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
@@ -204,22 +204,27 @@ function SidebarContent({
       </div>
 
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.to === "/"}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
-                isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
-              )
-            }
-          >
-            <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            {item.badge ? <NavBadge count={item.badge} active={currentPath === item.to || (item.to !== "/" && currentPath.startsWith(item.to))} /> : null}
-          </NavLink>
-        ))}
+        {navItems.map((item) => {
+          const Icon = item.icon;
+          const active = currentPath === item.to || (item.to !== "/" && currentPath.startsWith(item.to));
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+                  isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                )
+              }
+            >
+              {Icon ? <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-white" : "text-[var(--muted-foreground)]")} /> : null}
+              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {item.badge ? <NavBadge count={item.badge} active={active} /> : null}
+            </NavLink>
+          );
+        })}
       </nav>
 
       <div className="space-y-2 border-t border-[var(--border)] p-3">

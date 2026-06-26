@@ -3,7 +3,10 @@ import {
   CalendarClock,
   CalendarDays,
   CarFront,
+  Bell,
   DoorOpen,
+  Home,
+  MessageCircle,
   Newspaper,
   PartyPopper,
   ShieldCheck,
@@ -287,13 +290,13 @@ export const APPS: AppDefinition[] = [
 ];
 
 export const PORTAL_NAV = [
-  { to: "/", label: "Portail" },
-  { to: "/actualites", label: "Espace partage", pageKey: "mesoutils:actualites" },
-  { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations" },
-  { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux" },
-  { to: "/salles", label: "Salles", pageKey: "mesoutils:salles" },
-  { to: "/messagerie", label: "Messagerie" },
-  { to: "/notifications", label: "Notifications" },
+  { to: "/", label: "Portail", icon: Home },
+  { to: "/actualites", label: "Espace partage", pageKey: "mesoutils:actualites", icon: Newspaper },
+  { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations", icon: CalendarCheck },
+  { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
+  { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
+  { to: "/messagerie", label: "Messagerie", icon: MessageCircle },
+  { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },
 ] as const;
 
