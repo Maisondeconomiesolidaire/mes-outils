@@ -902,4 +902,83 @@ export default defineSchema({
     .index("by_pair", ["pairKey", "createdAt"])
     .index("by_to", ["toClerkId"])
     .index("by_from", ["fromClerkId"]),
+
+  /* ─── Klyd : boutique textile (base de données partagée, tables dédiées) ──── */
+
+  /**
+   * Articles textile de la boutique Klyd. Stockés dans une table dédiée
+   * (et non dans `articles`) : les articles de la recyclerie et ceux de Klyd
+   * restent ainsi totalement séparés, tout en partageant le même déploiement
+   * Convex / la même base de données.
+   */
+  klydeItems: defineTable({
+    photos: v.array(v.id("_storage")),
+    title: v.string(),
+    description: v.string(),
+    category: v.string(),
+    subcategory: v.optional(v.string()),
+    brand: v.optional(v.string()),
+    size: v.optional(v.string()),
+    condition: v.string(),
+    color: v.optional(v.string()),
+    material: v.optional(v.string()),
+    price: v.optional(v.number()),
+    parcelSize: v.optional(v.string()),
+    gender: v.optional(v.string()),
+    style: v.optional(v.string()),
+    location: v.optional(v.string()),
+    sku: v.optional(v.string()),
+    quantity: v.number(),
+    status: v.union(
+      v.literal("stock"),
+      v.literal("en_ligne"),
+      v.literal("en_cours_envoi"),
+      v.literal("envoye"),
+      v.literal("gagne"),
+      // Anciennes valeurs conservées pour les articles créés avant le suivi.
+      v.literal("en_stock"),
+      v.literal("reserve"),
+      v.literal("vendu"),
+      v.literal("archive"),
+    ),
+    aiConfidence: v.optional(v.number()),
+    aiNotes: v.optional(v.string()),
+    trackingNotes: v.optional(v.string()),
+    featured: v.optional(v.boolean()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_status", ["status"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_sku", ["sku"])
+    .index("by_featured", ["featured"]),
+
+  /** Klyde — commandes boutique créées après connexion client. */
+  klydeOrders: defineTable({
+    itemIds: v.array(v.id("klydeItems")),
+    clerkId: v.string(),
+    customer: v.object({
+      firstName: v.string(),
+      lastName: v.string(),
+      email: v.string(),
+      phone: v.string(),
+    }),
+    total: v.number(),
+    status: v.union(v.literal("en_attente_paiement"), v.literal("payee")),
+    paymentMethod: v.literal("card"),
+    note: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_clerkId", ["clerkId"])
+    .index("by_createdAt", ["createdAt"]),
+
+  /** Klyde — wishlist client. */
+  klydeWishlists: defineTable({
+    clerkId: v.string(),
+    itemId: v.id("klydeItems"),
+    createdAt: v.number(),
+  })
+    .index("by_clerkId", ["clerkId"])
+    .index("by_clerkId_itemId", ["clerkId", "itemId"])
+    .index("by_itemId", ["itemId"]),
 });
