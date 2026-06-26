@@ -15,7 +15,7 @@ import { DateRangePicker, type DateRange } from "../components/ui/DateRangePicke
 import { Modal } from "../components/ui/Modal";
 import { PersonSelect, type Person } from "../components/ui/PersonSelect";
 import { FullSpinner } from "../components/ui/Spinner";
-import { formatDate, formatDateTime } from "../lib/format";
+import { formatDateTime } from "../lib/format";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 
 const ROOM_USAGES = [
@@ -313,13 +313,17 @@ function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange })
   const selected = new Date(range.start ?? Date.now());
   const start = new Date(selected);
   start.setHours(0, 0, 0, 0);
-  const end = new Date(selected);
-  end.setHours(23, 59, 59, 999);
   const dayStart = start.getTime();
-  const dayEnd = end.getTime();
-  const roomReservations = useQuery(api.reservations.listRoomReservations, tab === "rooms" ? { start: dayStart, end: dayEnd } : "skip");
+
+  // Fenêtre large autour de la date sélectionnée : l'agenda affiche **toutes**
+  // les réservations (de tous les utilisateurs) sur les jours du calendrier, et
+  // pas seulement celles du jour choisi.
+  const YEAR_MS = 365 * 86_400_000;
+  const windowStart = dayStart - YEAR_MS;
+  const windowEnd = dayStart + YEAR_MS;
+  const roomReservations = useQuery(api.reservations.listRoomReservations, tab === "rooms" ? { start: windowStart, end: windowEnd } : "skip");
   const rooms = useQuery(api.reservations.listRooms, tab === "rooms" ? {} : "skip") as Room[] | undefined;
-  const vehicleBookings = useQuery(api.reservations.listVehicleBookings, tab === "vehicles" ? { start: dayStart, end: dayEnd } : "skip");
+  const vehicleBookings = useQuery(api.reservations.listVehicleBookings, tab === "vehicles" ? { start: windowStart, end: windowEnd } : "skip");
 
   const roomName = useMemo(() => new Map((rooms ?? []).map((r) => [String(r._id), r.name])), [rooms]);
 
@@ -362,7 +366,9 @@ function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange })
     <div className="space-y-3 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
       <div className="flex items-center gap-2 px-1">
         <CalendarCheck className="h-4 w-4 text-brand-600" />
-        <p className="text-sm font-semibold text-[var(--foreground)]">Déjà réservé · {formatDate(dayStart)}</p>
+        <p className="text-sm font-semibold text-[var(--foreground)]">
+          {tab === "rooms" ? "Réservations des salles" : "Réservations des véhicules"}
+        </p>
       </div>
       <CalendarBoard
         selected={dayStart}
@@ -372,9 +378,9 @@ function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange })
         compact
       />
       {details.length === 0 ? (
-        <p className="px-1 pb-1 text-sm text-[var(--muted-foreground)]">Rien de réservé sur cette journée.</p>
+        <p className="px-1 pb-1 text-sm text-[var(--muted-foreground)]">Aucune réservation enregistrée.</p>
       ) : (
-        <p className="px-1 pb-1 text-xs text-[var(--muted-foreground)]">Cliquez sur une réservation pour voir les détails.</p>
+        <p className="px-1 pb-1 text-xs text-[var(--muted-foreground)]">Toutes les réservations s'affichent sur le calendrier. Cliquez sur l'une d'elles pour voir les détails.</p>
       )}
 
       <Modal open={Boolean(active)} onClose={() => setDetailId(null)} title="Détail de la réservation">
