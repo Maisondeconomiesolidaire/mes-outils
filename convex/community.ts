@@ -3,6 +3,7 @@ import { action, env, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireCrmPermission, requireStaff, requireUser } from "./lib";
+import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE_KEY = "mesoutils:actualites";
 
@@ -252,7 +253,7 @@ export const sendMessage = mutation({
     const body = args.body.trim();
     if (!body) throw new Error("Message vide.");
     if (args.toClerkId === identity.subject) throw new Error("Destinataire invalide.");
-    return await ctx.db.insert("directMessages", {
+    const messageId = await ctx.db.insert("directMessages", {
       pairKey: pairKey(identity.subject, args.toClerkId),
       fromClerkId: identity.subject,
       fromName: displayName(identity),
@@ -262,6 +263,27 @@ export const sendMessage = mutation({
       body,
       createdAt: Date.now(),
     });
+    await createMesoutilsNotification(ctx, {
+      recipientClerkId: args.toClerkId,
+      kind: "new_direct_message",
+      title: `Nouveau message de ${displayName(identity)}`,
+      body,
+      actorName: displayName(identity),
+      href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(displayName(identity))}`,
+    });
+    return messageId;
+  },
+});
+
+export const unreadDirectCount = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await requireStaff(ctx);
+    const messages = await ctx.db
+      .query("directMessages")
+      .withIndex("by_to", (q) => q.eq("toClerkId", identity.subject))
+      .collect();
+    return messages.filter((message) => !message.readAt).length;
   },
 });
 

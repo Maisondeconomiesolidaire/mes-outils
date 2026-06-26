@@ -73,6 +73,7 @@ type Post = {
   imageUrls: string[];
   likedByMe: boolean;
   likesCount: number;
+  latestLikeName?: string;
   commentsCount: number;
   comments: Comment[];
 };
@@ -218,11 +219,11 @@ function PostCard({
 
       {post.likesCount > 0 || post.commentsCount > 0 ? (
         <div className="flex items-center justify-between px-4 py-2.5 text-sm text-[var(--muted-foreground)]">
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex min-w-0 items-center gap-1.5">
             {post.likesCount > 0 ? (
               <>
                 <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 text-white"><ThumbsUp className="h-3 w-3 fill-current" /></span>
-                {post.likesCount}
+                <span className="truncate">{likeSummary(post.latestLikeName, post.likesCount)}</span>
               </>
             ) : null}
           </span>
@@ -289,6 +290,13 @@ function PostCard({
       ) : null}
     </article>
   );
+}
+
+function likeSummary(latestLikeName: string | undefined, likesCount: number) {
+  if (likesCount <= 0) return "";
+  const name = latestLikeName ?? "Quelqu'un";
+  if (likesCount === 1) return `${name} a liké ce post`;
+  return `${name} et ${likesCount - 1} autre${likesCount - 1 > 1 ? "s" : ""} personne${likesCount - 1 > 1 ? "s" : ""} ont liké ce post`;
 }
 
 /* ─── Événements ─────────────────────────────────────────────────────────── */

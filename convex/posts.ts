@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireCrmPermission, requireUser } from "./lib";
+import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const POSTS_PAGE_KEY = "mesoutils:actualites";
 
@@ -46,12 +47,18 @@ async function enrichPost(
       canRemove:
         comment.authorClerkId === currentClerkId || post.authorClerkId === currentClerkId,
     }));
+  const latestLike = [...likes].sort((a, b) => b.createdAt - a.createdAt)[0];
+  const latestLikeName =
+    latestLike?.clerkId === currentClerkId
+      ? "Vous"
+      : latestLike?.actorName ?? "Quelqu'un";
 
   return {
     ...post,
     imageUrls,
     comments: commentsWithMeta,
     likesCount: likes.length,
+    latestLikeName: likes.length > 0 ? latestLikeName : undefined,
     likedByMe: likes.some((like) => like.clerkId === currentClerkId),
     commentsCount: commentsWithMeta.length,
     canManage: post.authorClerkId === currentClerkId,
@@ -119,7 +126,7 @@ export const addComment = mutation({
     const body = args.body.trim();
     if (!body) throw new Error("Commentaire vide.");
 
-    return await ctx.db.insert("postComments", {
+    const commentId = await ctx.db.insert("postComments", {
       postId: args.postId,
       authorClerkId: identity.subject,
       authorName: displayName(identity),
@@ -128,6 +135,17 @@ export const addComment = mutation({
       body,
       createdAt: Date.now(),
     });
+    if (post.authorClerkId !== identity.subject) {
+      await createMesoutilsNotification(ctx, {
+        recipientClerkId: post.authorClerkId,
+        kind: "post_commented",
+        title: `${displayName(identity)} a commenté votre post`,
+        body,
+        actorName: displayName(identity),
+        href: "/actualites?v=publications",
+      });
+    }
+    return commentId;
   },
 });
 
@@ -178,8 +196,22 @@ export const toggleLike = mutation({
     await ctx.db.insert("postLikes", {
       postId: args.postId,
       clerkId: identity.subject,
+      actorName: displayName(identity),
+      actorImageUrl:
+        (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
       createdAt: Date.now(),
     });
+    const post = await ctx.db.get(args.postId);
+    if (post && post.authorClerkId !== identity.subject) {
+      await createMesoutilsNotification(ctx, {
+        recipientClerkId: post.authorClerkId,
+        kind: "post_liked",
+        title: `${displayName(identity)} a liké votre post`,
+        body: post.body ? post.body.slice(0, 120) : "Publication avec photo",
+        actorName: displayName(identity),
+        href: "/actualites?v=publications",
+      });
+    }
     return { liked: true };
   },
 });

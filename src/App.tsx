@@ -6,6 +6,7 @@ import { Actualites } from "./pages/Actualites";
 import { Compte } from "./pages/Compte";
 import { Gotravaux } from "./pages/Gotravaux";
 import { Messagerie } from "./pages/Messagerie";
+import { Notifications } from "./pages/Notifications";
 import { Portail } from "./pages/Portail";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
@@ -53,6 +54,14 @@ export default function App() {
           element={
             <RequirePermission>
               <Messagerie />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <RequirePermission>
+              <Notifications />
             </RequirePermission>
           }
         />

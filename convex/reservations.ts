@@ -4,6 +4,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireCrmPermission, requireUser } from "./lib";
 import { vehicleBusyReason } from "./fleet";
+import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE_KEY = "mesoutils:reservations";
 
@@ -176,7 +177,7 @@ export const bookRoom = mutation({
     }
 
     const onBehalf = args.forName?.trim();
-    return await ctx.db.insert("roomReservations", {
+    const reservationId = await ctx.db.insert("roomReservations", {
       roomId: args.roomId,
       clerkId: identity.subject,
       userName: onBehalf || displayName(identity),
@@ -190,6 +191,14 @@ export const bookRoom = mutation({
       notes: args.notes?.trim() || undefined,
       createdAt: Date.now(),
     });
+    await createMesoutilsNotification(ctx, {
+      recipientClerkId: onBehalf ? args.forClerkId : identity.subject,
+      kind: "room_reservation_confirmed",
+      title: "Votre réservation de salle est confirmée",
+      body: `${room.name} · ${args.title.trim()}`,
+      href: "/reservations?v=mine",
+    });
+    return reservationId;
   },
 });
 
@@ -391,6 +400,22 @@ export const listVehicleReservations = query({
   },
 });
 
+export const pendingVehicleReservationsCount = query({
+  args: {},
+  handler: async (ctx) => {
+    try {
+      await requireCrmPermission(ctx, PAGE_KEY, "manage");
+    } catch {
+      return 0;
+    }
+    const pending = await ctx.db
+      .query("vehicleReservations")
+      .withIndex("by_status", (q) => q.eq("status", "pending"))
+      .collect();
+    return pending.length;
+  },
+});
+
 export const requestVehicle = mutation({
   args: {
     vehicleId: v.id("vehicles"),
@@ -486,6 +511,21 @@ export const decideVehicleReservation = mutation({
       decisionNote: args.note?.trim() || undefined,
       decidedBy: displayName(identity),
       decidedAt: Date.now(),
+    });
+
+    const vehicle = await ctx.db.get(reservation.vehicleId);
+    await createMesoutilsNotification(ctx, {
+      recipientClerkId: reservation.bookedForClerkId ?? reservation.clerkId,
+      kind: "vehicle_reservation_decided",
+      title:
+        args.decision === "approved"
+          ? "Votre réservation de véhicule est approuvée"
+          : "Votre réservation de véhicule est refusée",
+      body: [vehicle?.name ?? "Véhicule", reservation.purpose, args.note?.trim()]
+        .filter(Boolean)
+        .join(" · "),
+      actorName: displayName(identity),
+      href: "/reservations?v=mine",
     });
   },
 });

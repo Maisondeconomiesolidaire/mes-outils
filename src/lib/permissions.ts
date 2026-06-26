@@ -293,6 +293,7 @@ export const PORTAL_NAV = [
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux" },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles" },
   { to: "/messagerie", label: "Messagerie" },
+  { to: "/notifications", label: "Notifications" },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },
 ] as const;
 

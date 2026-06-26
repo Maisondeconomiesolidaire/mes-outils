@@ -743,10 +743,31 @@ export default defineSchema({
   postLikes: defineTable({
     postId: v.id("posts"),
     clerkId: v.string(),
+    actorName: v.optional(v.string()),
+    actorImageUrl: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_postId", ["postId"])
     .index("by_post_and_user", ["postId", "clerkId"]),
+
+  mesoutilsNotifications: defineTable({
+    recipientClerkId: v.string(),
+    kind: v.union(
+      v.literal("room_reservation_confirmed"),
+      v.literal("vehicle_reservation_decided"),
+      v.literal("new_direct_message"),
+      v.literal("post_liked"),
+      v.literal("post_commented"),
+    ),
+    title: v.string(),
+    body: v.optional(v.string()),
+    actorName: v.optional(v.string()),
+    href: v.optional(v.string()),
+    read: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_recipient_createdAt", ["recipientClerkId", "createdAt"])
+    .index("by_recipient_read_createdAt", ["recipientClerkId", "read", "createdAt"]),
 
   /** Salles réservables (réservation immédiate si le créneau est libre). */
   rooms: defineTable({

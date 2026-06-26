@@ -1,8 +1,9 @@
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, UserButton, useClerk, useUser } from "@clerk/clerk-react";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { LogOut, Menu, Moon, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { api } from "../../convex/_generated/api";
 
 /** Style "bouton primaire" appliqué à l'élément de navigation actif. */
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
@@ -78,10 +79,14 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     setMobileOpen(false);
   }, [location.pathname, location.search]);
 
-  if (access === undefined) return <FullSpinner label="Chargement du portail..." />;
-
   const hasMesoutilsAccess =
-    access.isAdmin || access.grants.some((grant) => grant.pageKey.startsWith("mesoutils:"));
+    access !== undefined &&
+    (access.isAdmin || access.grants.some((grant) => grant.pageKey.startsWith("mesoutils:")));
+  const unreadMessages = useQuery(api.community.unreadDirectCount, hasMesoutilsAccess ? {} : "skip") ?? 0;
+  const pendingVehicleReservations = useQuery(api.reservations.pendingVehicleReservationsCount, access ? {} : "skip") ?? 0;
+  const unreadNotifications = useQuery(api.mesoutilsNotifications.unreadCount, hasMesoutilsAccess ? {} : "skip") ?? 0;
+
+  if (access === undefined) return <FullSpinner label="Chargement du portail..." />;
 
   const navItems = PORTAL_NAV.filter((item) => {
     if ("adminOnly" in item && item.adminOnly) return access.isAdmin;
@@ -89,8 +94,19 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     // moins un droit « Mes Outils » (ou les admins).
     if (item.to === "/messagerie") return hasMesoutilsAccess;
     if ("pageKey" in item && item.pageKey) return canAccess(access, item.pageKey);
+    if (item.to === "/notifications") return hasMesoutilsAccess;
     return true;
-  });
+  }).map((item) => ({
+    ...item,
+    badge:
+      item.to === "/messagerie"
+        ? unreadMessages
+        : item.to === "/gotravaux"
+          ? pendingVehicleReservations
+          : item.to === "/notifications"
+            ? unreadNotifications
+            : 0,
+  }));
 
   const isMessagerie = location.pathname.startsWith("/messagerie");
   const logoSrc = theme === "dark" ? "/mesoutils-dark.png" : "/mesoutils-light.png";
@@ -104,6 +120,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
       userName={user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"}
       userEmail={user?.primaryEmailAddress?.emailAddress}
       userImage={user?.imageUrl}
+      currentPath={location.pathname}
     />
   );
 
@@ -169,14 +186,16 @@ function SidebarContent({
   userName,
   userEmail,
   userImage,
+  currentPath,
 }: {
-  navItems: ReadonlyArray<{ to: string; label: string }>;
+  navItems: ReadonlyArray<{ to: string; label: string; badge?: number }>;
   logoSrc: string;
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
   userName: string;
   userEmail?: string;
   userImage?: string | null;
+  currentPath: string;
 }) {
   return (
     <>
@@ -192,12 +211,13 @@ function SidebarContent({
             end={item.to === "/"}
             className={({ isActive }) =>
               cn(
-                "flex items-center rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
                 isActive ? NAV_ACTIVE : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
               )
             }
           >
-            {item.label}
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+            {item.badge ? <NavBadge count={item.badge} active={currentPath === item.to || (item.to !== "/" && currentPath.startsWith(item.to))} /> : null}
           </NavLink>
         ))}
       </nav>
@@ -226,6 +246,17 @@ function SidebarContent({
         </div>
       </div>
     </>
+  );
+}
+
+function NavBadge({ count, active }: { count: number; active: boolean }) {
+  return (
+    <span className={cn(
+      "ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 py-0.5 text-[11px] font-black leading-none",
+      active ? "bg-white text-brand-700" : "bg-brand-500 text-white",
+    )}>
+      {count > 99 ? "99+" : count}
+    </span>
   );
 }
 
