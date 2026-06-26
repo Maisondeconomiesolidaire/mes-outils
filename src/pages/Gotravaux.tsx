@@ -373,7 +373,7 @@ function VehicleDetailsModal({ vehicle, onClose, canCreate, canEdit }: { vehicle
   ];
 
   return (
-    <Modal open onClose={onClose} title={vehicle.name} className="max-w-4xl">
+    <Modal open onClose={onClose} title={vehicle.name}>
       <div className="mb-4 flex gap-1 rounded-xl border border-[var(--border)] bg-[var(--accent)] p-1">
         {tabs.map((item) => {
           const Icon = item.icon;
@@ -480,52 +480,58 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {canEdit ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {DOC_CATEGORIES.map((category) => (
-            <label key={category.key} className="flex min-h-24 cursor-pointer flex-col justify-between rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 transition hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10">
-              <span className="flex items-center gap-3">
-                <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--card)] text-brand-600">
-                  <FileText className="h-5 w-5" />
+        <section className="space-y-3">
+          <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Ajouter un document</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {DOC_CATEGORIES.map((category) => (
+              <label key={category.key} className="flex min-h-24 cursor-pointer flex-col justify-between rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 transition hover:border-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10">
+                <span className="flex items-center gap-3">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--card)] text-brand-600">
+                    <FileText className="h-5 w-5" />
+                  </span>
+                  <span className="text-sm font-bold text-[var(--foreground)]">{category.label}</span>
                 </span>
-                <span className="text-sm font-bold text-[var(--foreground)]">{category.label}</span>
-              </span>
-              <span className="mt-3 text-xs font-medium text-[var(--muted-foreground)]">
-                {uploadingCategory === category.key ? "Import en cours..." : "Cliquer pour importer"}
-              </span>
-              <input
-                type="file"
-                className="hidden"
-                onChange={(e) => {
-                  void handleFile(category.key, e.target.files?.[0]);
-                  e.currentTarget.value = "";
-                }}
-                disabled={uploadingCategory !== null}
-              />
-            </label>
-          ))}
-        </div>
+                <span className="mt-3 text-xs font-medium text-[var(--muted-foreground)]">
+                  {uploadingCategory === category.key ? "Import en cours..." : "Cliquer pour importer"}
+                </span>
+                <input
+                  type="file"
+                  className="hidden"
+                  onChange={(e) => {
+                    void handleFile(category.key, e.target.files?.[0]);
+                    e.currentTarget.value = "";
+                  }}
+                  disabled={uploadingCategory !== null}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
       ) : null}
 
-      {documents === undefined ? (
-        <FullSpinner label="Chargement..." />
-      ) : documents.length === 0 ? (
-        <p className="py-6 text-center text-sm text-[var(--muted-foreground)]">Aucun document. Importez carte grise, factures, devis...</p>
-      ) : (
-        <div className="space-y-2">
-          {documents.map((document) => (
-            <div key={document._id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3">
-              <FileText className="h-5 w-5 shrink-0 text-brand-600" />
-              <a href={document.url ?? "#"} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold text-[var(--foreground)] hover:underline">{document.name}</p>
-                <p className="text-xs text-[var(--muted-foreground)]">{DOC_CATEGORIES.find((c) => c.key === document.category)?.label} · {document.uploadedBy}</p>
-              </a>
-              {canEdit ? <button type="button" onClick={() => removeDocument({ documentId: document._id })} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button> : null}
-            </div>
-          ))}
-        </div>
-      )}
+      <section className="space-y-3 border-t border-[var(--border)] pt-5">
+        <h3 className="text-sm font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Documents ajoutés</h3>
+        {documents === undefined ? (
+          <FullSpinner label="Chargement..." />
+        ) : documents.length === 0 ? (
+          <p className="rounded-xl border border-dashed border-[var(--border)] px-4 py-6 text-center text-sm text-[var(--muted-foreground)]">Aucun document ajouté.</p>
+        ) : (
+          <div className="space-y-2">
+            {documents.map((document) => (
+              <div key={document._id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3">
+                <FileText className="h-5 w-5 shrink-0 text-brand-600" />
+                <a href={document.url ?? "#"} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[var(--foreground)] hover:underline">{document.name}</p>
+                  <p className="text-xs text-[var(--muted-foreground)]">{DOC_CATEGORIES.find((c) => c.key === document.category)?.label} · {document.uploadedBy}</p>
+                </a>
+                {canEdit ? <button type="button" onClick={() => removeDocument({ documentId: document._id })} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button> : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -554,7 +560,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Nouvelle maintenance" className="max-w-4xl">
+    <Modal open={open} onClose={onClose} title="Nouvelle maintenance">
       <div className="grid gap-4">
         <Field label="Véhicule" required>
           <VehicleSearchSelect
@@ -789,7 +795,7 @@ function ReservationDetailsModal({
   const vehicleDetails = [reservation.vehicle?.brand, reservation.vehicle?.model, reservation.vehicle?.plate].filter(Boolean).join(" · ");
 
   return (
-    <Modal open onClose={onClose} title="Détail de la réservation véhicule" className="max-w-2xl">
+    <Modal open onClose={onClose} title="Détail de la réservation véhicule">
       <div className="grid gap-4">
         <div className="flex items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-3">
           <div className="h-16 w-24 shrink-0 overflow-hidden rounded-xl bg-[var(--muted)]">

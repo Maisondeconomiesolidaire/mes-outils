@@ -184,7 +184,7 @@ export function Salles() {
         {sub === "calendar" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} mode="calendar" /> : null}
       </div>
 
-      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? "Modifier la salle" : "Nouvelle salle"} className="max-w-2xl">
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)} title={editingId ? "Modifier la salle" : "Nouvelle salle"}>
         <div className="grid gap-4">
           <SinglePhotoUpload value={form.photo} previewUrl={form.photoUrl || null} onChange={(id) => updateRoomForm({ photo: id })} />
           <Field label="Nom" required>

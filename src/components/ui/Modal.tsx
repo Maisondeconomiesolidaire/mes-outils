@@ -14,7 +14,7 @@ export function Modal({
   onClose: () => void;
   title?: string;
   children: ReactNode;
-  /** Largeur max optionnelle (ex. "max-w-2xl"). La largeur reste plafonnée à 80vw. */
+  /** Classes optionnelles pour ajustements ponctuels. La taille de base reste 80vw × 80vh. */
   className?: string;
 }) {
   useEffect(() => {
@@ -37,8 +37,7 @@ export function Modal({
       <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
       <div
         className={cn(
-          // Au plus 80% de l'écran, jamais de débordement horizontal, scroll vertical interne.
-          "relative z-10 flex max-h-[85vh] w-[80vw] max-w-[640px] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-strong)]",
+          "relative z-10 flex h-[80vh] w-[80vw] max-w-[80vw] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-strong)]",
           className,
         )}
       >
