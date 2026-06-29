@@ -2,11 +2,15 @@ import { addDays, format, formatDistanceToNow, startOfHour } from "date-fns";
 import { fr } from "date-fns/locale";
 
 export function formatDate(ts: number) {
-  return format(new Date(ts), "d MMM yyyy", { locale: fr });
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "Date inconnue";
+  return format(date, "d MMM yyyy", { locale: fr });
 }
 
 export function formatDateTime(ts: number) {
-  return format(new Date(ts), "d MMM yyyy 'à' HH:mm", { locale: fr });
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "Date inconnue";
+  return format(date, "d MMM yyyy 'à' HH:mm", { locale: fr });
 }
 
 export function formatRelative(ts: number) {
