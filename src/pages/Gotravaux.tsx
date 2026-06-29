@@ -201,7 +201,16 @@ export function Gotravaux() {
 
         {sub === "tasks" ? <TaskList tasks={tasks} onUpdate={updateTask} canEdit={canEdit} /> : null}
         {sub === "reservations" && canSeeReservations ? <VehicleReservationsPanel /> : null}
-        {sub === "calendar" ? <FleetCalendar vehicles={vehicles} tasks={tasks} canSeeReservations={canSeeReservations} /> : null}
+        {sub === "calendar" ? (
+          <FleetCalendar
+            vehicles={vehicles}
+            tasks={tasks}
+            canSeeReservations={canSeeReservations}
+            canEdit={canEdit}
+            onOpenVehicle={(vehicleId) => setDetailsVehicleId(vehicleId)}
+            onUpdateTask={updateTask}
+          />
+        ) : null}
       </div>
 
       {/* Création d'un véhicule (Informations seulement) */}
@@ -612,27 +621,78 @@ function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate
   );
 }
 
-type AgendaEntry = { id: string; date: number; endDate?: number; label: string; sublabel: string; tone: "reservation" | "maintenance" | "pending" };
+type AgendaEntry =
+  | {
+      id: string;
+      kind: "task";
+      task: VehicleTask;
+      date: number;
+      endDate?: number;
+      label: string;
+      sublabel: string;
+      tone: "maintenance";
+    }
+  | {
+      id: string;
+      kind: "reservation";
+      reservation: ReservationItem;
+      date: number;
+      endDate?: number;
+      label: string;
+      sublabel: string;
+      tone: "reservation" | "pending";
+    };
 
-function FleetCalendar({ vehicles, tasks, canSeeReservations }: { vehicles: Vehicle[]; tasks: VehicleTask[]; canSeeReservations: boolean }) {
-  const reservations = useQuery(api.reservations.listVehicleReservations, canSeeReservations ? {} : "skip");
+function FleetCalendar({
+  vehicles,
+  tasks,
+  canSeeReservations,
+  canEdit,
+  onOpenVehicle,
+  onUpdateTask,
+}: {
+  vehicles: Vehicle[];
+  tasks: VehicleTask[];
+  canSeeReservations: boolean;
+  canEdit: boolean;
+  onOpenVehicle: (vehicleId: Id<"vehicles">) => void;
+  onUpdateTask: ReturnType<typeof useMutation>;
+}) {
+  const access = usePermissionsAccess();
+  const canManageReservations = canAccess(access, "mesoutils:reservations", "manage");
+  const reservations = useQuery(api.reservations.listVehicleReservations, canSeeReservations ? {} : "skip") as ReservationItem[] | undefined;
+  const decide = useMutation(api.reservations.decideVehicleReservation);
+  const cancel = useMutation(api.reservations.cancelVehicleReservation);
+  const [selectedDay, setSelectedDay] = useState(() => startOfDayTimestamp(Date.now()));
+  const [selectedReservationId, setSelectedReservationId] = useState<Id<"vehicleReservations"> | null>(null);
   const entries: AgendaEntry[] = [];
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
   for (const task of tasks) {
     if (task.status === "done" || !task.dueDate) continue;
-    entries.push({ id: `task-${task._id}`, date: task.dueDate, endDate: task.endDate, label: `Maintenance · ${task.vehicle?.name ?? vehicleName.get(String(task.vehicleId)) ?? "Véhicule"}`, sublabel: task.title, tone: "maintenance" });
+    entries.push({
+      id: `task-${task._id}`,
+      kind: "task",
+      task,
+      date: task.dueDate,
+      endDate: task.endDate,
+      label: `Maintenance · ${task.vehicle?.name ?? vehicleName.get(String(task.vehicleId)) ?? "Véhicule"}`,
+      sublabel: task.title,
+      tone: "maintenance",
+    });
   }
   for (const reservation of reservations ?? []) {
     if (reservation.status === "rejected") continue;
-    entries.push({ id: `reservation-${reservation._id}`, date: reservation.start, endDate: reservation.end, label: `${reservation.vehicle?.name ?? "Véhicule"} · ${reservation.userName}`, sublabel: reservation.purpose, tone: reservation.status === "approved" ? "reservation" : "pending" });
-  }
-
-  const upcoming = entries.filter((entry) => entry.date > Date.now() - 86_400_000).sort((a, b) => a.date - b.date);
-  const byDay = new Map<string, AgendaEntry[]>();
-  for (const entry of upcoming) {
-    const key = formatDate(entry.date);
-    byDay.set(key, [...(byDay.get(key) ?? []), entry]);
+    entries.push({
+      id: `reservation-${reservation._id}`,
+      kind: "reservation",
+      reservation,
+      date: reservation.start,
+      endDate: reservation.end,
+      label: `${reservation.vehicle?.name ?? "Véhicule"} · ${reservation.userName}`,
+      sublabel: reservation.purpose,
+      tone: reservation.status === "approved" ? "reservation" : "pending",
+    });
   }
 
   const toneStyles = { reservation: "border-l-brand-500", maintenance: "border-l-amber-500", pending: "border-l-sky-500" };
@@ -644,29 +704,111 @@ function FleetCalendar({ vehicles, tasks, canSeeReservations }: { vehicles: Vehi
     subtitle: entry.sublabel,
     tone: entry.tone === "maintenance" ? "amber" : entry.tone === "pending" ? "sky" : "brand",
   }));
+  const selectedDayEntries = entries
+    .filter((entry) => overlapsDay(entry.date, entry.endDate, selectedDay))
+    .sort((a, b) => a.date - b.date);
+  const selectedReservation = reservations?.find((reservation) => reservation._id === selectedReservationId) ?? null;
+
+  async function decideAndClose(reservationId: Id<"vehicleReservations">, decision: "approved" | "rejected") {
+    await decide({ reservationId, decision });
+    setSelectedReservationId(null);
+  }
+
+  function handleEventClick(id: string, day?: Date) {
+    const entry = entries.find((item) => item.id === id);
+    if (!entry) return;
+    setSelectedDay(startOfDayTimestamp((day ?? new Date(entry.date)).getTime()));
+    if (entry.kind === "reservation") setSelectedReservationId(entry.reservation._id);
+    else onOpenVehicle(entry.task.vehicleId);
+  }
 
   return (
     <div className="space-y-5">
-      <CalendarBoard events={calendarEvents} selected={Date.now()} />
-      {upcoming.length === 0 ? (
-        <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Réservations et maintenances à venir s'afficheront ici." />
-      ) : null}
-      {Array.from(byDay.entries()).map(([day, dayEntries]) => (
-        <section key={day} className="premium-panel overflow-hidden rounded-2xl">
-          <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-2.5"><p className="text-sm font-bold capitalize text-[var(--foreground)]">{day}</p></div>
+      <CalendarBoard
+        events={calendarEvents}
+        selected={selectedDay}
+        onSelect={(day) => setSelectedDay(startOfDayTimestamp(day.getTime()))}
+        onEventClick={handleEventClick}
+      />
+      <section className="premium-panel overflow-hidden rounded-2xl">
+        <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-3">
+          <p className="text-sm font-bold capitalize text-[var(--foreground)]">{formatDate(selectedDay)}</p>
+        </div>
+        {selectedDayEntries.length === 0 ? (
+          <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Aucune réservation ou maintenance sur cette journée." />
+        ) : (
           <div className="divide-y divide-[var(--border)]">
-            {dayEntries.map((entry, index) => (
-              <div key={index} className={`flex items-center gap-4 border-l-4 px-5 py-3 ${toneStyles[entry.tone]}`}>
+            {selectedDayEntries.map((entry) => (
+              <div key={entry.id} className={`flex flex-wrap items-center gap-4 border-l-4 px-5 py-3 ${toneStyles[entry.tone]}`}>
                 <span className="w-14 shrink-0 text-sm font-semibold text-[var(--foreground)]">{formatDateTime(entry.date).slice(-5)}</span>
-                <div className="min-w-0"><p className="truncate text-sm font-semibold text-[var(--foreground)]">{entry.label}</p><p className="truncate text-xs text-[var(--muted-foreground)]">{entry.sublabel}</p></div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[var(--foreground)]">{entry.label}</p>
+                  <p className="truncate text-xs text-[var(--muted-foreground)]">{entry.sublabel}</p>
+                  {entry.endDate ? <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(entry.date)} → {formatDateTime(entry.endDate)}</p> : null}
+                </div>
                 {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente</span> : null}
+                {entry.kind === "reservation" ? (
+                  <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(entry.reservation._id)}>
+                    <Info className="h-4 w-4" />Détails
+                  </Button>
+                ) : (
+                  <div className="ml-auto flex flex-wrap items-center gap-2">
+                    <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.task.vehicleId)}>
+                      <Info className="h-4 w-4" />Véhicule
+                    </Button>
+                    <Select
+                      value={entry.task.status}
+                      disabled={!canEdit}
+                      onChange={(event) =>
+                        onUpdateTask({
+                          taskId: entry.task._id,
+                          status: event.target.value as TaskStatus,
+                          priority: entry.task.priority,
+                        })
+                      }
+                      className="h-9 w-auto"
+                    >
+                      <option value="todo">À faire</option>
+                      <option value="in_progress">En cours</option>
+                      <option value="done">Terminée</option>
+                    </Select>
+                  </div>
+                )}
               </div>
             ))}
           </div>
-        </section>
-      ))}
+        )}
+      </section>
+      <ReservationDetailsModal
+        reservation={selectedReservation}
+        canManage={canManageReservations}
+        onClose={() => setSelectedReservationId(null)}
+        onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
+        onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
+        onCancel={(reservationId) => {
+          void cancel({ reservationId });
+          setSelectedReservationId(null);
+        }}
+      />
     </div>
   );
+}
+
+function startOfDayTimestamp(input: number) {
+  const date = new Date(input);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function endOfDayTimestamp(input: number) {
+  const date = new Date(input);
+  date.setHours(23, 59, 59, 999);
+  return date.getTime();
+}
+
+function overlapsDay(start: number, end: number | undefined, dayStart: number) {
+  const dayEnd = endOfDayTimestamp(dayStart);
+  return start <= dayEnd && (end ?? start) >= dayStart;
 }
 
 function VehicleReservationsPanel() {

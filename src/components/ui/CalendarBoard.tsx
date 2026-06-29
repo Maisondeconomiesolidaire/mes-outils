@@ -1,4 +1,5 @@
 import {
+  addDays,
   addMonths,
   eachDayOfInterval,
   endOfMonth,
@@ -42,7 +43,7 @@ export function CalendarBoard({
   rangeEnd?: number | null;
   events?: CalendarEvent[];
   onSelect?: (day: Date) => void;
-  onEventClick?: (id: string) => void;
+  onEventClick?: (id: string, day?: Date) => void;
   compact?: boolean;
   disabledBefore?: number | null;
 }) {
@@ -59,8 +60,12 @@ export function CalendarBoard({
   const eventsByDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     for (const event of events) {
-      const key = format(new Date(event.start), "yyyy-MM-dd");
-      map.set(key, [...(map.get(key) ?? []), event]);
+      const start = startOfDay(new Date(event.start));
+      const end = startOfDay(new Date(event.end ?? event.start));
+      for (let current = start; current.getTime() <= end.getTime(); current = addDays(current, 1)) {
+        const key = format(current, "yyyy-MM-dd");
+        map.set(key, [...(map.get(key) ?? []), event]);
+      }
     }
     return map;
   }, [events]);
@@ -152,7 +157,7 @@ export function CalendarBoard({
                         onEventClick
                           ? (e) => {
                               e.stopPropagation();
-                              onEventClick(event.id);
+                              onEventClick(event.id, day);
                             }
                           : undefined
                       }
@@ -162,7 +167,7 @@ export function CalendarBoard({
                               if (e.key === "Enter" || e.key === " ") {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                onEventClick(event.id);
+                                onEventClick(event.id, day);
                               }
                             }
                           : undefined
