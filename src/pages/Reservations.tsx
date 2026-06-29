@@ -378,6 +378,7 @@ function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange })
   const calendarEvents: CalendarEvent[] = details.map((entry) => ({
     id: entry.id,
     start: entry.date,
+    end: entry.endDate,
     title: tab === "rooms" ? `${entry.assetName} · ${entry.reason}` : `${entry.assetName} · ${entry.personName}`,
     subtitle: `${formatDateTime(entry.date).slice(-5)}–${formatDateTime(entry.endDate).slice(-5)} · ${entry.personName}`,
     tone: tab === "rooms" ? "brand" : entry.pending ? "amber" : "sky",
