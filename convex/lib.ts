@@ -236,6 +236,33 @@ export async function requireRequestParticipant(
   throw new Error("Accès refusé à cette demande.");
 }
 
+/** Adresse email associée à un compte Clerk (renseignée à la connexion). */
+export async function emailForClerkId(
+  ctx: QueryCtx | MutationCtx,
+  clerkId: string | undefined,
+): Promise<string | null> {
+  if (!clerkId) return null;
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+    .unique();
+  return user?.email ?? null;
+}
+
+/** Compte Clerk associé à une adresse email (renseignée à la connexion). */
+export async function clerkIdForEmail(
+  ctx: QueryCtx | MutationCtx,
+  email: string,
+): Promise<string | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_email", (q) => q.eq("email", normalized))
+    .first();
+  return user?.clerkId ?? null;
+}
+
 type AerogommageItemInput = {
   objectType?: string;
   label?: string;

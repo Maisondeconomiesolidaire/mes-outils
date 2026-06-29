@@ -11,6 +11,7 @@ import { canAccess } from "../lib/permissions";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
+import { Checkbox } from "../components/ui/Checkbox";
 import { DateRangePicker, type DateRange } from "../components/ui/DateRangePicker";
 import { Modal } from "../components/ui/Modal";
 import { PersonSelect, type Person } from "../components/ui/PersonSelect";
@@ -86,6 +87,8 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const [attendees, setAttendees] = useState("");
   const [vehicleUsage, setVehicleUsage] = useState<"pro" | "personal">("pro");
   const [expectedKm, setExpectedKm] = useState("");
+  const [willTransport, setWillTransport] = useState(false);
+  const [transportDetails, setTransportDetails] = useState("");
   const [forUser, setForUser] = useState<Person | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -95,20 +98,24 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     setLabel(""); setNotes(""); setForUser(null); setError(null);
     setRoomUsage(ROOM_USAGES[0]); setAttendees("");
     setExpectedKm("");
+    setWillTransport(false); setTransportDetails("");
     setVehicleUsage(vehicle && vehicle.reservablePro === false && vehicle.reservablePersonal === true ? "personal" : "pro");
   }
   function closeBooking() { setBookingRoom(null); setBookingVehicle(null); }
 
   const attendeesValue = Number(attendees) || 0;
   const overCapacity = Boolean(bookingRoom?.capacity && attendeesValue > bookingRoom.capacity);
-  const canSubmit = Boolean(label.trim()) && (!bookingRoom || (attendeesValue >= 1 && !overCapacity));
+  const canSubmit =
+    Boolean(label.trim()) &&
+    (!bookingRoom || (attendeesValue >= 1 && !overCapacity)) &&
+    (!bookingVehicle || !willTransport || Boolean(transportDetails.trim()));
 
   async function submitBooking() {
     if (!range.start || !range.end || !canSubmit) return;
     setSubmitting(true); setError(null);
     try {
       if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
-      else if (bookingVehicle) await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: expectedKm ? Number(expectedKm) : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
+      else if (bookingVehicle) await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: expectedKm ? Number(expectedKm) : undefined, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
       closeBooking();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Réservation impossible.");
@@ -277,6 +284,23 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                   <span className="text-sm font-medium text-[var(--muted-foreground)]">km</span>
                 </div>
               </Field>
+              <Field label="Transport de matériel">
+                <Checkbox
+                  checked={willTransport}
+                  onChange={setWillTransport}
+                  label="Allez-vous transporter du matériel ou des objets ?"
+                  description="Déménagement, collecte de meubles, charge volumineuse…"
+                />
+              </Field>
+              {willTransport ? (
+                <Field label="Que comptez-vous transporter ?" required>
+                  <Textarea
+                    value={transportDetails}
+                    onChange={(e) => setTransportDetails(e.target.value)}
+                    placeholder="Décrivez ce que vous transporterez (nature, volume, poids approximatif…)."
+                  />
+                </Field>
+              ) : null}
             </>
           ) : null}
 

@@ -875,6 +875,8 @@ type ReservationItem = {
   purpose: string;
   usageType?: "pro" | "personal";
   expectedKm?: number;
+  willTransport?: boolean;
+  transportDetails?: string;
   start: number;
   end: number;
   status: "pending" | "approved" | "rejected";
@@ -964,6 +966,14 @@ function ReservationDetailsModal({
         <div className="rounded-xl border border-[var(--border)] p-3">
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Motif</p>
           <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{reservation.purpose}</p>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] p-3">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Transport de matériel</p>
+          <p className="mt-1 text-sm font-semibold text-[var(--foreground)]">{reservation.willTransport ? "Oui" : "Non"}</p>
+          {reservation.willTransport && reservation.transportDetails ? (
+            <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--muted-foreground)]">{reservation.transportDetails}</p>
+          ) : null}
         </div>
 
         {reservation.decidedBy || reservation.decisionNote ? (

@@ -458,6 +458,7 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
   const createDeal = useMutation(api.community.createDeal);
   const removeDeal = useMutation(api.community.removeDeal);
   const setStatus = useMutation(api.community.setDealStatus);
+  const expressInterest = useMutation(api.community.expressDealInterest);
 
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", dealType: "pret" as DealType, price: "", from: null as number | null, to: null as number | null });
@@ -532,7 +533,14 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
                       <Button variant="ghost" size="sm" onClick={() => removeDeal({ dealId: deal._id })}><Trash2 className="h-4 w-4" /></Button>
                     </>
                   ) : (
-                    <Button size="sm" className="flex-1" onClick={() => navigate(contactDealHref(deal))}>
+                    <Button
+                      size="sm"
+                      className="flex-1"
+                      onClick={() => {
+                        void expressInterest({ dealId: deal._id });
+                        navigate(contactDealHref(deal));
+                      }}
+                    >
                       <MessagesSquare className="h-4 w-4" /> Contacter
                     </Button>
                   )}

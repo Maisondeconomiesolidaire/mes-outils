@@ -25,6 +25,7 @@ import type * as http from "../http.js";
 import type * as klyde from "../klyde.js";
 import type * as lib from "../lib.js";
 import type * as livraison from "../livraison.js";
+import type * as mesoutilsEmails from "../mesoutilsEmails.js";
 import type * as mesoutilsNotifications from "../mesoutilsNotifications.js";
 import type * as messages from "../messages.js";
 import type * as notifications from "../notifications.js";
@@ -64,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   klyde: typeof klyde;
   lib: typeof lib;
   livraison: typeof livraison;
+  mesoutilsEmails: typeof mesoutilsEmails;
   mesoutilsNotifications: typeof mesoutilsNotifications;
   messages: typeof messages;
   notifications: typeof notifications;

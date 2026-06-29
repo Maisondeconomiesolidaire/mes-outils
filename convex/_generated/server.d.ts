@@ -31,6 +31,7 @@ type Env = {
   readonly CONVEX_SITE_URL: string | undefined;
   readonly EMAIL_LOGO_ID: string | undefined;
   readonly MAPBOX_ACCESS_TOKEN: string | undefined;
+  readonly MESOUTILS_APP_URL: string | undefined;
   readonly OPENAI_API_KEY: string | undefined;
   readonly OPENAI_REQUEST_ANALYSIS_MODEL: string | undefined;
   readonly STAFF_EMAILS: string | undefined;

@@ -758,6 +758,8 @@ export default defineSchema({
       v.literal("new_direct_message"),
       v.literal("post_liked"),
       v.literal("post_commented"),
+      v.literal("deal_interest"),
+      v.literal("vehicle_reservation_request"),
     ),
     title: v.string(),
     body: v.optional(v.string()),
@@ -824,6 +826,9 @@ export default defineSchema({
     usageType: v.optional(v.union(v.literal("pro"), v.literal("personal"))),
     // Kilométrage estimé par le demandeur.
     expectedKm: v.optional(v.number()),
+    // Transport d'objets/matériel (déménagement, collecte volumineuse…).
+    willTransport: v.optional(v.boolean()),
+    transportDetails: v.optional(v.string()),
     start: v.number(),
     end: v.number(),
     status: v.union(

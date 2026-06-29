@@ -9,6 +9,7 @@ export default defineApp({
     ADMIN_EMAILS: v.optional(v.string()),
     CLERK_SECRET_KEY: v.optional(v.string()),
     APP_URL: v.optional(v.string()),
+    MESOUTILS_APP_URL: v.optional(v.string()),
     CONVEX_SITE_URL: v.optional(v.string()),
     EMAIL_LOGO_ID: v.optional(v.string()),
     OPENAI_API_KEY: v.optional(v.string()),

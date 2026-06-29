@@ -1,0 +1,225 @@
+import { internalAction } from "./_generated/server";
+import { v } from "convex/values";
+import { esc, resendSend } from "./emails";
+
+// Emails internes de l'application Mes Outils (équipe), distincts des emails
+// clients de la recyclerie (cf. `emails.ts`). Expéditeur et gabarit dédiés.
+const FROM = "Mes Outils <onboarding@resend.dev>";
+const BRAND = "#f1104f";
+
+/** URL publique de l'app Mes Outils, pour les liens des emails (optionnelle). */
+function appUrl() {
+  return (process.env.MESOUTILS_APP_URL ?? "").replace(/\/$/, "");
+}
+
+/** Lien absolu vers une route de l'app, ou `null` si l'URL n'est pas configurée. */
+function appLink(path: string) {
+  const base = appUrl();
+  return base ? `${base}${path}` : null;
+}
+
+/** Bouton « à toute épreuve » (table + lien). Rien si `href` est nul. */
+function button(href: string | null, label: string) {
+  if (!href) return "";
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:0 0 22px;">
+    <tr><td style="border-radius:12px;background:${BRAND};">
+      <a href="${href}" target="_blank" style="display:inline-block;padding:13px 24px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;line-height:1;color:#ffffff;text-decoration:none;border-radius:12px;">${esc(label)}</a>
+    </td></tr>
+  </table>`;
+}
+
+/** Gabarit complet : préheader, titre, intro, contenu, pied de page neutre. */
+function shell(opts: {
+  preheader: string;
+  heading: string;
+  intro: string;
+  contentHtml?: string;
+}) {
+  return `<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+  </head>
+  <body style="margin:0;padding:0;background:#f4f1ec;">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${esc(opts.preheader)}</div>
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f1ec;padding:24px 12px;">
+      <tr><td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #ece9e4;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
+          <tr>
+            <td style="background:linear-gradient(135deg,#ffffff,#fff7ef,#ffe9d6);padding:22px 28px;border-bottom:1px solid #f1ece5;">
+              <span style="font-family:Helvetica,Arial,sans-serif;font-size:17px;font-weight:800;color:${BRAND};">Mes Outils</span>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 32px;">
+              <h1 style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:22px;line-height:1.25;color:#18181b;">${esc(opts.heading)}</h1>
+              <p style="margin:0 0 18px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.65;color:#3f3f46;">${opts.intro}</p>
+              ${opts.contentHtml ?? ""}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:22px 32px;background:#faf8f5;border-top:1px solid #f1ece5;">
+              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#c4c0b8;">
+                Message automatique de l'espace Mes Outils — merci de ne pas répondre à cet email.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`;
+}
+
+/** Encart mettant en avant le détail d'une réservation (créneau). */
+function detailCard(rows: Array<[string, string]>) {
+  const cells = rows
+    .map(
+      ([label, value]) =>
+        `<tr>
+          <td style="padding:6px 0;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#a1a1aa;white-space:nowrap;vertical-align:top;">${esc(label)}</td>
+          <td style="padding:6px 0 6px 16px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;color:#3f3f46;">${esc(value)}</td>
+        </tr>`,
+    )
+    .join("");
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;padding:16px 18px;background:#faf8f5;border:1px solid #ece9e4;border-radius:14px;">${cells}</table>`;
+}
+
+const dayFmt = new Intl.DateTimeFormat("fr-FR", {
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  timeZone: "Europe/Paris",
+});
+const timeFmt = new Intl.DateTimeFormat("fr-FR", {
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "Europe/Paris",
+});
+
+/** Créneau lisible : « lundi 30 juin, 09:00 – 11:00 » (ou sur deux jours). */
+function formatRange(start: number, end: number) {
+  const startDay = dayFmt.format(new Date(start));
+  const endDay = dayFmt.format(new Date(end));
+  if (startDay === endDay) {
+    return `${startDay}, ${timeFmt.format(new Date(start))} – ${timeFmt.format(new Date(end))}`;
+  }
+  return `${startDay} ${timeFmt.format(new Date(start))} → ${endDay} ${timeFmt.format(new Date(end))}`;
+}
+
+// ─── Réservations (salles & véhicules) ───────────────────────────────────────
+
+type ReservationState =
+  | "submitted"
+  | "confirmed"
+  | "approved"
+  | "rejected"
+  | "cancelled";
+
+const STATE_COPY: Record<
+  ReservationState,
+  { heading: string; subject: string; intro: (asset: string) => string }
+> = {
+  submitted: {
+    heading: "Votre réservation a bien été soumise ✅",
+    subject: "Réservation soumise",
+    intro: (asset) =>
+      `Votre demande de réservation de ${asset} a bien été enregistrée. Elle est en attente de validation par un responsable — vous serez prévenu·e dès qu'une décision est prise.`,
+  },
+  confirmed: {
+    heading: "Votre réservation est confirmée 🎉",
+    subject: "Réservation confirmée",
+    intro: (asset) =>
+      `Votre réservation de ${asset} est confirmée. Voici le récapitulatif du créneau réservé.`,
+  },
+  approved: {
+    heading: "Votre réservation a été validée 🎉",
+    subject: "Réservation validée",
+    intro: (asset) =>
+      `Bonne nouvelle : votre réservation de ${asset} a été validée par un responsable.`,
+  },
+  rejected: {
+    heading: "Votre réservation a été refusée",
+    subject: "Réservation refusée",
+    intro: (asset) =>
+      `Votre réservation de ${asset} n'a pas pu être validée. N'hésitez pas à proposer un autre créneau.`,
+  },
+  cancelled: {
+    heading: "Votre réservation a été annulée",
+    subject: "Réservation annulée",
+    intro: (asset) => `Votre réservation de ${asset} a été annulée.`,
+  },
+};
+
+export const sendReservationEmail = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    assetKind: v.union(v.literal("room"), v.literal("vehicle")),
+    assetName: v.string(),
+    label: v.string(),
+    start: v.number(),
+    end: v.number(),
+    state: v.union(
+      v.literal("submitted"),
+      v.literal("confirmed"),
+      v.literal("approved"),
+      v.literal("rejected"),
+      v.literal("cancelled"),
+    ),
+    note: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const assetWord = args.assetKind === "room" ? "salle" : "véhicule";
+    const copy = STATE_COPY[args.state];
+    const rows: Array<[string, string]> = [
+      [args.assetKind === "room" ? "Salle" : "Véhicule", args.assetName],
+      [args.assetKind === "room" ? "Objet" : "Motif", args.label],
+      ["Créneau", formatRange(args.start, args.end)],
+    ];
+    if (args.note) rows.push(["Note", args.note]);
+
+    const html = shell({
+      preheader: copy.intro(`${assetWord} « ${args.assetName} »`),
+      heading: copy.heading,
+      intro: `Bonjour ${esc(args.name)},<br/><br/>${esc(copy.intro(`${assetWord} « ${args.assetName} »`))}`,
+      contentHtml: `
+        ${detailCard(rows)}
+        ${button(appLink("/reservations?v=mine"), "Voir mes réservations")}
+      `,
+    });
+    await resendSend(
+      args.email,
+      `${copy.subject} · ${args.assetName}`,
+      html,
+      FROM,
+    );
+  },
+});
+
+// ─── Bons plans ──────────────────────────────────────────────────────────────
+
+export const sendDealInterestEmail = internalAction({
+  args: {
+    email: v.string(),
+    authorName: v.string(),
+    interestedName: v.string(),
+    dealTitle: v.string(),
+  },
+  handler: async (_ctx, { email, authorName, interestedName, dealTitle }) => {
+    const html = shell({
+      preheader: `${interestedName} est intéressé·e par votre annonce « ${dealTitle} ».`,
+      heading: `${esc(interestedName)} est intéressé·e par votre annonce 🎯`,
+      intro: `Bonjour ${esc(authorName)},<br/><br/><strong>${esc(interestedName)}</strong> s'intéresse à votre bon plan <strong>« ${esc(dealTitle)} »</strong>. Vous pouvez lui répondre directement depuis la messagerie de l'équipe.`,
+      contentHtml: button(appLink("/messagerie"), "Ouvrir la messagerie"),
+    });
+    await resendSend(
+      email,
+      `${interestedName} est intéressé·e par « ${dealTitle} »`,
+      html,
+      FROM,
+    );
+  },
+});

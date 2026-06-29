@@ -2,11 +2,22 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
+import { internal } from "./_generated/api";
+import {
+  clerkIdForEmail,
+  emailForClerkId,
+  hasCrmPermission,
+  requireCrmPermission,
+  requireUser,
+} from "./lib";
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE_KEY = "mesoutils:reservations";
+
+// Destinataire unique des notifications « nouvelle demande de réservation
+// véhicule » : seul ce compte est prévenu de chaque demande.
+const VEHICLE_REQUEST_NOTIFY_EMAIL = "f.henry@eco-solidaire.fr";
 
 function ensureRange(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
@@ -198,6 +209,21 @@ export const bookRoom = mutation({
       body: `${room.name} · ${args.title.trim()}`,
       href: "/reservations?v=mine",
     });
+    const email = onBehalf
+      ? await emailForClerkId(ctx, args.forClerkId)
+      : identity.email ?? null;
+    if (email) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
+        email,
+        name: onBehalf || displayName(identity),
+        assetKind: "room",
+        assetName: room.name,
+        label: args.title.trim(),
+        start: args.start,
+        end: args.end,
+        state: "confirmed",
+      });
+    }
     return reservationId;
   },
 });
@@ -215,7 +241,24 @@ export const cancelRoomReservation = mutation({
     if (reservation.clerkId !== identity.subject && !isManager) {
       throw new Error("Annulation non autorisée.");
     }
+    const room = await ctx.db.get(reservation.roomId);
     await ctx.db.delete(args.reservationId);
+    const email = await emailForClerkId(
+      ctx,
+      reservation.bookedForClerkId ?? reservation.clerkId,
+    );
+    if (email) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
+        email,
+        name: reservation.userName,
+        assetKind: "room",
+        assetName: room?.name ?? "Salle",
+        label: reservation.title,
+        start: reservation.start,
+        end: reservation.end,
+        state: "cancelled",
+      });
+    }
   },
 });
 
@@ -408,6 +451,8 @@ export const requestVehicle = mutation({
     purpose: v.string(),
     usageType: v.optional(v.union(v.literal("pro"), v.literal("personal"))),
     expectedKm: v.optional(v.number()),
+    willTransport: v.optional(v.boolean()),
+    transportDetails: v.optional(v.string()),
     start: v.number(),
     end: v.number(),
     forClerkId: v.optional(v.string()),
@@ -441,7 +486,11 @@ export const requestVehicle = mutation({
     }
 
     const onBehalf = args.forName?.trim();
-    return await ctx.db.insert("vehicleReservations", {
+    const willTransport = args.willTransport ?? false;
+    const transportDetails = willTransport
+      ? args.transportDetails?.trim() || undefined
+      : undefined;
+    const reservationId = await ctx.db.insert("vehicleReservations", {
       vehicleId: args.vehicleId,
       clerkId: identity.subject,
       userName: onBehalf || displayName(identity),
@@ -450,11 +499,46 @@ export const requestVehicle = mutation({
       purpose: args.purpose.trim(),
       usageType: args.usageType,
       expectedKm: args.expectedKm,
+      willTransport,
+      transportDetails,
       start: args.start,
       end: args.end,
       status: "pending",
       createdAt: Date.now(),
     });
+
+    // Une seule personne est notifiée de chaque demande de réservation véhicule.
+    const requesterName = onBehalf || displayName(identity);
+    const notifyClerkId = await clerkIdForEmail(ctx, VEHICLE_REQUEST_NOTIFY_EMAIL);
+    if (notifyClerkId && notifyClerkId !== identity.subject) {
+      await createMesoutilsNotification(ctx, {
+        recipientClerkId: notifyClerkId,
+        kind: "vehicle_reservation_request",
+        title: "Nouvelle demande de réservation de véhicule",
+        body: [vehicle.name, requesterName, args.purpose.trim()]
+          .filter(Boolean)
+          .join(" · "),
+        actorName: displayName(identity),
+        href: "/gotravaux?v=reservations",
+      });
+    }
+
+    const email = onBehalf
+      ? await emailForClerkId(ctx, args.forClerkId)
+      : identity.email ?? null;
+    if (email) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
+        email,
+        name: onBehalf || displayName(identity),
+        assetKind: "vehicle",
+        assetName: vehicle.name,
+        label: args.purpose.trim(),
+        start: args.start,
+        end: args.end,
+        state: "submitted",
+      });
+    }
+    return reservationId;
   },
 });
 
@@ -513,6 +597,23 @@ export const decideVehicleReservation = mutation({
       actorName: displayName(identity),
       href: "/reservations?v=mine",
     });
+    const email = await emailForClerkId(
+      ctx,
+      reservation.bookedForClerkId ?? reservation.clerkId,
+    );
+    if (email) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
+        email,
+        name: reservation.userName,
+        assetKind: "vehicle",
+        assetName: vehicle?.name ?? "Véhicule",
+        label: reservation.purpose,
+        start: reservation.start,
+        end: reservation.end,
+        state: args.decision === "approved" ? "approved" : "rejected",
+        note: args.note?.trim() || undefined,
+      });
+    }
   },
 });
 
@@ -529,6 +630,23 @@ export const cancelVehicleReservation = mutation({
     if (reservation.clerkId !== identity.subject && !canManage) {
       throw new Error("Annulation non autorisée.");
     }
+    const vehicle = await ctx.db.get(reservation.vehicleId);
     await ctx.db.delete(args.reservationId);
+    const email = await emailForClerkId(
+      ctx,
+      reservation.bookedForClerkId ?? reservation.clerkId,
+    );
+    if (email) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
+        email,
+        name: reservation.userName,
+        assetKind: "vehicle",
+        assetName: vehicle?.name ?? "Véhicule",
+        label: reservation.purpose,
+        start: reservation.start,
+        end: reservation.end,
+        state: "cancelled",
+      });
+    }
   },
 });

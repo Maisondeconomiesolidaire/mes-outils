@@ -2,7 +2,14 @@ import { v } from "convex/values";
 import { action, env, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { hasCrmPermission, requireCrmPermission, requireStaff, requireUser } from "./lib";
+import { internal } from "./_generated/api";
+import {
+  emailForClerkId,
+  hasCrmPermission,
+  requireCrmPermission,
+  requireStaff,
+  requireUser,
+} from "./lib";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE_KEY = "mesoutils:actualites";
@@ -180,6 +187,41 @@ export const removeDeal = mutation({
       throw new Error("Suppression non autorisée.");
     }
     await ctx.db.delete(args.dealId);
+  },
+});
+
+/**
+ * Une personne se déclare intéressée par un bon plan : notifie l'auteur dans
+ * l'app et lui envoie un email « (nom) est intéressé·e par votre annonce ».
+ */
+export const expressDealInterest = mutation({
+  args: { dealId: v.id("dealPosts") },
+  handler: async (ctx, args) => {
+    const identity = await requireStaff(ctx);
+    const deal = await ctx.db.get(args.dealId);
+    if (!deal) throw new Error("Bon plan introuvable.");
+    // On ne se notifie pas soi-même.
+    if (deal.authorClerkId === identity.subject) return;
+
+    const interestedName = displayName(identity);
+    await createMesoutilsNotification(ctx, {
+      recipientClerkId: deal.authorClerkId,
+      kind: "deal_interest",
+      title: `${interestedName} est intéressé·e par votre annonce`,
+      body: deal.title,
+      actorName: interestedName,
+      href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(interestedName)}`,
+    });
+
+    const email = await emailForClerkId(ctx, deal.authorClerkId);
+    if (email) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendDealInterestEmail, {
+        email,
+        authorName: deal.authorName,
+        interestedName,
+        dealTitle: deal.title,
+      });
+    }
   },
 });
 

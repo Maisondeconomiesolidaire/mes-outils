@@ -44,7 +44,7 @@ function typeLabel(type: string) {
   return TYPE_LABELS[type] ?? "Demande";
 }
 
-function esc(value: string) {
+export function esc(value: string) {
   return value.replace(
     /[&<>"]/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!,
@@ -188,7 +188,12 @@ function shell(opts: {
 </html>`;
 }
 
-async function resendSend(to: string, subject: string, html: string) {
+export async function resendSend(
+  to: string,
+  subject: string,
+  html: string,
+  from: string = FROM,
+) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     console.warn("RESEND_API_KEY non configurée — email ignoré.");
@@ -203,7 +208,7 @@ async function resendSend(to: string, subject: string, html: string) {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ from: FROM, to: [email], subject, html }),
+    body: JSON.stringify({ from, to: [email], subject, html }),
   });
 
   if (!response.ok) {
