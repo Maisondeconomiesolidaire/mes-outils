@@ -1,7 +1,8 @@
 import { format, isSameDay, setHours, setMinutes } from "date-fns";
 import { fr } from "date-fns/locale";
 import { ArrowLeft, ArrowRight, CalendarDays, Check, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
 import { CalendarBoard } from "./CalendarBoard";
 
@@ -37,9 +38,6 @@ export function DateRangePicker({
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<WizardStep>("startDate");
   const [maxVisitedStep, setMaxVisitedStep] = useState(0);
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({ top: 0, left: 0, width: 520, mobile: false });
 
   const [startDay, setStartDay] = useState<Date | null>(value.start ? new Date(value.start) : null);
   const [endDay, setEndDay] = useState<Date | null>(value.end ? new Date(value.end) : null);
@@ -65,29 +63,13 @@ export function DateRangePicker({
     }
   }, [value.start, value.end]);
 
-  useLayoutEffect(() => {
-    if (!open || !buttonRef.current) return;
-    const rect = buttonRef.current.getBoundingClientRect();
-    const mobile = window.innerWidth < 640;
-    if (mobile) {
-      setPosition({ top: 0, left: 0, width: window.innerWidth, mobile: true });
-      return;
-    }
-    const width = Math.min(520, window.innerWidth - 24);
-    const left = Math.min(Math.max(12, rect.left), window.innerWidth - width - 12);
-    const top = Math.min(rect.bottom + 8, window.innerHeight - 620);
-    setPosition({ top: Math.max(12, top), left, width, mobile: false });
-  }, [open]);
-
   useEffect(() => {
     if (!open) return;
-    function onClick(event: MouseEvent) {
-      const target = event.target as Node;
-      if (buttonRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
-      setOpen(false);
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
     }
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [open]);
 
   function buildRange(nextStartDay = startDay, nextEndDay = endDay, nextStartTime = startTime, nextEndTime = endTime) {
@@ -151,7 +133,6 @@ export function DateRangePicker({
   return (
     <div className="relative">
       <button
-        ref={buttonRef}
         type="button"
         onClick={() => {
           setOpen((current) => !current);
@@ -168,18 +149,17 @@ export function DateRangePicker({
         <span className={value.start ? "" : "text-[var(--muted-foreground)]"}>{label}</span>
       </button>
 
-      {open ? (
+      {open ? createPortal(
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 p-3 backdrop-blur-sm sm:p-6">
+          <button
+            type="button"
+            className="absolute inset-0 cursor-default"
+            onClick={() => setOpen(false)}
+            aria-label="Fermer le sélecteur"
+          />
         <div
-          ref={popoverRef}
-          className={cn(
-            "fixed z-[80] overflow-hidden border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-strong)]",
-            position.mobile ? "inset-x-0 bottom-0 max-h-[92vh] overflow-y-auto rounded-t-3xl" : "rounded-3xl",
-          )}
-          style={
-            position.mobile
-              ? { width: "100%" }
-              : { top: position.top, left: position.left, width: position.width }
-          }
+          className="relative z-10 max-h-[92vh] w-full max-w-[520px] overflow-y-auto rounded-3xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-strong)]"
+          onClick={(event) => event.stopPropagation()}
         >
           <div className="border-b border-[var(--border)] p-4">
             <div className="flex items-start justify-between gap-3">
@@ -336,6 +316,8 @@ export function DateRangePicker({
             ) : null}
           </div>
         </div>
+        </div>,
+        document.body,
       ) : null}
     </div>
   );
