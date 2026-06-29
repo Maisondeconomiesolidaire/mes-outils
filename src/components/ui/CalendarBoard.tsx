@@ -35,6 +35,7 @@ export function CalendarBoard({
   onSelect,
   onEventClick,
   compact = false,
+  disabledBefore,
 }: {
   selected?: number | null;
   rangeStart?: number | null;
@@ -43,6 +44,7 @@ export function CalendarBoard({
   onSelect?: (day: Date) => void;
   onEventClick?: (id: string) => void;
   compact?: boolean;
+  disabledBefore?: number | null;
 }) {
   const [viewMonth, setViewMonth] = useState(() => new Date(selected ?? rangeStart ?? Date.now()));
   const days = useMemo(
@@ -102,6 +104,10 @@ export function CalendarBoard({
           const dayEvents = eventsByDay.get(dayKey) ?? [];
           const outside = !isSameMonth(day, viewMonth);
           const isSelected = selected ? isSameDay(day, new Date(selected)) : false;
+          const disabled =
+            disabledBefore !== undefined && disabledBefore !== null
+              ? day.getTime() < startOfDay(new Date(disabledBefore)).getTime()
+              : false;
           const inRange =
             rangeStart && rangeEnd
               ? isWithinInterval(day, {
@@ -114,13 +120,17 @@ export function CalendarBoard({
             <button
               key={day.toISOString()}
               type="button"
-              onClick={() => onSelect?.(day)}
+              onClick={() => {
+                if (!disabled) onSelect?.(day);
+              }}
+              disabled={disabled}
               className={cn(
                 "min-h-16 bg-[var(--card)] p-1.5 text-left transition hover:bg-[var(--accent)]",
                 compact ? "min-h-12" : "sm:min-h-24",
                 outside && "text-[var(--muted-foreground)]/45",
+                disabled && "cursor-not-allowed opacity-35 hover:bg-[var(--card)]",
                 isSelected && "bg-[var(--selected)] ring-2 ring-inset ring-brand-500",
-                !isSelected && inRange && "bg-[var(--selected)]",
+                !disabled && !isSelected && inRange && "bg-[var(--selected)]",
               )}
             >
               <span
@@ -179,6 +189,10 @@ export function CalendarBoard({
       </div>
     </div>
   );
+}
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
 
 function toneClass(tone: CalendarEvent["tone"] = "brand") {

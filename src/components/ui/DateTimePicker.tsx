@@ -90,12 +90,18 @@ export function DateTimePicker({
       >
         <CalendarDays className="h-4 w-4 shrink-0 text-brand-600" />
         <span className={selected ? "" : "text-[var(--muted-foreground)]"}>
-          {selected ? format(selected, "EEE d MMM yyyy 'à' HH:mm", { locale: fr }) : placeholder}
+          {selected ? format(selected, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr }) : placeholder}
         </span>
       </button>
 
       {open ? (
         <div className="absolute left-0 z-50 mt-2 w-[20rem] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-strong)]">
+          <div className="border-b border-[var(--border)] bg-[var(--accent)] px-3 py-3">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Date et heure</p>
+            <p className="mt-1 text-sm font-semibold text-[var(--foreground)]">
+              {selected ? format(selected, "EEEE d MMMM yyyy 'à' HH:mm", { locale: fr }) : "À définir"}
+            </p>
+          </div>
           <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2.5">
             <button
               type="button"

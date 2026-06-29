@@ -64,7 +64,7 @@ export function DatePicker({
       >
         <CalendarDays className="h-4 w-4 shrink-0 text-brand-600" />
         <span className={cn("flex-1", !selected && "text-[var(--muted-foreground)]")}>
-          {selected ? format(selected, "d MMM yyyy", { locale: fr }) : placeholder}
+          {selected ? format(selected, "EEEE d MMMM yyyy", { locale: fr }) : placeholder}
         </span>
         {selected ? (
           <span
@@ -80,6 +80,12 @@ export function DatePicker({
 
       {open ? (
         <div className="absolute left-0 z-50 mt-2 w-72 rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3 shadow-[var(--shadow-strong)]">
+          <div className="mb-3 rounded-xl border border-[var(--border)] bg-[var(--accent)] px-3 py-2">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Date</p>
+            <p className="mt-1 text-sm font-semibold text-[var(--foreground)]">
+              {selected ? format(selected, "EEEE d MMMM yyyy", { locale: fr }) : "À définir"}
+            </p>
+          </div>
           <div className="mb-2 flex items-center justify-between">
             <button type="button" onClick={() => setViewMonth((c) => subMonths(c, 1))} className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)]"><ChevronLeft className="h-4 w-4" /></button>
             <span className="text-sm font-semibold capitalize text-[var(--foreground)]">{format(viewMonth, "MMMM yyyy", { locale: fr })}</span>
