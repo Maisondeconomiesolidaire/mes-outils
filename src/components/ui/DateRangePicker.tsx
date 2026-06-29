@@ -1,6 +1,6 @@
 import { format, isSameDay, setHours, setMinutes } from "date-fns";
 import { fr } from "date-fns/locale";
-import { ArrowRight, CalendarDays, Check, Clock, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Clock, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 import { CalendarBoard } from "./CalendarBoard";
@@ -14,7 +14,14 @@ const TIME_OPTIONS = Array.from({ length: 24 }, (_, index) => {
 
 export type DateRange = { start: number | null; end: number | null };
 type TimeValue = { h: number; m: number };
-type ActiveField = "start" | "end";
+type WizardStep = "startDate" | "startTime" | "endDate" | "endTime";
+
+const WIZARD_STEPS: Array<{ key: WizardStep; label: string }> = [
+  { key: "startDate", label: "Date début" },
+  { key: "startTime", label: "Heure début" },
+  { key: "endDate", label: "Date fin" },
+  { key: "endTime", label: "Heure fin" },
+];
 
 export function DateRangePicker({
   value,
@@ -28,7 +35,7 @@ export function DateRangePicker({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [activeField, setActiveField] = useState<ActiveField>("start");
+  const [step, setStep] = useState<WizardStep>("startDate");
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 780, mobile: false });
@@ -110,12 +117,11 @@ export function DateRangePicker({
   }
 
   function selectDay(day: Date) {
-    if (activeField === "start") {
+    if (step === "startDate") {
       setStartDay(day);
       const nextEndDay = !endDay || day.getTime() > endDay.getTime() ? day : endDay;
       if (nextEndDay !== endDay) setEndDay(nextEndDay);
       emit(day, nextEndDay, startTime, endTime);
-      setActiveField("end");
       return;
     }
     if (startDay && day.getTime() < startOfDate(startDay).getTime()) return;
@@ -127,7 +133,6 @@ export function DateRangePicker({
     setStartTime(time);
     const nextEndDay = endDay ?? startDay;
     if (startDay && nextEndDay) emit(startDay, nextEndDay, time, endTime);
-    setActiveField("end");
   }
 
   function selectEndTime(time: TimeValue) {
@@ -139,7 +144,11 @@ export function DateRangePicker({
   const label = value.start && value.end ? rangeLabel(value, withTime) : placeholder;
   const preview = buildRange().range;
   const duration = preview.start && preview.end ? durationLabel(preview.start, preview.end, withTime) : null;
-  const activeTitle = activeField === "start" ? "Sélectionnez le début" : "Sélectionnez la fin";
+  const currentStepIndex = WIZARD_STEPS.findIndex((item) => item.key === step);
+  const activeTitle = stepTitle(step);
+  const editingStart = step === "startDate" || step === "startTime";
+  const canGoNext = canContinue(step, startDay, endDay);
+  const canValidate = Boolean(value.start && value.end);
 
   return (
     <div className="relative">
@@ -148,7 +157,7 @@ export function DateRangePicker({
         type="button"
         onClick={() => {
           setOpen((current) => !current);
-          setActiveField("start");
+          setStep("startDate");
         }}
         className={cn(
           "flex h-11 w-full items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-left text-sm font-medium text-[var(--foreground)] transition",
@@ -179,82 +188,167 @@ export function DateRangePicker({
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">Quand ?</p>
                 <p className="mt-1 text-base font-semibold text-[var(--foreground)]">{activeTitle}</p>
               </div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-[var(--accent)] px-3 py-1.5 text-xs font-bold text-[var(--muted-foreground)]">
-                <span className={cn("inline-flex h-5 min-w-5 items-center justify-center rounded-full", activeField === "start" ? "bg-brand-500 text-white" : "bg-[var(--selected)] text-[var(--selected-foreground)]")}>
-                  {activeField === "start" ? "●" : "✓"}
-                </span>
-                Début
-                <ArrowRight className="h-3.5 w-3.5" />
-                <span className={cn("inline-flex h-5 min-w-5 items-center justify-center rounded-full", activeField === "end" ? "bg-brand-500 text-white" : "bg-[var(--card)] text-[var(--muted-foreground)]")}>
-                  {activeField === "end" ? "●" : "○"}
-                </span>
-                Fin
+              <div className="inline-flex rounded-full bg-[var(--accent)] p-1 text-xs font-bold text-[var(--muted-foreground)]">
+                {WIZARD_STEPS.map((item, index) => (
+                  <span
+                    key={item.key}
+                    className={cn(
+                      "inline-flex h-7 min-w-7 items-center justify-center rounded-full px-2",
+                      item.key === step && "bg-brand-500 text-white",
+                      index < currentStepIndex && "bg-[var(--selected)] text-[var(--selected-foreground)]",
+                    )}
+                    title={item.label}
+                  >
+                    {index < currentStepIndex ? "✓" : index + 1}
+                  </span>
+                ))}
               </div>
             </div>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
-              <RangeCard active={activeField === "start"} label="Début" value={startDay ? formatStep(startDay, startTime, withTime) : "À définir"} onClick={() => setActiveField("start")} />
+              <RangeCard active={editingStart} label="Début" value={startDay ? formatStep(startDay, startTime, withTime) : "À définir"} />
               <div className="flex items-center justify-center text-xs font-bold text-[var(--muted-foreground)] sm:flex-col">
                 <ArrowRight className="h-4 w-4 rotate-90 sm:rotate-0" />
                 {duration ? <span className="mt-1 whitespace-nowrap">{duration}</span> : null}
               </div>
-              <RangeCard active={activeField === "end"} label="Fin" value={endDay ? formatStep(endDay, endTime, withTime) : "À définir"} onClick={() => setActiveField("end")} />
+              <RangeCard active={!editingStart} label="Fin" value={endDay ? formatStep(endDay, endTime, withTime) : "À définir"} />
             </div>
           </div>
 
-          <div className="grid transition-transform duration-300 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="p-4">
-              <CalendarBoard
-                selected={(activeField === "start" ? startDay : endDay)?.getTime() ?? null}
-                rangeStart={startDay?.getTime() ?? null}
-                rangeEnd={endDay?.getTime() ?? null}
-                onSelect={selectDay}
-                compact
-                disabledBefore={activeField === "end" ? startDay?.getTime() ?? null : null}
-              />
+          <div className="grid lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="overflow-hidden p-4">
+              <div
+                className="flex transition-transform duration-300 ease-out"
+                style={{ transform: `translateX(-${currentStepIndex * 100}%)` }}
+              >
+                <StepPanel>
+                  <CalendarBoard
+                    selected={startDay?.getTime() ?? null}
+                    rangeStart={startDay?.getTime() ?? null}
+                    rangeEnd={endDay?.getTime() ?? null}
+                    onSelect={selectDay}
+                    compact
+                  />
+                </StepPanel>
+                <StepPanel>
+                  <TimeGrid value={startTime} onChange={selectStartTime} />
+                </StepPanel>
+                <StepPanel>
+                  <CalendarBoard
+                    selected={endDay?.getTime() ?? null}
+                    rangeStart={startDay?.getTime() ?? null}
+                    rangeEnd={endDay?.getTime() ?? null}
+                    onSelect={selectDay}
+                    compact
+                    disabledBefore={startDay?.getTime() ?? null}
+                  />
+                </StepPanel>
+                <StepPanel>
+                  {withTime ? (
+                    <TimeGrid value={endTime} onChange={selectEndTime} isDisabled={isEndTimeDisabled} />
+                  ) : (
+                    <p className="rounded-xl bg-[var(--card)] p-3 text-sm text-[var(--muted-foreground)]">
+                      Journée complète.
+                    </p>
+                  )}
+                </StepPanel>
+              </div>
             </div>
             <div className="border-t border-[var(--border)] bg-[var(--accent)] p-4 lg:border-l lg:border-t-0">
               <div className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
-                <Clock className="h-3.5 w-3.5 text-brand-600" />
-                {activeField === "start" ? "Heure de début" : "Heure de fin"}
+                {step === "startDate" || step === "endDate" ? (
+                  <CalendarDays className="h-3.5 w-3.5 text-brand-600" />
+                ) : (
+                  <Clock className="h-3.5 w-3.5 text-brand-600" />
+                )}
+                Étape {currentStepIndex + 1} / 4
               </div>
-              {withTime ? (
-                <TimeGrid
-                  value={activeField === "start" ? startTime : endTime}
-                  onChange={activeField === "start" ? selectStartTime : selectEndTime}
-                  isDisabled={activeField === "end" ? isEndTimeDisabled : undefined}
-                />
-              ) : (
-                <p className="rounded-xl bg-[var(--card)] p-3 text-sm text-[var(--muted-foreground)]">
-                  Journée complète.
-                </p>
-              )}
+              <ol className="space-y-2">
+                {WIZARD_STEPS.map((item, index) => (
+                  <li
+                    key={item.key}
+                    className={cn(
+                      "flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] px-3 py-2 text-sm font-semibold text-[var(--muted-foreground)]",
+                      item.key === step && "border-brand-500 text-[var(--foreground)] ring-2 ring-brand-500/15",
+                      index < currentStepIndex && "text-[var(--selected-foreground)]",
+                    )}
+                  >
+                    <span className={cn(
+                      "inline-flex h-6 w-6 items-center justify-center rounded-full bg-[var(--accent)] text-xs",
+                      item.key === step && "bg-brand-500 text-white",
+                      index < currentStepIndex && "bg-[var(--selected)] text-[var(--selected-foreground)]",
+                    )}>
+                      {index < currentStepIndex ? "✓" : index + 1}
+                    </span>
+                    {item.label}
+                  </li>
+                ))}
+              </ol>
               <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--card)] p-3">
                 <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Durée</p>
                 <p className="mt-1 text-sm font-semibold text-[var(--foreground)]">{duration ?? "Choisissez un début et une fin"}</p>
               </div>
               <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStartDay(null);
-                    setEndDay(null);
-                    onChange({ start: null, end: null });
-                    setActiveField("start");
-                  }}
-                  className="h-10 flex-1 rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
-                >
-                  Effacer
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  disabled={!value.start || !value.end}
-                  className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-500 text-sm font-semibold text-white disabled:opacity-50"
-                >
-                  <Check className="h-4 w-4" />
-                  Valider
-                </button>
+                {currentStepIndex > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setStep(WIZARD_STEPS[currentStepIndex - 1].key)}
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    Retour
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartDay(null);
+                      setEndDay(null);
+                      onChange({ start: null, end: null });
+                      setStep("startDate");
+                    }}
+                    className="h-10 flex-1 rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
+                  >
+                    Effacer
+                  </button>
+                )}
+                {currentStepIndex < WIZARD_STEPS.length - 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => setStep(WIZARD_STEPS[currentStepIndex + 1].key)}
+                    disabled={!canGoNext}
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-500 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    Suivant
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    disabled={!canValidate}
+                    className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-500 text-sm font-semibold text-white disabled:opacity-50"
+                  >
+                    <Check className="h-4 w-4" />
+                    Valider
+                  </button>
+                )}
               </div>
+              {currentStepIndex > 0 ? (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStartDay(null);
+                      setEndDay(null);
+                      onChange({ start: null, end: null });
+                      setStep("startDate");
+                    }}
+                    className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
+                  >
+                    Effacer
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setOpen(false)}
@@ -278,11 +372,9 @@ export function DateRangePicker({
   }
 }
 
-function RangeCard({ active, label, value, onClick }: { active: boolean; label: string; value: string; onClick: () => void }) {
+function RangeCard({ active, label, value }: { active: boolean; label: string; value: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
         "flex min-w-0 flex-1 flex-col rounded-2xl border px-4 py-3 text-left transition",
         active
@@ -292,8 +384,12 @@ function RangeCard({ active, label, value, onClick }: { active: boolean; label: 
     >
       <span className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">{label}</span>
       <span className="mt-1 truncate text-sm font-semibold">{value}</span>
-    </button>
+    </div>
   );
+}
+
+function StepPanel({ children }: { children: React.ReactNode }) {
+  return <div className="w-full shrink-0">{children}</div>;
 }
 
 function TimeGrid({
@@ -379,4 +475,20 @@ function durationLabel(start: number, end: number, withTime: boolean) {
 
 function startOfDate(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function stepTitle(step: WizardStep) {
+  const titles: Record<WizardStep, string> = {
+    startDate: "Choisissez la date de début",
+    startTime: "Choisissez l'heure de début",
+    endDate: "Choisissez la date de fin",
+    endTime: "Choisissez l'heure de fin",
+  };
+  return titles[step];
+}
+
+function canContinue(step: WizardStep, startDay: Date | null, endDay: Date | null) {
+  if (step === "startDate" || step === "startTime") return Boolean(startDay);
+  if (step === "endDate") return Boolean(startDay && endDay);
+  return true;
 }
