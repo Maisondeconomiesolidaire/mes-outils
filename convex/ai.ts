@@ -328,30 +328,24 @@ function sanitizeLotGroups(
   }>,
 ) {
   const articleById = new Map(articles.map((article) => [article._id, article]));
-  const used = new Set<string>();
   return groups
     .map((group) => {
-      // On garde l'ordre proposé par l'IA mais sans réutiliser un article déjà
-      // placé dans un lot précédent (un article ne peut appartenir qu'à un lot).
       const uniqueIds = Array.from(new Set(group.articleIds));
       const groupArticles = uniqueIds
         .map((id) => articleById.get(id))
-        .filter((article): article is NonNullable<typeof article> => Boolean(article))
-        .filter((article) => !used.has(article._id));
+        .filter((article): article is NonNullable<typeof article> => Boolean(article));
+      const themeKeys = Array.from(
+        new Set(groupArticles.map((article) => article.themeKey).filter(Boolean)),
+      );
       const total = groupArticles.reduce((sum, article) => sum + article.price, 0);
-      // On fait confiance au regroupement sémantique de l'IA : il suffit d'avoir
-      // au moins deux articles existants (peu importe le statut ou le thème
-      // dérivé). L'équipe valide ensuite avant publication.
-      const valid = groupArticles.length >= 2;
-      if (valid) for (const article of groupArticles) used.add(article._id);
       return {
         ...group,
         articleIds: groupArticles.map((article) => article._id),
         suggestedPrice: Math.min(
-          Math.max(8, Number(group.suggestedPrice) || 10),
+          Math.max(10, Number(group.suggestedPrice) || 10),
           discountedBundlePrice(total),
         ),
-        _valid: valid,
+        _valid: groupArticles.length >= 2 && themeKeys.length === 1,
       };
     })
     .filter((group) => group._valid)
@@ -491,82 +485,198 @@ IMPORTANT : applique toutes les décotes selon l'état "${identification.estimat
 
 Produis l'évaluation JSON complète basée sur les résultats trouvés.`;
 
-    // Étape 2 : on tente d'abord le modèle avec recherche web (prix réels) ;
-    // s'il est indisponible (modèle preview retiré, etc.), on retombe sur
-    // gpt-4o pour produire l'évaluation à partir des connaissances du modèle.
-    let result: ArticleAIAnalysis;
-    try {
-      result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
+    const result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
+      model: "gpt-4o-search-preview",
+      max_tokens: 1600,
+      web_search_options: { search_context_size: "medium" },
+      messages: [
+        { role: "system", content: VALUATION_PROMPT },
+        { role: "user", content: searchUserPrompt },
+      ],
+    });
+
+    // Sanity checks
+    sanitizeArticleAnalysis(result);
+    result.backgroundPrompt = identification.backgroundPrompt;
+
+    return result;
+  },
+});
+
+// ─── Génération d'article à partir de mots-clés (sans photo) ───────────────────
+
+function sanitizeArticleAnalysis(
+  result: ArticleAIAnalysis & { weightKg?: number },
+): ArticleAIAnalysis & { weightKg?: number } {
+  if (!Object.keys(CATEGORIES).includes(result.category)) {
+    result.category = "Maison et Jardin";
+  }
+  result.price = Math.max(0, Number(result.price) || 0);
+  result.originalPrice =
+    result.originalPrice != null ? Number(result.originalPrice) || null : null;
+  result.weightKg =
+    result.weightKg != null ? Math.max(0, Number(result.weightKg) || 0) : undefined;
+  result.onlineEligible = result.price >= 10;
+  result.recommendedSaleMode =
+    result.recommendedSaleMode === "bundle" || result.price < 10
+      ? "bundle"
+      : "single";
+  if (!result.singleSaleNote) {
+    result.singleSaleNote =
+      result.price >= 10
+        ? "Peut être vendu seul car il atteint le seuil minimum de 10 €."
+        : "Vente seule déconseillée car le prix estimé est inférieur au minimum de mise en ligne.";
+  }
+  if (!result.bundleSaleNote) {
+    result.bundleSaleNote =
+      result.price >= 10
+        ? "Peut aussi servir à renforcer un lot thématique si des articles proches existent."
+        : "À conserver pour un lot avec des articles similaires afin d'atteindre un prix vendable.";
+  }
+  if (!result.listingRecommendation) {
+    result.listingRecommendation =
+      result.recommendedSaleMode === "single"
+        ? "Cet article atteint le seuil minimum de 10 € et peut être mis en ligne seul."
+        : "Cet article est plus pertinent en attente pour un lot avec des articles du même univers.";
+  }
+  result.keywords = Array.from(
+    new Set((result.keywords ?? []).map(normalizeKeyword).filter(Boolean)),
+  ).slice(0, 12);
+  result.sources = Array.from(
+    new Set(
+      (Array.isArray(result.sources) ? result.sources : [])
+        .map((s) => (typeof s === "string" ? s.trim() : ""))
+        .filter((s) => /^https?:\/\//i.test(s)),
+    ),
+  ).slice(0, 6);
+  result.themeKey =
+    result.themeKey?.trim() ||
+    fallbackThemeKey({
+      title: result.title,
+      description: result.description,
+      keywords: result.keywords,
+    });
+  return result;
+}
+
+export const generateArticleFromKeywords = action({
+  args: { keywords: v.string() },
+  handler: async (
+    ctx,
+    { keywords },
+  ): Promise<ArticleAIAnalysis & { weightKg?: number }> => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, "articles", "analyze")) {
+      throw new Error("Accès CRM insuffisant.");
+    }
+
+    const brief = keywords.trim();
+    if (!brief) throw new Error("Renseignez au moins quelques mots-clés.");
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey)
+      throw new Error(
+        "Clé OpenAI non configurée. Exécutez : npx convex env set OPENAI_API_KEY sk-...",
+      );
+
+    const userPrompt = `Article à créer à partir des mots-clés / indications fournis par l'équipe (il n'y a PAS de photo, déduis l'article le plus probable) :
+"""
+${brief}
+"""
+
+Étapes :
+1. Déduis l'objet le plus probable décrit par ces mots-clés (marque, modèle, type, matière si possible).
+2. Choisis un état réaliste : "Bon état" par défaut, sauf si les mots-clés indiquent un autre état (neuf, à rénover, déstockage…).
+3. Recherche sur Leboncoin, Vinted, eBay France et Amazon France les prix actuels pour cet article en état similaire, puis applique TOUTE la méthodologie de valorisation et les décotes.
+
+En plus des champs JSON habituels, ajoute le champ "weightKg" : le poids estimé de l'article en kilogrammes (nombre, ex: 0.5, 2, 12).`;
+
+    const result = await callOpenAI<ArticleAIAnalysis & { weightKg?: number }>(
+      apiKey,
+      {
         model: "gpt-4o-search-preview",
         max_tokens: 1600,
         web_search_options: { search_context_size: "medium" },
         messages: [
-          { role: "system", content: VALUATION_PROMPT },
-          { role: "user", content: searchUserPrompt },
+          {
+            role: "system",
+            content:
+              VALUATION_PROMPT +
+              `\n\nIMPORTANT : ajoute aussi le champ "weightKg" (poids estimé en kilogrammes, nombre) dans le JSON de réponse.`,
+          },
+          { role: "user", content: userPrompt },
         ],
-      });
-    } catch {
-      result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
+      },
+    );
+
+    return sanitizeArticleAnalysis(result);
+  },
+});
+
+// ─── Description de lot générée par l'IA ──────────────────────────────────────
+
+export const generateLotDescription = action({
+  args: {
+    articleIds: v.array(v.id("articles")),
+    title: v.optional(v.string()),
+  },
+  handler: async (ctx, { articleIds, title }): Promise<{ description: string }> => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, "articles", "create")) {
+      throw new Error("Accès CRM insuffisant.");
+    }
+
+    const items = await ctx.runQuery(api.articles.getManyForLot, {
+      ids: articleIds,
+    });
+    if (items.length === 0) throw new Error("Aucun article dans ce lot.");
+
+    const cleanTitle = title?.trim();
+    const fallback = (): { description: string } => {
+      const lines = items.map((item) => `• ${item.title}`).join("\n");
+      return {
+        description: `Lot de ${items.length} articles${
+          cleanTitle ? ` — ${cleanTitle}` : ""
+        } :\n${lines}\n\nUn ensemble cohérent à petit prix, à récupérer en boutique. Un bon geste pour la planète comme pour le porte-monnaie.`,
+      };
+    };
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return fallback();
+
+    try {
+      const result = await callOpenAI<{ description: string }>(apiKey, {
         model: "gpt-4o",
-        max_tokens: 1600,
-        temperature: 0.2,
+        temperature: 0.6,
+        max_tokens: 400,
         messages: [
-          { role: "system", content: VALUATION_PROMPT },
-          { role: "user", content: searchUserPrompt },
+          {
+            role: "system",
+            content:
+              "Tu es rédacteur produit pour une recyclerie française. Tu rédiges des descriptions de lots attractives, chaleureuses et honnêtes pour une boutique de seconde main. Retourne uniquement du JSON valide, sans commentaires.",
+          },
+          {
+            role: "user",
+            content: `Rédige une description de vente pour un lot${
+              cleanTitle ? ` intitulé "${cleanTitle}"` : ""
+            } composé des articles suivants :
+${JSON.stringify(items, null, 0)}
+
+Consignes :
+- 3 à 5 phrases, ton chaleureux et vendeur, en français.
+- Mets en valeur la cohérence du lot (univers, thème, usage commun) et l'intérêt d'acheter l'ensemble plutôt que séparément.
+- Mentionne le nombre d'articles (${items.length}) et donne envie, sans inventer de caractéristiques absentes.
+- Termine par une phrase courte sur la démarche solidaire et de seconde main.
+
+Retourne ce JSON exact : { "description": "texte de la description" }`,
+          },
         ],
       });
+      const description = result.description?.trim();
+      return description ? { description } : fallback();
+    } catch {
+      return fallback();
     }
-
-    // Sanity checks
-    if (!Object.keys(CATEGORIES).includes(result.category)) {
-      result.category = "Maison et Jardin";
-    }
-    result.price = Math.max(0, Number(result.price) || 0);
-    result.originalPrice =
-      result.originalPrice != null ? Number(result.originalPrice) || null : null;
-    result.onlineEligible = result.price >= 10;
-    result.recommendedSaleMode =
-      result.recommendedSaleMode === "bundle" || result.price < 10
-        ? "bundle"
-        : "single";
-    if (!result.singleSaleNote) {
-      result.singleSaleNote =
-        result.price >= 10
-          ? "Peut être vendu seul car il atteint le seuil minimum de 10 €."
-          : "Vente seule déconseillée car le prix estimé est inférieur au minimum de mise en ligne.";
-    }
-    if (!result.bundleSaleNote) {
-      result.bundleSaleNote =
-        result.price >= 10
-          ? "Peut aussi servir à renforcer un lot thématique si des articles proches existent."
-          : "À conserver pour un lot avec des articles similaires afin d'atteindre un prix vendable.";
-    }
-    if (!result.listingRecommendation) {
-      result.listingRecommendation =
-        result.recommendedSaleMode === "single"
-          ? "Cet article atteint le seuil minimum de 10 € et peut être mis en ligne seul."
-          : "Cet article est plus pertinent en attente pour un lot avec des articles du même univers.";
-    }
-    result.keywords = Array.from(
-      new Set((result.keywords ?? []).map(normalizeKeyword).filter(Boolean)),
-    ).slice(0, 12);
-    result.sources = Array.from(
-      new Set(
-        (Array.isArray(result.sources) ? result.sources : [])
-          .map((s) => (typeof s === "string" ? s.trim() : ""))
-          .filter((s) => /^https?:\/\//i.test(s)),
-      ),
-    ).slice(0, 6);
-    result.themeKey =
-      result.themeKey?.trim() || fallbackThemeKey({
-        title: result.title,
-        description: result.description,
-        keywords: result.keywords,
-      });
-
-    result.backgroundPrompt = identification.backgroundPrompt;
-
-    return result;
   },
 });
 

@@ -6,12 +6,10 @@ import { requireAnyCrmPermission, requireCrmPermission } from "./lib";
 
 const vehicleKind = v.union(
   v.literal("utilitaire"),
+  v.literal("camionnette"),
+  v.literal("camion"),
   v.literal("voiture"),
 );
-
-function normalizeVehicleKind(kind: string) {
-  return kind === "voiture" ? "voiture" : "utilitaire";
-}
 
 /** Deux timestamps tombent-ils le même jour (UTC) ? */
 function sameUtcDay(a: number, b: number): boolean {
@@ -97,29 +95,25 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, "flotte", "read");
-    const vehicles = (await ctx.db.query("vehicles").order("desc").collect()).filter(
-      (vehicle) => vehicle.recycappEnabled === true,
-    );
+    const vehicles = await ctx.db.query("vehicles").order("desc").collect();
     const now = Date.now();
     return await Promise.all(
       vehicles.map(async (vehicle) => {
         const reason = vehicle.active
           ? await vehicleBusyReason(ctx, vehicle._id, now)
           : null;
-        const status: "disponible" | "sur_collecte" | "en_tournee" | "en_maintenance" | "inactif" =
+        const status: "disponible" | "sur_collecte" | "en_tournee" | "inactif" =
           !vehicle.active
             ? "inactif"
             : reason?.startsWith("En tournée")
               ? "en_tournee"
-              : reason?.startsWith("En maintenance")
-                ? "en_maintenance"
               : reason
                 ? "sur_collecte"
                 : "disponible";
         const photoUrl = vehicle.photo
           ? await ctx.storage.getUrl(vehicle.photo)
           : null;
-        return { ...vehicle, kind: normalizeVehicleKind(vehicle.kind), status, reason, photoUrl };
+        return { ...vehicle, status, reason, photoUrl };
       }),
     );
   },
@@ -138,9 +132,7 @@ export const availableOn = query({
       ["demandes", "read"],
     ]);
     const vehicles = (await ctx.db.query("vehicles").collect()).filter(
-      (vehicle) =>
-        vehicle.recycappEnabled === true &&
-        (vehicle.active || vehicle._id === includeVehicleId),
+      (vehicle) => vehicle.active || vehicle._id === includeVehicleId,
     );
     const result = [];
     for (const vehicle of vehicles) {
@@ -156,7 +148,7 @@ export const availableOn = query({
         _id: vehicle._id,
         name: vehicle.name,
         plate: vehicle.plate ?? null,
-        kind: normalizeVehicleKind(vehicle.kind),
+        kind: vehicle.kind,
         photoUrl,
       });
     }
@@ -174,9 +166,7 @@ export const takenInRange = query({
       ["demandes", "read"],
       ["calendrier", "read"],
     ]);
-    const vehicles = (await ctx.db.query("vehicles").collect()).filter(
-      (vehicle) => vehicle.recycappEnabled === true,
-    );
+    const vehicles = await ctx.db.query("vehicles").collect();
     const nameById = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
     const entries: Array<{
@@ -241,7 +231,6 @@ export const create = mutation({
     return await ctx.db.insert("vehicles", {
       ...args,
       active: true,
-      recycappEnabled: true,
       createdAt: Date.now(),
     });
   },

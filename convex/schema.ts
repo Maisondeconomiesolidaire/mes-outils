@@ -189,7 +189,8 @@ const livraisonDetails = v.object({
   ),
 });
 
-export default defineSchema({
+export default defineSchema(
+  {
   articles: defineTable({
     title: v.string(),
     description: v.string(),
@@ -308,6 +309,8 @@ export default defineSchema({
     plate: v.optional(v.string()),
     kind: v.union(
       v.literal("utilitaire"),
+      v.literal("camionnette"),
+      v.literal("camion"),
       v.literal("voiture"),
     ),
     photo: v.optional(v.id("_storage")),
@@ -1148,4 +1151,6 @@ export default defineSchema({
     .index("by_clerkId", ["clerkId"])
     .index("by_clerkId_itemId", ["clerkId", "itemId"])
     .index("by_itemId", ["itemId"]),
-});
+  },
+  { schemaValidation: false },
+);
