@@ -135,15 +135,22 @@ Exemples de styles attendus :
 "Besoin d'un coup de main pour ta pelouse ? Pas de panique, notre équipe de Pays de Bray Emploi a la main verte ! 🌿💪 #SolidaritéEnAction #JardinageSansStress"
 "Aujourd'hui, on a sauvé 12 fauteuils roulants de l'oubli ! 🦸‍♂️♻️ Direction la recyclerie pour une seconde vie. #ÉconomieCirculaire #SantéPourTous"
 "Chez Les Sens du Bray, on construit du solide... et du sens. 🌱🏗️ Envie de voir nos dernières réalisations ? Spoiler : c'est du bois, du local et du beau ! #ArchitectureDurable #MadeInBray"
-Réponds uniquement avec le texte du post, sans guillemets ni préambule.`;
+Réponds UNIQUEMENT avec un objet JSON valide, sans aucun texte autour, au format exact :
+{
+  "title": "titre court et accrocheur de l'événement (max ~60 caractères, sans hashtag)",
+  "description": "le post complet prêt à publier, max 360 caractères, dans le ton décrit ci-dessus (accroche + message + call-to-action + hashtags)",
+  "location": "le lieu si mentionné ou déductible du contexte, sinon une chaîne vide"
+}`;
 
-/** Génère un post d'événement à partir de mots-clés (max 360 caractères). */
+type GeneratedEventPost = { title: string; description: string; location: string };
+
+/** Génère un post d'événement complet (titre, description, lieu) depuis un contexte libre. */
 export const generateEventPost = action({
-  args: { keywords: v.string() },
-  handler: async (ctx, { keywords }): Promise<string> => {
+  args: { context: v.string() },
+  handler: async (ctx, { context }): Promise<GeneratedEventPost> => {
     await ctx.runQuery(internal.community.assertCanCreateEvent, {});
-    const prompt = keywords.trim();
-    if (!prompt) throw new Error("Quelques mots-clés sont nécessaires.");
+    const brief = context.trim();
+    if (!brief) throw new Error("Quelques éléments de contexte sont nécessaires.");
 
     const apiKey = process.env.OPENAI_API_KEY;
     if (!apiKey) {
@@ -159,10 +166,11 @@ export const generateEventPost = action({
       body: JSON.stringify({
         model: "gpt-4o",
         temperature: 0.8,
-        max_tokens: 220,
+        max_tokens: 400,
+        response_format: { type: "json_object" },
         messages: [
           { role: "system", content: EVENT_POST_SYSTEM_PROMPT },
-          { role: "user", content: `Mots-clés : ${prompt}` },
+          { role: "user", content: `Contexte de l'événement : ${brief}` },
         ],
       }),
     });
@@ -176,11 +184,19 @@ export const generateEventPost = action({
     const data = (await response.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
-    const text = (data.choices?.[0]?.message?.content ?? "")
-      .replace(/^["«»\s]+|["«»\s]+$/g, "")
-      .trim();
-    // Filet de sécurité : on borne à 360 caractères.
-    return text.length > 360 ? `${text.slice(0, 359).trimEnd()}…` : text;
+    let parsed: { title?: string; description?: string; location?: string } = {};
+    try {
+      parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "{}");
+    } catch {
+      parsed = {};
+    }
+    const description = (parsed.description ?? "").trim();
+    return {
+      title: (parsed.title ?? "").trim().slice(0, 120),
+      description:
+        description.length > 360 ? `${description.slice(0, 359).trimEnd()}…` : description,
+      location: (parsed.location ?? "").trim().slice(0, 120),
+    };
   },
 });
 

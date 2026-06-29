@@ -379,17 +379,22 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
   const [form, setForm] = useState({ title: "", description: "", location: "", start: null as number | null, end: null as number | null });
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
-  const [aiKeywords, setAiKeywords] = useState("");
+  const [aiContext, setAiContext] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
   async function generate() {
-    if (!aiKeywords.trim()) return;
+    if (!aiContext.trim()) return;
     setAiLoading(true);
     setAiError(null);
     try {
-      const text = await generatePost({ keywords: aiKeywords });
-      setForm((current) => ({ ...current, description: text }));
+      const result = await generatePost({ context: aiContext });
+      setForm((current) => ({
+        ...current,
+        title: result.title || current.title,
+        description: result.description || current.description,
+        location: result.location || current.location,
+      }));
     } catch (caught) {
       setAiError(caught instanceof Error ? caught.message : "Génération impossible.");
     } finally {
@@ -411,7 +416,7 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
       });
       setForm({ title: "", description: "", location: "", start: null, end: null });
       setImages([]);
-      setAiKeywords("");
+      setAiContext("");
       setAiError(null);
       setOpen(false);
     } finally {
@@ -466,6 +471,28 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
 
       <Modal open={open} onClose={() => setOpen(false)} title="Nouvel événement">
         <div className="grid gap-4">
+          {/* Assistant IA en premier : on décrit le contexte, l'IA remplit le reste. */}
+          <div className="rounded-2xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-500/30 dark:bg-brand-500/10">
+            <div className="flex items-center gap-2 text-sm font-semibold text-brand-700 dark:text-brand-300">
+              <Sparkles className="h-4 w-4" /> Rédaction assistée par l'IA
+            </div>
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Décrivez l'événement en quelques mots, l'IA rédige le titre, le lieu et le post (sauf les photos).
+            </p>
+            <Textarea
+              value={aiContext}
+              onChange={(e) => setAiContext(e.target.value)}
+              placeholder="Ex. Déstockage à la recyclerie samedi matin, tout à 2 euros, vêtements et petit mobilier..."
+              className="mt-3 min-h-[80px]"
+            />
+            <div className="mt-2 flex justify-end">
+              <Button type="button" variant="secondary" onClick={generate} disabled={aiLoading || !aiContext.trim()}>
+                <Sparkles className="h-4 w-4" /> {aiLoading ? "Rédaction..." : "Rédiger avec l'IA"}
+              </Button>
+            </div>
+            {aiError ? <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{aiError}</p> : null}
+          </div>
+
           <Field label="Titre" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
           <Field label="Lieu"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
           <Field label="Période" hint="Optionnel : laissez vide pour un événement sans date précise.">
@@ -475,25 +502,6 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
               placeholder="Date et horaires"
             />
           </Field>
-          <Field label="Assistant IA" hint="Quelques mots-clés, l'IA rédige un post engageant (max 360 caractères).">
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                value={aiKeywords}
-                onChange={(e) => setAiKeywords(e.target.value)}
-                placeholder="collecte, vélos, samedi matin..."
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void generate();
-                  }
-                }}
-              />
-              <Button type="button" variant="secondary" onClick={generate} disabled={aiLoading || !aiKeywords.trim()} className="shrink-0">
-                <Sparkles className="h-4 w-4" /> {aiLoading ? "Rédaction..." : "Rédiger avec l'IA"}
-              </Button>
-            </div>
-          </Field>
-          {aiError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{aiError}</p> : null}
           <Field label="Description"><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
           <Field label="Photos"><PhotoUpload value={images} onChange={setImages} /></Field>
           <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
