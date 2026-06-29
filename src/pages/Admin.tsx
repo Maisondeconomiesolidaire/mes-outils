@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { Check, CircleDashed, Mail, Save, Search, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
+import { Bike, Check, CircleDashed, LayoutDashboard, Mail, Recycle, Save, Search, ShieldCheck, ShieldOff, ShoppingBag, Trash2 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select } from "../components/ui/Field";
 import { FullSpinner } from "../components/ui/Spinner";
+import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { ACTION_LABELS, ALL_PERMISSION_PAGES, type Action, type Grant, KNOWN_PAGE_KEYS, groupPagesByApp } from "../lib/permissions";
 import { cn } from "../lib/cn";
 
@@ -122,6 +124,27 @@ function mergeUsers(clerkUsers: ClerkUser[], permissionPeople: PermissionPerson[
 }
 
 export function Admin() {
+  const [tab, setTab] = useState<"dashboard" | "access">("dashboard");
+  return (
+    <div className="space-y-6">
+      <div>
+        <p className="section-kicker">Administration</p>
+        <h2 className="mt-2 text-2xl font-semibold text-[var(--foreground)]">Maison mère</h2>
+      </div>
+      <UnderlineTabs
+        items={[
+          { key: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+          { key: "access", label: "Accès", icon: ShieldCheck },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+      {tab === "dashboard" ? <GlobalDashboard /> : <AccessManager />}
+    </div>
+  );
+}
+
+function AccessManager() {
   const permissionsData = useQuery(api.permissions.listManaged);
   const listClerkUsers = useAction(api.permissions.listClerkUsers);
   const upsert = useMutation(api.permissions.upsert);
@@ -262,14 +285,10 @@ export function Admin() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="border-b border-[var(--border)] pb-5">
-        <p className="section-kicker">Administration</p>
-        <h2 className="mt-2 text-2xl font-semibold text-[var(--foreground)]">Acces Mes Outils, Recyclerie et Klyde</h2>
-        <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-          {people.length} utilisateurs · {ALL_PERMISSION_PAGES.length} pages suivies
-        </p>
-      </section>
+    <div className="space-y-5">
+      <p className="text-sm text-[var(--muted-foreground)]">
+        {people.length} utilisateurs · {ALL_PERMISSION_PAGES.length} pages suivies
+      </p>
 
       <div className="grid gap-6 xl:grid-cols-[340px_minmax(0,1fr)]">
         <aside className="glass-card overflow-hidden rounded-lg border border-[var(--border)]">
@@ -519,6 +538,142 @@ export function Admin() {
             </div>
           </div>
         </section>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Tableau de bord global (maison mère) ───────────────────────────────── */
+
+const eurFmt = new Intl.NumberFormat("fr-FR", {
+  style: "currency",
+  currency: "EUR",
+  maximumFractionDigits: 0,
+});
+const numFmt = new Intl.NumberFormat("fr-FR");
+const eur = (value: number) => eurFmt.format(value);
+const num = (value: number) => numFmt.format(value);
+
+type AppLine = { label: string; detail: string; value: string };
+
+function AppBlock({
+  icon: Icon,
+  tint,
+  label,
+  caption,
+  revenue,
+  lines,
+}: {
+  icon: LucideIcon;
+  tint: string;
+  label: string;
+  caption: string;
+  revenue: number;
+  lines: AppLine[];
+}) {
+  return (
+    <section className="py-6 first:pt-0 last:pb-0">
+      <div className="flex items-end justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white", tint)}>
+            <Icon className="h-5 w-5" />
+          </span>
+          <div>
+            <h3 className="text-lg font-semibold leading-tight text-[var(--foreground)]">{label}</h3>
+            <p className="text-xs text-[var(--muted-foreground)]">{caption}</p>
+          </div>
+        </div>
+        <p className="text-2xl font-bold tracking-tight text-[var(--foreground)]">{eur(revenue)}</p>
+      </div>
+      <dl className="mt-4 divide-y divide-[var(--border)]">
+        {lines.map((line) => (
+          <div key={line.label} className="grid grid-cols-[1fr_auto] items-baseline gap-4 py-2.5 sm:grid-cols-[170px_1fr_auto]">
+            <dt className="text-sm font-medium text-[var(--foreground)]">{line.label}</dt>
+            <dd className="order-last col-span-2 text-xs text-[var(--muted-foreground)] sm:order-none sm:col-span-1 sm:text-sm">{line.detail}</dd>
+            <dd className="text-right text-sm font-semibold tabular-nums text-[var(--foreground)]">{line.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function GlobalDashboard() {
+  const stats = useQuery(api.dashboard.globalStats);
+  if (stats === undefined) return <FullSpinner label="Chargement du tableau de bord..." />;
+
+  const shares = [
+    { key: "recyclerie", label: "Recyclerie", revenue: stats.recyclerie.revenue, tint: "bg-brand-500" },
+    { key: "klyde", label: "Klyde", revenue: stats.klyde.revenue, tint: "bg-indigo-500" },
+    { key: "cycle", label: "Cycle en Bray", revenue: stats.cycle.revenue, tint: "bg-emerald-500" },
+  ];
+  const denom = stats.totalRevenue || 1;
+
+  return (
+    <div className="space-y-9">
+      {/* Chiffre d'affaires total + répartition par application. */}
+      <div>
+        <p className="text-sm font-medium text-[var(--muted-foreground)]">Chiffre d'affaires total · toutes applications</p>
+        <p className="mt-1 text-5xl font-bold tracking-tight text-[var(--foreground)]">{eur(stats.totalRevenue)}</p>
+        <div className="mt-6 flex h-2.5 overflow-hidden rounded-full bg-[var(--accent)]">
+          {shares.map((share) =>
+            share.revenue > 0 ? (
+              <div
+                key={share.key}
+                className={cn("h-full", share.tint)}
+                style={{ width: `${(share.revenue / denom) * 100}%` }}
+              />
+            ) : null,
+          )}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
+          {shares.map((share) => (
+            <div key={share.key} className="flex items-center gap-2 text-sm">
+              <span className={cn("h-2.5 w-2.5 rounded-full", share.tint)} />
+              <span className="font-medium text-[var(--foreground)]">{share.label}</span>
+              <span className="text-[var(--muted-foreground)]">{eur(share.revenue)}</span>
+              <span className="text-xs text-[var(--muted-foreground)]">· {Math.round((share.revenue / denom) * 100)}%</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Détail par application. */}
+      <div className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
+        <AppBlock
+          icon={Recycle}
+          tint="bg-brand-500"
+          label="Recyclerie"
+          caption={`${num(stats.recyclerie.requests)} demandes · ${num(stats.recyclerie.open)} ouvertes`}
+          revenue={stats.recyclerie.revenue}
+          lines={[
+            { label: "Collecte", detail: `${num(stats.recyclerie.collecte.requests)} demandes · ${num(stats.recyclerie.collecte.won)} gagnées`, value: eur(stats.recyclerie.collecte.revenue) },
+            { label: "Aérogommage", detail: `${num(stats.recyclerie.aerogommage.requests)} demandes · ${num(stats.recyclerie.aerogommage.won)} gagnées`, value: eur(stats.recyclerie.aerogommage.revenue) },
+            { label: "Boutique", detail: `${num(stats.recyclerie.boutique.sales)} ventes en caisse`, value: eur(stats.recyclerie.boutique.revenue) },
+          ]}
+        />
+        <AppBlock
+          icon={ShoppingBag}
+          tint="bg-indigo-500"
+          label="Klyde"
+          caption={`${num(stats.klyde.orders)} commandes · ${num(stats.klyde.items)} articles`}
+          revenue={stats.klyde.revenue}
+          lines={[
+            { label: "Commandes payées", detail: `${num(stats.klyde.pendingOrders)} en attente de paiement`, value: num(stats.klyde.paidOrders) },
+            { label: "Catalogue", detail: "articles en ligne", value: num(stats.klyde.items) },
+          ]}
+        />
+        <AppBlock
+          icon={Bike}
+          tint="bg-emerald-500"
+          label="Cycle en Bray"
+          caption={`${num(stats.cycle.bikes)} vélos au catalogue`}
+          revenue={stats.cycle.revenue}
+          lines={[
+            { label: "Vélos vendus", detail: `${num(stats.cycle.bikesAvailable)} disponibles`, value: num(stats.cycle.bikesSold) },
+            { label: "Demandes", detail: `${num(stats.cycle.open)} en cours · ${num(stats.cycle.won)} gagnées`, value: num(stats.cycle.requests) },
+          ]}
+        />
       </div>
     </div>
   );

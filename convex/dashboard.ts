@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
-import { requireCrmPermission } from "./lib";
+import { requireAdmin, requireCrmPermission } from "./lib";
 import { STEP } from "./processes";
 import { Doc } from "./_generated/dataModel";
 
@@ -73,6 +73,87 @@ export const stats = query({
       scheduledToday,
       byType,
       byStage,
+    };
+  },
+});
+
+/**
+ * Vue « maison mère » : agrégat du chiffre d'affaires et de l'activité de
+ * toutes les applications (Recyclerie, Klyde, Cycle en Bray). Réservé aux
+ * administrateurs. Parcourt les tables en entier (acceptable : usage admin,
+ * faible fréquence) — à dénormaliser via compteurs si le volume explose.
+ */
+export const globalStats = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+
+    const [requests, ventes, klydeOrders, klydeItems, bikes, cycleRequests] =
+      await Promise.all([
+        ctx.db.query("requests").collect(),
+        ctx.db.query("ventes").collect(),
+        ctx.db.query("klydeOrders").collect(),
+        ctx.db.query("klydeItems").collect(),
+        ctx.db.query("bikes").collect(),
+        ctx.db.query("cycleRequests").collect(),
+      ]);
+
+    // — Recyclerie : collecte + aérogommage (devis gagnés) + boutique (caisse) —
+    const recyclerieSegment = (type: "collecte" | "aerogommage") => {
+      const items = requests.filter((request) => request.type === type);
+      const won = items.filter((request) => request.outcome === "gagnee");
+      return {
+        requests: items.length,
+        open: items.filter((request) => request.outcome === "open").length,
+        won: won.length,
+        revenue: won.reduce((sum, request) => sum + (request.quoteAmount ?? 0), 0),
+      };
+    };
+    const collecte = recyclerieSegment("collecte");
+    const aerogommage = recyclerieSegment("aerogommage");
+    const boutique = {
+      revenue: ventes.reduce((sum, vente) => sum + vente.total, 0),
+      sales: ventes.length,
+    };
+    const recyclerieRevenue = collecte.revenue + aerogommage.revenue + boutique.revenue;
+
+    // — Klyde : commandes boutique payées —
+    const paidKlyde = klydeOrders.filter((order) => order.status === "payee");
+    const klyde = {
+      revenue: paidKlyde.reduce((sum, order) => sum + order.total, 0),
+      orders: klydeOrders.length,
+      paidOrders: paidKlyde.length,
+      pendingOrders: klydeOrders.length - paidKlyde.length,
+      items: klydeItems.length,
+    };
+
+    // — Cycle en Bray : vélos vendus + pipeline des demandes —
+    const cycleOpenStatuses = ["nouveau", "validation", "en_cours"];
+    const soldBikes = bikes.filter((bike) => bike.status === "sold");
+    const cycle = {
+      revenue: soldBikes.reduce((sum, bike) => sum + (bike.price ?? 0), 0),
+      requests: cycleRequests.length,
+      open: cycleRequests.filter((request) => cycleOpenStatuses.includes(request.pipelineStatus)).length,
+      won: cycleRequests.filter((request) => request.pipelineStatus === "gagnee").length,
+      bikes: bikes.length,
+      bikesSold: soldBikes.length,
+      bikesAvailable: bikes.filter((bike) =>
+        ["available", "online", "ready"].includes(bike.status),
+      ).length,
+    };
+
+    return {
+      totalRevenue: recyclerieRevenue + klyde.revenue + cycle.revenue,
+      recyclerie: {
+        revenue: recyclerieRevenue,
+        requests: requests.length,
+        open: requests.filter((request) => request.outcome === "open").length,
+        collecte,
+        aerogommage,
+        boutique,
+      },
+      klyde,
+      cycle,
     };
   },
 });
