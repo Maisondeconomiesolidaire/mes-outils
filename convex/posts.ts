@@ -113,6 +113,29 @@ export const create = mutation({
   },
 });
 
+export const update = mutation({
+  args: {
+    postId: v.id("posts"),
+    body: v.string(),
+    images: v.optional(v.array(v.id("_storage"))),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
+    const identity = await requireUser(ctx);
+    const post = await ctx.db.get(args.postId);
+    if (!post) throw new Error("Post introuvable.");
+    if (post.authorClerkId !== identity.subject) {
+      throw new Error("Modification non autorisée.");
+    }
+    const body = args.body.trim();
+    const images = args.images ?? post.images;
+    if (!body && images.length === 0) {
+      throw new Error("Le post est vide.");
+    }
+    await ctx.db.patch(args.postId, { body, images, editedAt: Date.now() });
+  },
+});
+
 export const addComment = mutation({
   args: {
     postId: v.id("posts"),

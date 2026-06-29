@@ -9,6 +9,7 @@ import {
   MessageCircle,
   MessagesSquare,
   PartyPopper,
+  Pencil,
   Pin,
   PinOff,
   Plus,
@@ -17,6 +18,7 @@ import {
   Tag,
   ThumbsUp,
   Trash2,
+  X,
 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -70,6 +72,7 @@ type Post = {
   authorImageUrl?: string;
   body?: string;
   createdAt: number;
+  editedAt?: number;
   pinned?: boolean;
   imageUrls: string[];
   likedByMe: boolean;
@@ -77,6 +80,7 @@ type Post = {
   latestLikeName?: string;
   commentsCount: number;
   comments: Comment[];
+  canManage: boolean;
 };
 
 function Publications({ canCreate, canManage }: { canCreate: boolean; canManage: boolean }) {
@@ -89,6 +93,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
   const toggleLike = useMutation(api.posts.toggleLike);
   const removePost = useMutation(api.posts.remove);
   const pinPost = useMutation(api.posts.pin);
+  const updatePost = useMutation(api.posts.update);
 
   const [body, setBody] = useState("");
   const [images, setImages] = useState<Id<"_storage">[]>([]);
@@ -154,6 +159,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             onToggleLike={() => toggleLike({ postId: post._id })}
             onPin={() => pinPost({ postId: post._id, pinned: !post.pinned })}
             onRemove={() => removePost({ postId: post._id })}
+            onUpdate={(text) => updatePost({ postId: post._id, body: text })}
             onAddComment={(text) => addComment({ postId: post._id, body: text })}
             onRemoveComment={(commentId) => removeComment({ commentId })}
           />
@@ -164,14 +170,34 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 }
 
 function PostCard({
-  post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onAddComment, onRemoveComment,
+  post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onUpdate, onAddComment, onRemoveComment,
 }: {
   post: Post; currentName: string; currentImage?: string; canManage: boolean; canCreate: boolean;
-  onToggleLike: () => void; onPin: () => void; onRemove: () => void;
+  onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (text: string) => Promise<unknown>;
   onAddComment: (text: string) => Promise<unknown>; onRemoveComment: (commentId: Id<"postComments">) => void;
 }) {
   const [showComments, setShowComments] = useState(false);
   const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editDraft, setEditDraft] = useState(post.body ?? "");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  function startEdit() {
+    setEditDraft(post.body ?? "");
+    setEditing(true);
+  }
+
+  async function saveEdit() {
+    const text = editDraft.trim();
+    if (!text && post.imageUrls.length === 0) return;
+    setSavingEdit(true);
+    try {
+      await onUpdate(text);
+      setEditing(false);
+    } finally {
+      setSavingEdit(false);
+    }
+  }
 
   async function submitComment() {
     const text = draft.trim();
@@ -195,22 +221,52 @@ function PostCard({
                 </span>
               ) : null}
             </div>
-            <p className="text-xs text-[var(--muted-foreground)]">{formatRelative(post.createdAt)}</p>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              {formatRelative(post.createdAt)}{post.editedAt ? " · modifié" : ""}
+            </p>
           </div>
         </div>
-        {canManage ? (
+        {post.canManage || canManage ? (
           <div className="flex items-center gap-1">
-            <button type="button" onClick={onPin} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]">
-              {post.pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
-            </button>
-            <button type="button" onClick={onRemove} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600">
-              <Trash2 className="h-4 w-4" />
-            </button>
+            {post.canManage ? (
+              <button type="button" onClick={startEdit} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]" title="Modifier">
+                <Pencil className="h-4 w-4" />
+              </button>
+            ) : null}
+            {canManage ? (
+              <button type="button" onClick={onPin} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]">
+                {post.pinned ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
+              </button>
+            ) : null}
+            {canManage ? (
+              <button type="button" onClick={onRemove} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
 
-      {post.body ? <p className="whitespace-pre-wrap px-4 pb-3 text-[15px] leading-7 text-[var(--foreground)]">{post.body}</p> : null}
+      {editing ? (
+        <div className="space-y-2 px-4 pb-3">
+          <textarea
+            value={editDraft}
+            onChange={(event) => setEditDraft(event.target.value)}
+            rows={4}
+            className="w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none focus:ring-2 focus:ring-brand-500/30"
+          />
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={savingEdit}>
+              <X className="h-4 w-4" /> Annuler
+            </Button>
+            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editDraft.trim() && post.imageUrls.length === 0)}>
+              {savingEdit ? "Enregistrement..." : "Enregistrer"}
+            </Button>
+          </div>
+        </div>
+      ) : post.body ? (
+        <p className="whitespace-pre-wrap px-4 pb-3 text-[15px] leading-7 text-[var(--foreground)]">{post.body}</p>
+      ) : null}
 
       {post.imageUrls.length > 0 ? (
         <div className={`grid gap-0.5 ${post.imageUrls.length === 1 ? "" : "grid-cols-2"}`}>
@@ -481,6 +537,7 @@ function contactDealHref(deal: Deal) {
     ctxTitle: deal.title,
   });
   if (deal.imageUrls[0]) params.set("ctxImage", deal.imageUrls[0]);
+  if (deal.description.trim()) params.set("ctxDesc", deal.description.trim().slice(0, 280));
   const typeLabel = DEAL_TYPES.find((t) => t.key === deal.dealType)?.label;
   if (typeLabel) params.set("ctxType", typeLabel);
   if (deal.dealType === "vente" && deal.price) params.set("ctxPrice", String(deal.price));

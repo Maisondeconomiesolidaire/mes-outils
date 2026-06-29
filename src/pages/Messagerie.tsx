@@ -111,7 +111,7 @@ function ConversationList({
   );
 }
 
-type DealContext = { title: string; image?: string; type?: string; price?: string };
+type DealContext = { title: string; description?: string; image?: string; type?: string; price?: string };
 
 export function Messagerie() {
   const { user } = useUser();
@@ -124,6 +124,7 @@ export function Messagerie() {
   const dealContext: DealContext | null = ctxTitle
     ? {
         title: ctxTitle,
+        description: searchParams.get("ctxDesc") ?? undefined,
         image: searchParams.get("ctxImage") ?? undefined,
         type: searchParams.get("ctxType") ?? undefined,
         price: searchParams.get("ctxPrice") ?? undefined,
@@ -269,21 +270,26 @@ function Thread({
       </div>
 
       {context ? (
-        <div className="flex items-center gap-3 border-t border-[var(--border)] bg-[var(--accent)] px-3 py-2.5">
+        <div className="flex items-start gap-3 border-t border-[var(--border)] bg-[var(--accent)] px-3 py-2.5">
           {context.image ? (
-            <img src={context.image} alt="" className="h-12 w-12 shrink-0 rounded-lg object-cover" />
+            <img src={context.image} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
           ) : (
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-[var(--card)]">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-[var(--card)]">
               <Tag className="h-5 w-5 text-[var(--muted-foreground)]" />
             </div>
           )}
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-brand-600">
-              {context.type ? `Bon plan · ${context.type}` : "Bon plan"}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-[11px] font-bold uppercase tracking-wide text-brand-600">
+                {context.type ? `Bon plan · ${context.type}` : "Bon plan"}
+              </p>
+              {context.price ? <span className="shrink-0 text-sm font-bold text-[var(--foreground)]">{context.price} €</span> : null}
+            </div>
             <p className="truncate text-sm font-semibold text-[var(--foreground)]">{context.title}</p>
+            {context.description ? (
+              <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-[var(--muted-foreground)]">{context.description}</p>
+            ) : null}
           </div>
-          {context.price ? <span className="shrink-0 text-sm font-bold text-[var(--foreground)]">{context.price} €</span> : null}
           <button
             type="button"
             onClick={() => setContext(null)}

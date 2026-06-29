@@ -32,7 +32,7 @@ export function AppLayout() {
                   les clics répétés déclenchent un 429 « too many requests ».
                   Configuration identique à celle de recycapp (qui fonctionne)
                   avec la même clé Clerk. */}
-              <SignIn routing="hash" appearance={{ variables: { colorPrimary: "#47c667" } }} />
+              <SignIn routing="hash" fallbackRedirectUrl="/" signUpUrl="#/sign-up" appearance={{ variables: { colorPrimary: "#47c667" } }} />
             </div>
           </div>
         </div>
