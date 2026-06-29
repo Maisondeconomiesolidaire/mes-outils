@@ -36,6 +36,7 @@ export function DateRangePicker({
 }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<WizardStep>("startDate");
+  const [maxVisitedStep, setMaxVisitedStep] = useState(0);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0, width: 520, mobile: false });
@@ -155,6 +156,7 @@ export function DateRangePicker({
         onClick={() => {
           setOpen((current) => !current);
           setStep("startDate");
+          setMaxVisitedStep(value.start && value.end ? WIZARD_STEPS.length - 1 : 0);
         }}
         className={cn(
           "flex h-11 w-full items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-left text-sm font-medium text-[var(--foreground)] transition",
@@ -209,6 +211,28 @@ export function DateRangePicker({
                 />
               ))}
             </div>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <SummaryItem
+                active={step === "startDate"}
+                label="Date début"
+                value={startDay ? format(startDay, "d MMM yyyy", { locale: fr }) : "À choisir"}
+              />
+              <SummaryItem
+                active={step === "startTime"}
+                label="Heure début"
+                value={startDay && maxVisitedStep >= 1 ? formatTime(startTime) : "À choisir"}
+              />
+              <SummaryItem
+                active={step === "endDate"}
+                label="Date fin"
+                value={endDay && maxVisitedStep >= 2 ? format(endDay, "d MMM yyyy", { locale: fr }) : "À choisir"}
+              />
+              <SummaryItem
+                active={step === "endTime"}
+                label="Heure fin"
+                value={endDay && maxVisitedStep >= 3 ? formatTime(endTime) : "À choisir"}
+              />
+            </div>
           </div>
 
           <div className="p-4">
@@ -262,6 +286,7 @@ export function DateRangePicker({
                     setEndDay(null);
                     onChange({ start: null, end: null });
                     setStep("startDate");
+                    setMaxVisitedStep(0);
                   }}
                   className="h-10 flex-1 rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
                 >
@@ -271,7 +296,11 @@ export function DateRangePicker({
               {currentStepIndex < WIZARD_STEPS.length - 1 ? (
                 <button
                   type="button"
-                  onClick={() => setStep(WIZARD_STEPS[currentStepIndex + 1].key)}
+                  onClick={() => {
+                    const nextIndex = currentStepIndex + 1;
+                    setMaxVisitedStep((current) => Math.max(current, nextIndex));
+                    setStep(WIZARD_STEPS[nextIndex].key);
+                  }}
                   disabled={!canGoNext}
                   className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-500 text-sm font-semibold text-white disabled:opacity-50"
                 >
@@ -298,6 +327,7 @@ export function DateRangePicker({
                   setEndDay(null);
                   onChange({ start: null, end: null });
                   setStep("startDate");
+                  setMaxVisitedStep(0);
                 }}
                 className="mt-2 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
               >
@@ -353,6 +383,20 @@ function TimeGrid({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function SummaryItem({ active, label, value }: { active: boolean; label: string; value: string }) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border border-[var(--border)] bg-[var(--accent)] px-3 py-2",
+        active && "border-brand-500 bg-[var(--selected)] ring-2 ring-brand-500/15",
+      )}
+    >
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold text-[var(--foreground)]">{value}</p>
     </div>
   );
 }

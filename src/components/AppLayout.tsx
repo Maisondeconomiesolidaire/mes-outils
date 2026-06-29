@@ -220,7 +220,7 @@ function SidebarContent({
               }
             >
               {Icon ? <Icon className={cn("h-[18px] w-[18px] shrink-0", active ? "text-white" : "text-[var(--muted-foreground)]")} /> : null}
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              <span className={cn("min-w-0 flex-1 truncate", active && "text-white")}>{item.label}</span>
               {item.badge ? <NavBadge count={item.badge} active={active} /> : null}
             </NavLink>
           );
