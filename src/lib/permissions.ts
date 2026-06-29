@@ -294,7 +294,7 @@ export const APPS: AppDefinition[] = [
   {
     key: "recycapp",
     label: "Recyclerie",
-    description: "CRM operationnel: demandes, flotte, tournees, boutique, stock et clients.",
+    description: "CRM de gestion pour les demandes, la boutique, le stock et les clients.",
     icon: ShieldCheck,
     logoSrc: "/recyclerie-logo.png",
     href: "https://mesrecycleries.vercel.app",
@@ -304,7 +304,7 @@ export const APPS: AppDefinition[] = [
   {
     key: "klyde",
     label: "Klyd",
-    description: "Boutique textile haut de gamme : stock, mise en ligne et commandes.",
+    description: "Boutique textile : stock, mise en ligne et suivi des commandes.",
     icon: Shirt,
     logoSrc: "/klyd-logo.png",
     href: import.meta.env.VITE_KLYD_URL ?? "https://klyd.vercel.app",
@@ -315,8 +315,9 @@ export const APPS: AppDefinition[] = [
   {
     key: "cycleenbray",
     label: "Cycle en Bray",
-    description: "CRM velo et boutique premium pour les Recycleries 60 et 76.",
+    description: "Boutique et CRM de gestion pour la Recyclerie 60 et 76.",
     icon: Bike,
+    logoSrc: "/cycle-en-bray-logo.webp",
     href: import.meta.env.VITE_CYCLEENBRAY_URL ?? "https://cycleenbray.vercel.app",
     external: true,
     accent: "from-emerald-500 to-zinc-900",
