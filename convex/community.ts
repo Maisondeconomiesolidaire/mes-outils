@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, env, mutation, query } from "./_generated/server";
+import { action, env, internalQuery, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -71,7 +71,7 @@ export const createEvent = mutation({
     title: v.string(),
     description: v.optional(v.string()),
     location: v.optional(v.string()),
-    start: v.number(),
+    start: v.optional(v.number()),
     end: v.optional(v.number()),
     images: v.optional(v.array(v.id("_storage"))),
   },
@@ -106,6 +106,81 @@ export const removeEvent = mutation({
       throw new Error("Suppression non autorisée.");
     }
     await ctx.db.delete(args.eventId);
+  },
+});
+
+/* ─── Assistant IA pour les posts d'événements ───────────────────────────── */
+
+export const assertCanCreateEvent = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "create");
+    return true;
+  },
+});
+
+const EVENT_POST_SYSTEM_PROMPT = `Tu es un assistant IA spécialisé dans la rédaction de posts engageants pour un réseau social d'entreprise. Ton objectif est d'aider les collaborateurs à rédiger des publications claires, impactantes et dynamiques en fonction de quelques mots-clés fournis, n'hésite pas à visiter le site www.eco-solidaire.fr pour récupérer plus d'informations. Tu as le droit à un nombre de caractères maximum de 360.
+Ton & Style :
+Léger et accessible, avec une pointe d'humour bien dosée.
+Sérieux dans le fond, fun dans la forme.
+Inspirant et humain : on parle d'économie solidaire, d'impact social et d'innovation locale !
+Public :
+Principalement les collaborateurs (communication interne).
+Possibilité d'être partagé en externe sur notre site, donc un ton accessible au grand public.
+Structure suggérée :
+Accroche : Une phrase punchy ou une question qui capte l'attention.
+Message clé : Expliquer l'info de manière concise et engageante.
+Call-to-action (optionnel) : Encourager l'interaction (commentaire, partage, participation…).
+Exemples de styles attendus :
+"Besoin d'un coup de main pour ta pelouse ? Pas de panique, notre équipe de Pays de Bray Emploi a la main verte ! 🌿💪 #SolidaritéEnAction #JardinageSansStress"
+"Aujourd'hui, on a sauvé 12 fauteuils roulants de l'oubli ! 🦸‍♂️♻️ Direction la recyclerie pour une seconde vie. #ÉconomieCirculaire #SantéPourTous"
+"Chez Les Sens du Bray, on construit du solide... et du sens. 🌱🏗️ Envie de voir nos dernières réalisations ? Spoiler : c'est du bois, du local et du beau ! #ArchitectureDurable #MadeInBray"
+Réponds uniquement avec le texte du post, sans guillemets ni préambule.`;
+
+/** Génère un post d'événement à partir de mots-clés (max 360 caractères). */
+export const generateEventPost = action({
+  args: { keywords: v.string() },
+  handler: async (ctx, { keywords }): Promise<string> => {
+    await ctx.runQuery(internal.community.assertCanCreateEvent, {});
+    const prompt = keywords.trim();
+    if (!prompt) throw new Error("Quelques mots-clés sont nécessaires.");
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Clé OpenAI absente du déploiement Convex partagé.");
+    }
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        temperature: 0.8,
+        max_tokens: 220,
+        messages: [
+          { role: "system", content: EVENT_POST_SYSTEM_PROMPT },
+          { role: "user", content: `Mots-clés : ${prompt}` },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Erreur OpenAI (${response.status}): ${(await response.text()).slice(0, 300)}`,
+      );
+    }
+
+    const data = (await response.json()) as {
+      choices?: Array<{ message?: { content?: string } }>;
+    };
+    const text = (data.choices?.[0]?.message?.content ?? "")
+      .replace(/^["«»\s]+|["«»\s]+$/g, "")
+      .trim();
+    // Filet de sécurité : on borne à 360 caractères.
+    return text.length > 360 ? `${text.slice(0, 359).trimEnd()}…` : text;
   },
 });
 

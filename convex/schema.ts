@@ -886,7 +886,8 @@ export default defineSchema({
     title: v.string(),
     description: v.optional(v.string()),
     location: v.optional(v.string()),
-    start: v.number(),
+    // Date optionnelle : un événement peut être publié sans créneau précis.
+    start: v.optional(v.number()),
     end: v.optional(v.number()),
     images: v.array(v.id("_storage")),
     createdAt: v.number(),

@@ -33,7 +33,9 @@
   --accent-foreground: oklch(0.205 0 0);
   --border: oklch(0.922 0 0);
   --border-strong: #d2dcd5;
-  --input: oklch(0.922 0 0);
+  /* Fond des champs en clair : gris très léger pour rester lisible sans
+     paraître sombre (le contour --border assure la délimitation). */
+  --input: oklch(0.97 0 0);
   /* Surface "sélectionnée / active" douce, qui s'adapte au thème. */
   --selected: #e6f6ec;
   --selected-foreground: #1d5931;

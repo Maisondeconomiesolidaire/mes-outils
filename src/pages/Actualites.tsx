@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import {
@@ -13,6 +13,7 @@ import {
   PinOff,
   Plus,
   Send,
+  Sparkles,
   Tag,
   ThumbsUp,
   Trash2,
@@ -307,7 +308,7 @@ type EventItem = {
   title: string;
   description?: string;
   location?: string;
-  start: number;
+  start?: number;
   end?: number;
   imageUrls: string[];
   canManage: boolean;
@@ -317,25 +318,45 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
   const events = useQuery(api.community.listEvents) as EventItem[] | undefined;
   const createEvent = useMutation(api.community.createEvent);
   const removeEvent = useMutation(api.community.removeEvent);
+  const generatePost = useAction(api.community.generateEventPost);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ title: "", description: "", location: "", start: null as number | null, end: null as number | null });
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
+  const [aiKeywords, setAiKeywords] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  async function generate() {
+    if (!aiKeywords.trim()) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const text = await generatePost({ keywords: aiKeywords });
+      setForm((current) => ({ ...current, description: text }));
+    } catch (caught) {
+      setAiError(caught instanceof Error ? caught.message : "Génération impossible.");
+    } finally {
+      setAiLoading(false);
+    }
+  }
 
   async function save() {
-    if (!form.title.trim() || !form.start) return;
+    if (!form.title.trim()) return;
     setSaving(true);
     try {
       await createEvent({
         title: form.title,
         description: form.description || undefined,
         location: form.location || undefined,
-        start: form.start,
+        start: form.start ?? undefined,
         end: form.end ?? undefined,
         images,
       });
       setForm({ title: "", description: "", location: "", start: null, end: null });
       setImages([]);
+      setAiKeywords("");
+      setAiError(null);
       setOpen(false);
     } finally {
       setSaving(false);
@@ -364,11 +385,13 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
                 <div className="flex aspect-video items-center justify-center bg-brand-50"><PartyPopper className="h-10 w-10 text-brand-500" /></div>
               )}
               <div className="p-4">
-                <p className="text-xs font-bold uppercase tracking-wide text-brand-600">{formatDate(event.start)}</p>
+                <p className="text-xs font-bold uppercase tracking-wide text-brand-600">{event.start ? formatDate(event.start) : "Date à venir"}</p>
                 <h3 className="mt-1 text-lg font-bold text-[var(--foreground)]">{event.title}</h3>
-                <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                  {formatDateTime(event.start)}{event.end ? ` → ${formatDateTime(event.end)}` : ""}
-                </p>
+                {event.start ? (
+                  <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                    {formatDateTime(event.start)}{event.end ? ` → ${formatDateTime(event.end)}` : ""}
+                  </p>
+                ) : null}
                 {event.location ? (
                   <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-[var(--foreground)]"><MapPin className="h-4 w-4 text-brand-600" />{event.location}</p>
                 ) : null}
@@ -389,18 +412,37 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
         <div className="grid gap-4">
           <Field label="Titre" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
           <Field label="Lieu"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
-          <Field label="Période" required>
+          <Field label="Période" hint="Optionnel : laissez vide pour un événement sans date précise.">
             <DateRangePicker
               value={{ start: form.start, end: form.end }}
               onChange={(range) => setForm({ ...form, start: range.start, end: range.end })}
               placeholder="Date et horaires"
             />
           </Field>
+          <Field label="Assistant IA" hint="Quelques mots-clés, l'IA rédige un post engageant (max 360 caractères).">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                value={aiKeywords}
+                onChange={(e) => setAiKeywords(e.target.value)}
+                placeholder="collecte, vélos, samedi matin..."
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void generate();
+                  }
+                }}
+              />
+              <Button type="button" variant="secondary" onClick={generate} disabled={aiLoading || !aiKeywords.trim()} className="shrink-0">
+                <Sparkles className="h-4 w-4" /> {aiLoading ? "Rédaction..." : "Rédiger avec l'IA"}
+              </Button>
+            </div>
+          </Field>
+          {aiError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{aiError}</p> : null}
           <Field label="Description"><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
           <Field label="Photos"><PhotoUpload value={images} onChange={setImages} /></Field>
           <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
             <Button variant="ghost" onClick={() => setOpen(false)}>Annuler</Button>
-            <Button onClick={save} disabled={saving || !form.title.trim() || !form.start}>
+            <Button onClick={save} disabled={saving || !form.title.trim()}>
               <Plus className="h-4 w-4" /> {saving ? "Création..." : "Créer"}
             </Button>
           </div>

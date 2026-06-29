@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { Bike, Check, CircleDashed, LayoutDashboard, Mail, Recycle, Save, Search, ShieldCheck, ShieldOff, ShoppingBag, Trash2 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Check, CircleDashed, LayoutDashboard, Mail, Save, Search, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -129,7 +128,7 @@ export function Admin() {
     <div className="space-y-6">
       <div>
         <p className="section-kicker">Administration</p>
-        <h2 className="mt-2 text-2xl font-semibold text-[var(--foreground)]">Maison mère</h2>
+        <h2 className="mt-2 text-2xl font-semibold text-[var(--foreground)]">Tableau de bord</h2>
       </div>
       <UnderlineTabs
         items={[
@@ -557,15 +556,13 @@ const num = (value: number) => numFmt.format(value);
 type AppLine = { label: string; detail: string; value: string };
 
 function AppBlock({
-  icon: Icon,
-  tint,
+  logo,
   label,
   caption,
   revenue,
   lines,
 }: {
-  icon: LucideIcon;
-  tint: string;
+  logo: string;
   label: string;
   caption: string;
   revenue: number;
@@ -575,8 +572,8 @@ function AppBlock({
     <section className="py-6 first:pt-0 last:pb-0">
       <div className="flex items-end justify-between gap-4">
         <div className="flex items-center gap-3">
-          <span className={cn("flex h-10 w-10 items-center justify-center rounded-xl text-white", tint)}>
-            <Icon className="h-5 w-5" />
+          <span className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl border border-[var(--border)] bg-white">
+            <img src={logo} alt={label} className="h-8 w-8 object-contain" />
           </span>
           <div>
             <h3 className="text-lg font-semibold leading-tight text-[var(--foreground)]">{label}</h3>
@@ -641,8 +638,7 @@ function GlobalDashboard() {
       {/* Détail par application. */}
       <div className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
         <AppBlock
-          icon={Recycle}
-          tint="bg-brand-500"
+          logo="/recyclerie-logo.png"
           label="Recyclerie"
           caption={`${num(stats.recyclerie.requests)} demandes · ${num(stats.recyclerie.open)} ouvertes`}
           revenue={stats.recyclerie.revenue}
@@ -653,8 +649,7 @@ function GlobalDashboard() {
           ]}
         />
         <AppBlock
-          icon={ShoppingBag}
-          tint="bg-indigo-500"
+          logo="/klyd-logo.png"
           label="Klyde"
           caption={`${num(stats.klyde.orders)} commandes · ${num(stats.klyde.items)} articles`}
           revenue={stats.klyde.revenue}
@@ -664,8 +659,7 @@ function GlobalDashboard() {
           ]}
         />
         <AppBlock
-          icon={Bike}
-          tint="bg-emerald-500"
+          logo="/cycle-en-bray-logo.webp"
           label="Cycle en Bray"
           caption={`${num(stats.cycle.bikes)} vélos au catalogue`}
           revenue={stats.cycle.revenue}
