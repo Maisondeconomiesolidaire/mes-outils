@@ -628,11 +628,12 @@ export const counts = query({
     if (!(await hasCrmPermission(ctx, "demandes", "read"))) {
       return { complete: 0 };
     }
-    const requests = await ctx.db.query("requests").collect();
+    const openRequests = await ctx.db
+      .query("requests")
+      .withIndex("by_outcome", (q) => q.eq("outcome", "open"))
+      .collect();
     return {
-      complete: requests.filter(
-        (request) => request.complete && request.outcome === "open",
-      ).length,
+      complete: openRequests.filter((request) => request.complete).length,
     };
   },
 });

@@ -924,6 +924,146 @@ export default defineSchema({
     .index("by_to", ["toClerkId"])
     .index("by_from", ["fromClerkId"]),
 
+  /** Cycle en Bray — vélos reconditionnés, stock CRM et boutique publique. */
+  bikes: defineTable({
+    photos: v.array(v.id("_storage")),
+    title: v.string(),
+    description: v.string(),
+    site: v.union(v.literal("60"), v.literal("76")),
+    gdrReference: v.optional(v.string()),
+    internalReference: v.optional(v.string()),
+    category: v.string(),
+    brand: v.optional(v.string()),
+    model: v.optional(v.string()),
+    condition: v.string(),
+    useMode: v.optional(v.union(v.literal("purchase"), v.literal("rental"))),
+    status: v.union(
+      v.literal("inactive"),
+      v.literal("available"),
+      v.literal("purchase_pending"),
+      v.literal("sold"),
+      // Valeurs intermédiaires conservées pour compatibilité/migration.
+      v.literal("waiting"),
+      v.literal("online"),
+      v.literal("draft"),
+      v.literal("atelier"),
+      v.literal("ready"),
+      v.literal("reserved"),
+      v.literal("archived"),
+    ),
+    pipelineStatus: v.optional(v.union(
+      v.literal("nouveau"),
+      v.literal("validation"),
+      v.literal("en_cours"),
+      v.literal("gagnee"),
+      v.literal("perdue"),
+    )),
+    processStep: v.optional(v.number()),
+    processLog: v.optional(v.array(v.object({
+      step: v.number(),
+      by: v.string(),
+      at: v.number(),
+    }))),
+    customerName: v.optional(v.string()),
+    customerEmail: v.optional(v.string()),
+    customerPhone: v.optional(v.string()),
+    customerNotes: v.optional(v.string()),
+    price: v.optional(v.number()),
+    originalPrice: v.optional(v.number()),
+    sizeLabel: v.optional(v.string()),
+    frameHeightCm: v.optional(v.number()),
+    riderMinCm: v.optional(v.number()),
+    riderMaxCm: v.optional(v.number()),
+    wheelSize: v.optional(v.string()),
+    frameMaterial: v.optional(v.string()),
+    color: v.optional(v.string()),
+    weightKg: v.optional(v.number()),
+    brakeType: v.optional(v.string()),
+    drivetrain: v.optional(v.string()),
+    speeds: v.optional(v.number()),
+    motor: v.optional(v.string()),
+    batteryWh: v.optional(v.number()),
+    autonomyKm: v.optional(v.number()),
+    accessories: v.optional(v.array(v.string())),
+    repairs: v.optional(v.array(v.string())),
+    defects: v.optional(v.array(v.string())),
+    location: v.optional(v.string()),
+    featured: v.optional(v.boolean()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_status", ["status"])
+    .index("by_site", ["site"])
+    .index("by_category", ["category"])
+    .index("by_gdrReference", ["gdrReference"])
+    .index("by_featured", ["featured"])
+    .index("by_createdAt", ["createdAt"]),
+
+  cycleCustomers: defineTable({
+    firstName: v.string(),
+    lastName: v.string(),
+    email: v.string(),
+    phone: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
+
+  cycleRequests: defineTable({
+    requestKind: v.optional(v.union(v.literal("reservation"), v.literal("reebike"), v.literal("repair"))),
+    bikeId: v.optional(v.id("bikes")),
+    bikeTitle: v.string(),
+    bikeGdrReference: v.optional(v.string()),
+    customerId: v.id("cycleCustomers"),
+    customer: v.object({
+      firstName: v.string(),
+      lastName: v.string(),
+      email: v.string(),
+      phone: v.string(),
+      message: v.optional(v.string()),
+    }),
+    reebike: v.optional(v.object({
+      desiredAt: v.string(),
+      duration: v.optional(v.string()),
+      formula: v.string(),
+      frontBrake: v.string(),
+      bikeType: v.string(),
+      wheelSize: v.string(),
+      compatibilityPhotos: v.optional(v.array(v.id("_storage"))),
+    })),
+    reservation: v.optional(v.object({
+      rentalStart: v.optional(v.string()),
+      rentalEnd: v.optional(v.string()),
+    })),
+    rental: v.optional(v.object({
+      startDate: v.string(),
+      endDate: v.string(),
+    })),
+    management: v.optional(v.object({
+      site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+      assignedTo: v.optional(v.string()),
+      notes: v.optional(v.string()),
+    })),
+    pipelineStatus: v.union(
+      v.literal("nouveau"),
+      v.literal("validation"),
+      v.literal("en_cours"),
+      v.literal("gagnee"),
+      v.literal("perdue"),
+    ),
+    processStep: v.number(),
+    processLog: v.optional(v.array(v.object({
+      step: v.number(),
+      by: v.string(),
+      at: v.number(),
+    }))),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_pipelineStatus", ["pipelineStatus"])
+    .index("by_bikeId", ["bikeId"])
+    .index("by_customerId", ["customerId"])
+    .index("by_createdAt", ["createdAt"]),
+
   /* ─── Klyd : boutique textile (base de données partagée, tables dédiées) ──── */
 
   /**

@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { action, env, mutation, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireCrmPermission, requireStaff, requireUser } from "./lib";
+import { hasCrmPermission, requireCrmPermission, requireStaff, requireUser } from "./lib";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE_KEY = "mesoutils:actualites";
@@ -360,10 +360,5 @@ export const listStaffDirectory = action({
 });
 
 async function canManage(ctx: QueryCtx | MutationCtx) {
-  try {
-    await requireCrmPermission(ctx, PAGE_KEY, "manage");
-    return true;
-  } catch {
-    return false;
-  }
+  return await hasCrmPermission(ctx, PAGE_KEY, "manage");
 }

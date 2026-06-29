@@ -2,6 +2,7 @@ import {
   CalendarCheck,
   CalendarClock,
   CalendarDays,
+  Bike,
   CarFront,
   Bell,
   DoorOpen,
@@ -44,7 +45,7 @@ export type Access = {
 };
 
 export type AppDefinition = {
-  key: "recycapp" | "mesoutils" | "klyde" | "pointage" | "collecte";
+  key: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "pointage" | "collecte";
   label: string;
   description: string;
   icon: LucideIcon;
@@ -57,7 +58,7 @@ export type AppDefinition = {
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils" | "klyde";
+  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray";
   key: string;
   label: string;
   description: string;
@@ -262,7 +263,31 @@ export const KLYDE_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES];
+export const CYCLEENBRAY_PAGES: PermissionPage[] = [
+  {
+    app: "cycleenbray",
+    key: "cycle:stock",
+    label: "Stock velos",
+    description: "Creation, publication et suivi des velos reconditionnes.",
+    actions: ["read", "create", "update", "delete", "print"],
+  },
+  {
+    app: "cycleenbray",
+    key: "cycle:boutique",
+    label: "Boutique Cycle en Bray",
+    description: "Catalogue public, filtres, mise en avant et reservations.",
+    actions: ["read", "manage"],
+  },
+  {
+    app: "cycleenbray",
+    key: "cycle:admin",
+    label: "Admin Cycle en Bray",
+    description: "Configuration et droits de l'application Cycle en Bray.",
+    actions: ["read", "manage"],
+  },
+];
+
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
@@ -286,6 +311,16 @@ export const APPS: AppDefinition[] = [
     external: true,
     accent: "from-brand-500 to-brand-600",
     cardBg: "#f6eee5",
+  },
+  {
+    key: "cycleenbray",
+    label: "Cycle en Bray",
+    description: "CRM velo et boutique premium pour les Recycleries 60 et 76.",
+    icon: Bike,
+    href: import.meta.env.VITE_CYCLEENBRAY_URL ?? "https://cycleenbray.vercel.app",
+    external: true,
+    accent: "from-emerald-500 to-zinc-900",
+    cardBg: "#eef7f1",
   },
 ];
 
@@ -358,6 +393,9 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
   if (appKey === "klyde") {
     return access.grants.some((grant) => grant.pageKey.startsWith("klyde:"));
   }
+  if (appKey === "cycleenbray") {
+    return access.grants.some((grant) => grant.pageKey.startsWith("cycle:"));
+  }
   return access.grants.some((grant) => !grant.pageKey.includes(":"));
 }
 
@@ -366,5 +404,6 @@ export function groupPagesByApp() {
     { key: "mesoutils", label: "Mes Outils", pages: MESOUTILS_PAGES },
     { key: "recycapp", label: "Recyclerie", pages: RECYCAPP_PAGES },
     { key: "klyde", label: "Klyde", pages: KLYDE_PAGES },
+    { key: "cycleenbray", label: "Cycle en Bray", pages: CYCLEENBRAY_PAGES },
   ] as const;
 }

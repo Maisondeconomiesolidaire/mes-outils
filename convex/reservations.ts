@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireCrmPermission, requireUser } from "./lib";
+import { hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
@@ -211,14 +211,7 @@ export const cancelRoomReservation = mutation({
     const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
-    const isManager = await (async () => {
-      try {
-        await requireCrmPermission(ctx, PAGE_KEY, "manage");
-        return true;
-      } catch {
-        return false;
-      }
-    })();
+    const isManager = await hasCrmPermission(ctx, PAGE_KEY, "manage");
     if (reservation.clerkId !== identity.subject && !isManager) {
       throw new Error("Annulation non autorisée.");
     }
@@ -366,14 +359,7 @@ export const listVehicleReservations = query({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
-    const canManage = await (async () => {
-      try {
-        await requireCrmPermission(ctx, PAGE_KEY, "manage");
-        return true;
-      } catch {
-        return false;
-      }
-    })();
+    const canManage = await hasCrmPermission(ctx, PAGE_KEY, "manage");
     const reservations = await ctx.db
       .query("vehicleReservations")
       .order("desc")
@@ -539,14 +525,7 @@ export const cancelVehicleReservation = mutation({
     const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
-    const canManage = await (async () => {
-      try {
-        await requireCrmPermission(ctx, PAGE_KEY, "manage");
-        return true;
-      } catch {
-        return false;
-      }
-    })();
+    const canManage = await hasCrmPermission(ctx, PAGE_KEY, "manage");
     if (reservation.clerkId !== identity.subject && !canManage) {
       throw new Error("Annulation non autorisée.");
     }

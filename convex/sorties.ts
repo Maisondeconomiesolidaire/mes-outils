@@ -94,8 +94,8 @@ async function resolveRequestIdForStop(
 
   const candidates = (await ctx.db
     .query("requests")
+    .withIndex("by_outcome", (q) => q.eq("outcome", "open"))
     .filter((q) => q.eq(q.field("type"), "collecte"))
-    .filter((q) => q.eq(q.field("outcome"), "open"))
     .collect()).filter((request) => {
       if (requestCollectAddressKey(request) !== stopAddress) return false;
       if (!stopContact) return true;
@@ -807,8 +807,8 @@ export const listUpcomingCollectes = query({
     await requireCrmPermission(ctx, "tournees", "read");
     return await ctx.db
       .query("requests")
+      .withIndex("by_outcome", (q) => q.eq("outcome", "open"))
       .filter((q) => q.eq(q.field("type"), "collecte"))
-      .filter((q) => q.eq(q.field("outcome"), "open"))
       .order("desc")
       .take(50);
   },

@@ -229,10 +229,16 @@ export function Salles() {
 }
 
 function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda" | "calendar" }) {
-  const now = Date.now();
+  // Borne la fenêtre au début du jour (et non à la milliseconde) pour que les
+  // arguments de la query restent identiques d'un rendu à l'autre. Sinon Convex
+  // considère chaque rendu comme une nouvelle souscription et relance la query
+  // en boucle (compteur d'appels anormalement élevé).
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dayStart = today.getTime();
   const reservations = useQuery(api.reservations.listRoomReservations, {
-    start: now - 86_400_000,
-    end: now + 60 * 86_400_000,
+    start: dayStart - 86_400_000,
+    end: dayStart + 60 * 86_400_000,
   }) as
     | Array<{
         _id: Id<"roomReservations">;
@@ -264,7 +270,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   if (mode === "calendar") {
     return (
       <div className="space-y-3">
-        <CalendarBoard events={events} selected={now} />
+        <CalendarBoard events={events} selected={dayStart} />
         {upcoming.length === 0 ? (
           <p className="text-sm text-[var(--muted-foreground)]">Aucune réservation de salle sur la période affichée.</p>
         ) : null}
