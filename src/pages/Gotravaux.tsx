@@ -155,10 +155,10 @@ export function Gotravaux() {
             ) : (
               <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                 {filteredVehicles.map((vehicle) => (
-                  <article key={vehicle._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm transition hover:shadow-md">
-                    <div className="relative aspect-video bg-[var(--muted)]">
+                  <article key={vehicle._id} onClick={() => setDetailsVehicleId(vehicle._id)} className="group cursor-pointer overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm transition hover:shadow-md">
+                    <div className="relative aspect-video overflow-hidden bg-[var(--muted)]">
                       {vehicle.photoUrl ? (
-                        <img src={vehicle.photoUrl} alt={vehicle.name} className="h-full w-full object-cover" />
+                        <img src={vehicle.photoUrl} alt={vehicle.name} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
                       ) : (
                         <div className="flex h-full flex-col items-center justify-center gap-2 text-[var(--muted-foreground)]"><CarFront className="h-10 w-10" /><span className="text-sm font-semibold">Photo à ajouter</span></div>
                       )}
@@ -190,7 +190,6 @@ export function Gotravaux() {
                           <dd className="font-semibold text-[var(--foreground)]">{vehicle.brand || "—"}</dd>
                         </div>
                       </dl>
-                      <Button variant="secondary" className="mt-4 w-full" onClick={() => setDetailsVehicleId(vehicle._id)}>Détails</Button>
                     </div>
                   </article>
                 ))}

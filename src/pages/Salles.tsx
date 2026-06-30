@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { CalendarDays, DoorOpen, Pencil, Plus, Save, Trash2, Users } from "lucide-react";
+import { CalendarDays, DoorOpen, Plus, Save, Trash2, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
@@ -145,10 +145,14 @@ export function Salles() {
           ) : (
             <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {rooms.map((room) => (
-                <article key={room._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm transition hover:shadow-md">
-                  <div className="relative aspect-video bg-[var(--muted)]">
+                <article
+                  key={room._id}
+                  onClick={canEdit ? () => openEdit(room._id) : undefined}
+                  className={`group overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm transition hover:shadow-md ${canEdit ? "cursor-pointer" : ""}`}
+                >
+                  <div className="relative aspect-video overflow-hidden bg-[var(--muted)]">
                     {room.photoUrl ? (
-                      <img src={room.photoUrl} alt={room.name} className="h-full w-full object-cover" />
+                      <img src={room.photoUrl} alt={room.name} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
                     ) : (
                       <div className="flex h-full items-center justify-center text-[var(--muted-foreground)]">
                         <DoorOpen className="h-10 w-10" />
@@ -167,12 +171,6 @@ export function Salles() {
                       <Users className="h-4 w-4" />
                       {room.capacity ? `${room.capacity} personnes` : "Capacité —"}
                     </div>
-                    {canEdit ? (
-                      <Button variant="secondary" size="sm" className="mt-4 w-full" onClick={() => openEdit(room._id)}>
-                        <Pencil className="h-4 w-4" />
-                        Modifier la salle
-                      </Button>
-                    ) : null}
                   </div>
                 </article>
               ))}
