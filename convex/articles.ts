@@ -477,8 +477,7 @@ export const create = mutation({
       gdrReference: args.gdrReference,
     });
     const { desiredStatus, ...articleArgs } = args;
-    const shouldKeepForLot =
-      args.price < 10 || desiredStatus === "attente" || desiredStatus === "lot";
+    const shouldKeepForLot = desiredStatus === "attente" || desiredStatus === "lot";
     const articleId = await ctx.db.insert("articles", {
       ...articleArgs,
       weightKg: normalizeWeightKg(args.weightKg),
