@@ -25,7 +25,7 @@ export type CalendarEvent = {
   end?: number;
   title: string;
   subtitle?: string;
-  tone?: "brand" | "amber" | "rose" | "sky" | "zinc";
+  tone?: "brand" | "amber" | "rose" | "sky" | "zinc" | "violet";
 };
 
 export function CalendarBoard({
@@ -207,6 +207,7 @@ function toneClass(tone: CalendarEvent["tone"] = "brand") {
     rose: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
     sky: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200",
     zinc: "bg-zinc-100 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200",
+    violet: "bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-200",
   };
   return map[tone];
 }

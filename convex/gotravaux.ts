@@ -1,9 +1,15 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { requireCrmPermission, requireUser } from "./lib";
+import { action, mutation, query } from "./_generated/server";
+import { api } from "./_generated/api";
+import { accessAllows, customerFullName, requireCrmPermission, requireUser } from "./lib";
+import { buildAddressString, drivingDistanceKm, geocode } from "./livraison";
+import type { Id } from "./_generated/dataModel";
 
 const FLEET_PAGE_KEY = "mesoutils:gotravaux";
 const ROOMS_PAGE_KEY = "mesoutils:salles";
+
+/** Dépôt de départ pour le calcul des distances (identique aux tournées / livraisons). */
+const DEPOT_ADDRESS = "4 rue de la prairie 60650 Lachapelle-aux-Pots";
 
 const vehicleKind = v.union(
   v.literal("utilitaire"),
@@ -256,6 +262,114 @@ export const updateVehicleTask = mutation({
       priority: args.priority,
       updatedAt: Date.now(),
     });
+  },
+});
+
+/* ─── Services planifiés avec véhicule affecté (calendrier flotte) ─────────── */
+
+/** Adresse pertinente où le véhicule se rend pour un service donné. */
+function resolveServiceAddress(request: {
+  collecte?: { collectAddress?: { address?: string; postalCode?: string; city?: string } };
+  livraison?: { deliveryAddress?: { address?: string; postalCode?: string; city?: string } };
+  aerogommageOptions?: {
+    deliveryAddress?: { address?: string; postalCode?: string; city?: string };
+    pickupAddress?: { address?: string; postalCode?: string; city?: string };
+  };
+  customer: { address?: string; postalCode?: string; city?: string };
+}) {
+  const candidates = [
+    request.collecte?.collectAddress,
+    request.livraison?.deliveryAddress,
+    request.aerogommageOptions?.deliveryAddress,
+    request.aerogommageOptions?.pickupAddress,
+  ];
+  for (const candidate of candidates) {
+    if (candidate?.address) return candidate;
+  }
+  return {
+    address: request.customer.address,
+    postalCode: request.customer.postalCode,
+    city: request.customer.city,
+  };
+}
+
+/**
+ * Demandes ouvertes (collecte, livraison, aérogommage…) ayant un véhicule de la
+ * flotte affecté et une date planifiée — pour les afficher dans le calendrier
+ * Gotravaux à côté des réservations et des maintenances.
+ */
+export const listScheduledServices = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "read");
+    const requests = await ctx.db
+      .query("requests")
+      .withIndex("by_outcome", (q) => q.eq("outcome", "open"))
+      .collect();
+    const scheduled = requests.filter(
+      (request) => request.assignedVehicle && request.scheduledDate,
+    );
+    if (scheduled.length === 0) return [];
+
+    const vehicles = await ctx.db.query("vehicles").collect();
+    const vehicleById = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
+
+    return await Promise.all(
+      scheduled.map(async (request) => {
+        const vehicle = vehicleById.get(String(request.assignedVehicle));
+        const address = resolveServiceAddress(request);
+        return {
+          _id: request._id,
+          type: request.type,
+          collecteType: request.collecteType ?? null,
+          reference: request.reference ?? null,
+          scheduledDate: request.scheduledDate as number,
+          vehicleId: request.assignedVehicle as Id<"vehicles">,
+          vehicleName: vehicle?.name ?? null,
+          vehiclePlate: vehicle?.plate ?? null,
+          vehiclePhotoUrl: vehicle?.photo
+            ? await ctx.storage.getUrl(vehicle.photo)
+            : (vehicle?.photoUrl ?? null),
+          customerName: customerFullName(request.customer),
+          address: address.address ?? null,
+          postalCode: address.postalCode ?? null,
+          city: address.city ?? null,
+          // Distance déjà calculée (livraison) : aller-retour, indicative.
+          storedDistanceKm: request.livraison?.distanceKm ?? null,
+        };
+      }),
+    );
+  },
+});
+
+/**
+ * Distance routière (km, aller simple) entre le dépôt et l'adresse d'un service,
+ * via Mapbox. Calculée à la demande depuis la modale détail du calendrier.
+ */
+export const computeServiceDistance = action({
+  args: {
+    address: v.string(),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ distanceKm: number }> => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, FLEET_PAGE_KEY, "read")) {
+      throw new Error("Accès CRM insuffisant.");
+    }
+    const accessToken = process.env.MAPBOX_ACCESS_TOKEN;
+    if (!accessToken) {
+      throw new Error("MAPBOX_ACCESS_TOKEN n'est pas configurée côté Convex.");
+    }
+    const destination = buildAddressString(args);
+    if (!destination) throw new Error("Adresse du service manquante.");
+
+    const [depot, target] = await Promise.all([
+      geocode(DEPOT_ADDRESS, accessToken),
+      geocode(destination, accessToken),
+    ]);
+    const oneWayKm = await drivingDistanceKm(depot, target, accessToken);
+    return { distanceKm: Math.round(oneWayKm * 10) / 10 };
   },
 });
 

@@ -35,7 +35,7 @@ const ARTICLE_CATEGORIES: Record<string, string[]> = {
 
 // ─── Helpers Mapbox ──────────────────────────────────────────────────────────
 
-async function geocode(
+export async function geocode(
   address: string,
   accessToken: string,
 ): Promise<{ longitude: number; latitude: number }> {
@@ -63,7 +63,7 @@ async function geocode(
 }
 
 /** Distance routière (km) entre deux points via Mapbox Directions. */
-async function drivingDistanceKm(
+export async function drivingDistanceKm(
   from: { longitude: number; latitude: number },
   to: { longitude: number; latitude: number },
   accessToken: string,
@@ -104,7 +104,7 @@ function haversineKm(
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-function buildAddressString(a: {
+export function buildAddressString(a: {
   address?: string;
   postalCode?: string;
   city?: string;

@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useEffect, useMemo, useState } from "react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router-dom";
 import {
   CalendarClock,
@@ -8,7 +8,9 @@ import {
   Check,
   FileText,
   Info,
+  MapPin,
   Plus,
+  Route,
   Search,
   Trash2,
   Users,
@@ -72,6 +74,37 @@ type VehicleTask = {
   endDate?: number;
   createdBy: string;
 };
+
+type ServiceType = "aerogommage" | "collecte" | "article" | "velo" | "livraison";
+
+type ServiceItem = {
+  _id: Id<"requests">;
+  type: ServiceType;
+  collecteType?: string | null;
+  reference?: string | null;
+  scheduledDate: number;
+  vehicleId: Id<"vehicles">;
+  vehicleName?: string | null;
+  vehiclePlate?: string | null;
+  vehiclePhotoUrl?: string | null;
+  customerName: string;
+  address?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  storedDistanceKm?: number | null;
+};
+
+const SERVICE_LABELS: Record<ServiceType, string> = {
+  collecte: "Collecte",
+  livraison: "Livraison",
+  aerogommage: "Aérogommage",
+  article: "Article",
+  velo: "Vélo",
+};
+
+function serviceAddressString(service: ServiceItem) {
+  return [service.address, service.postalCode, service.city].filter(Boolean).join(" ");
+}
 
 function normalizeVehicleKind(kind: string): VehicleKind {
   return kind === "voiture" ? "voiture" : "utilitaire";
@@ -640,6 +673,16 @@ type AgendaEntry =
       label: string;
       sublabel: string;
       tone: "reservation" | "pending";
+    }
+  | {
+      id: string;
+      kind: "service";
+      service: ServiceItem;
+      date: number;
+      endDate?: number;
+      label: string;
+      sublabel: string;
+      tone: "service";
     };
 
 function FleetCalendar({
@@ -660,10 +703,12 @@ function FleetCalendar({
   const access = usePermissionsAccess();
   const canManageReservations = canAccess(access, "mesoutils:reservations", "manage");
   const reservations = useQuery(api.reservations.listVehicleReservations, canSeeReservations ? {} : "skip") as ReservationItem[] | undefined;
+  const services = useQuery(api.gotravaux.listScheduledServices, {}) as ServiceItem[] | undefined;
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
   const [selectedDay, setSelectedDay] = useState(() => startOfDayTimestamp(Date.now()));
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"vehicleReservations"> | null>(null);
+  const [selectedServiceId, setSelectedServiceId] = useState<Id<"requests"> | null>(null);
   const entries: AgendaEntry[] = [];
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
@@ -693,20 +738,44 @@ function FleetCalendar({
       tone: reservation.status === "approved" ? "reservation" : "pending",
     });
   }
+  for (const service of services ?? []) {
+    entries.push({
+      id: `service-${service._id}`,
+      kind: "service",
+      service,
+      date: service.scheduledDate,
+      label: `${SERVICE_LABELS[service.type]} · ${service.vehicleName ?? vehicleName.get(String(service.vehicleId)) ?? "Véhicule"}`,
+      sublabel: [service.customerName, service.city].filter(Boolean).join(" · "),
+      tone: "service",
+    });
+  }
 
-  const toneStyles = { reservation: "border-l-brand-500", maintenance: "border-l-amber-500", pending: "border-l-sky-500" };
+  const toneStyles = {
+    reservation: "border-l-brand-500",
+    maintenance: "border-l-amber-500",
+    pending: "border-l-sky-500",
+    service: "border-l-violet-500",
+  };
   const calendarEvents: CalendarEvent[] = entries.map((entry) => ({
     id: entry.id,
     start: entry.date,
     end: entry.endDate,
     title: entry.label,
     subtitle: entry.sublabel,
-    tone: entry.tone === "maintenance" ? "amber" : entry.tone === "pending" ? "sky" : "brand",
+    tone:
+      entry.tone === "maintenance"
+        ? "amber"
+        : entry.tone === "pending"
+          ? "sky"
+          : entry.tone === "service"
+            ? "violet"
+            : "brand",
   }));
   const selectedDayEntries = entries
     .filter((entry) => overlapsDay(entry.date, entry.endDate, selectedDay))
     .sort((a, b) => a.date - b.date);
   const selectedReservation = reservations?.find((reservation) => reservation._id === selectedReservationId) ?? null;
+  const selectedService = services?.find((service) => service._id === selectedServiceId) ?? null;
 
   async function decideAndClose(reservationId: Id<"vehicleReservations">, decision: "approved" | "rejected") {
     await decide({ reservationId, decision });
@@ -718,6 +787,7 @@ function FleetCalendar({
     if (!entry) return;
     setSelectedDay(startOfDayTimestamp((day ?? new Date(entry.date)).getTime()));
     if (entry.kind === "reservation") setSelectedReservationId(entry.reservation._id);
+    else if (entry.kind === "service") setSelectedServiceId(entry.service._id);
     else onOpenVehicle(entry.task.vehicleId);
   }
 
@@ -748,6 +818,10 @@ function FleetCalendar({
                 {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente</span> : null}
                 {entry.kind === "reservation" ? (
                   <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(entry.reservation._id)}>
+                    <Info className="h-4 w-4" />Détails
+                  </Button>
+                ) : entry.kind === "service" ? (
+                  <Button size="sm" variant="secondary" onClick={() => setSelectedServiceId(entry.service._id)}>
                     <Info className="h-4 w-4" />Détails
                   </Button>
                 ) : (
@@ -789,7 +863,97 @@ function FleetCalendar({
           setSelectedReservationId(null);
         }}
       />
+      <ServiceDetailsModal service={selectedService} onClose={() => setSelectedServiceId(null)} />
     </div>
+  );
+}
+
+function ServiceDetailsModal({ service, onClose }: { service: ServiceItem | null; onClose: () => void }) {
+  const computeDistance = useAction(api.gotravaux.computeServiceDistance);
+  const [distanceKm, setDistanceKm] = useState<number | null>(null);
+  const [distanceError, setDistanceError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const serviceId = service?._id ?? null;
+  const fullAddress = service ? serviceAddressString(service) : "";
+
+  useEffect(() => {
+    setDistanceKm(null);
+    setDistanceError(null);
+    if (!serviceId || !service) return;
+    if (!fullAddress) {
+      setDistanceError("Aucune adresse renseignée pour ce service.");
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    computeDistance({
+      address: service.address ?? "",
+      postalCode: service.postalCode ?? undefined,
+      city: service.city ?? undefined,
+    })
+      .then((result) => {
+        if (!cancelled) setDistanceKm(result.distanceKm);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setDistanceError(error instanceof Error ? error.message : "Calcul de distance impossible.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceId]);
+
+  if (!service) return null;
+
+  return (
+    <Modal open onClose={onClose} title="Détail du service planifié">
+      <div className="grid gap-4">
+        <div className="flex items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-3">
+          <div className="h-16 w-24 shrink-0 overflow-hidden rounded-xl bg-[var(--muted)]">
+            {service.vehiclePhotoUrl ? <img src={service.vehiclePhotoUrl} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-[var(--muted-foreground)]"><CarFront className="h-6 w-6" /></div>}
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-violet-100 px-2.5 py-1 text-xs font-semibold text-violet-800 dark:bg-violet-500/20 dark:text-violet-200">{SERVICE_LABELS[service.type]}</span>
+              {service.reference ? <span className="text-sm font-semibold text-[var(--muted-foreground)]">#{service.reference}</span> : null}
+            </div>
+            <p className="mt-1 truncate text-sm font-semibold text-[var(--foreground)]">{service.vehicleName ?? "Véhicule"}{service.vehiclePlate ? ` · ${service.vehiclePlate}` : ""}</p>
+          </div>
+        </div>
+
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <DetailItem label="Type de service" value={SERVICE_LABELS[service.type]} />
+          <DetailItem label="Véhicule" value={service.vehicleName ?? "—"} />
+          <DetailItem label="Date planifiée" value={formatDateTime(service.scheduledDate)} />
+          <DetailItem label="Client" value={service.customerName || "—"} />
+        </dl>
+
+        <div className="rounded-xl border border-[var(--border)] p-3">
+          <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]"><MapPin className="h-3.5 w-3.5" />Adresse</p>
+          <p className="mt-1 text-sm text-[var(--foreground)]">{fullAddress || "Non renseignée"}</p>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border)] p-3">
+          <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]"><Route className="h-3.5 w-3.5" />Distance depuis le dépôt</p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">4 rue de la prairie 60650 Lachapelle-aux-Pots → adresse du service (aller simple)</p>
+          {loading ? (
+            <p className="mt-2 text-sm font-semibold text-[var(--foreground)]">Calcul en cours…</p>
+          ) : distanceError ? (
+            <p className="mt-2 text-sm font-semibold text-rose-600">{distanceError}</p>
+          ) : distanceKm !== null ? (
+            <p className="mt-2 text-lg font-bold text-[var(--foreground)]">{distanceKm.toLocaleString("fr-FR")} km</p>
+          ) : null}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
+          <Button variant="ghost" onClick={onClose}>Fermer</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
