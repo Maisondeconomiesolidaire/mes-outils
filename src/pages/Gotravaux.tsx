@@ -57,6 +57,8 @@ type Vehicle = {
   saleDate?: string;
   active: boolean;
   recycappEnabled?: boolean;
+  reservablePro?: boolean;
+  reservablePersonal?: boolean;
   photo?: Id<"_storage">;
   photoUrl?: string | null;
   openTasksCount: number;
@@ -267,7 +269,7 @@ const emptyVehicleForm = {
   name: "", plate: "", kind: "utilitaire" as VehicleKind, site: "" as "" | "60" | "76",
   brand: "", model: "", seats: "", assignedTo: "", photo: null as Id<"_storage"> | null, photoUrl: "",
   odometerKm: "", technicalControlDate: "", pollutionControlDate: "", status: "active" as VehicleStatus,
-  recycappEnabled: false,
+  recycappEnabled: false, reservablePro: true, reservablePersonal: false,
 };
 type VehicleFormState = typeof emptyVehicleForm;
 
@@ -284,6 +286,8 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
           technicalControlDate: vehicle.technicalControlDate ?? "", pollutionControlDate: vehicle.pollutionControlDate ?? "",
           status: vehicle.saleDate ? ("sold" as VehicleStatus) : vehicle.active ? ("active" as VehicleStatus) : ("immobilized" as VehicleStatus),
           recycappEnabled: vehicle.recycappEnabled === true,
+          reservablePro: vehicle.reservablePro !== false,
+          reservablePersonal: vehicle.reservablePersonal === true,
         }
       : emptyVehicleForm,
   );
@@ -299,6 +303,8 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
       technicalControlDate: nextForm.technicalControlDate || undefined, pollutionControlDate: nextForm.pollutionControlDate || undefined,
       active: nextForm.status === "active",
       recycappEnabled: nextForm.recycappEnabled,
+      reservablePro: nextForm.reservablePro,
+      reservablePersonal: nextForm.reservablePersonal,
     };
   }
 
@@ -366,6 +372,46 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
           <option value="sold">Vendu</option>
         </Select>
       </Field>
+      <div className="grid gap-3">
+        <p className="text-sm font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Réservation</p>
+        <label className="rounded-xl border border-[var(--border)] bg-[var(--accent)] p-4">
+          <span className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={form.reservablePro}
+              onChange={(e) => updateForm({ reservablePro: e.target.checked })}
+              className="mt-1 h-4 w-4 accent-brand-500"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-[var(--foreground)]">
+                Réservable pour un usage professionnel
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-[var(--muted-foreground)]">
+                Autorise la réservation de ce véhicule pour les déplacements professionnels.
+              </span>
+            </span>
+          </span>
+        </label>
+        <label className="rounded-xl border border-[var(--border)] bg-[var(--accent)] p-4">
+          <span className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              checked={form.reservablePersonal}
+              onChange={(e) => updateForm({ reservablePersonal: e.target.checked })}
+              className="mt-1 h-4 w-4 accent-brand-500"
+            />
+            <span>
+              <span className="block text-sm font-semibold text-[var(--foreground)]">
+                Réservable pour un usage personnel
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-[var(--muted-foreground)]">
+                Autorise la réservation de ce véhicule pour les déplacements personnels.
+              </span>
+            </span>
+          </span>
+        </label>
+      </div>
+
       <label className="rounded-xl border border-[var(--border)] bg-[var(--accent)] p-4">
         <span className="flex items-start gap-3">
           <input

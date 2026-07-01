@@ -83,6 +83,8 @@ export const createVehicle = mutation({
     technicalControlDate: v.optional(v.string()),
     pollutionControlDate: v.optional(v.string()),
     recycappEnabled: v.optional(v.boolean()),
+    reservablePro: v.optional(v.boolean()),
+    reservablePersonal: v.optional(v.boolean()),
     active: v.boolean(),
   },
   handler: async (ctx, args) => {
@@ -121,6 +123,8 @@ export const updateVehicle = mutation({
     insurancePolicy: v.optional(v.string()),
     saleDate: v.optional(v.string()),
     recycappEnabled: v.optional(v.boolean()),
+    reservablePro: v.optional(v.boolean()),
+    reservablePersonal: v.optional(v.boolean()),
     active: v.boolean(),
   },
   handler: async (ctx, { vehicleId, ...patch }) => {
