@@ -351,7 +351,7 @@ export const APPS: AppDefinition[] = [
   {
     key: "bennespro",
     label: "Bennes & Pro",
-    description: "Le suivi des déchets déposés par les professionnels sur nos sites.",
+    description: "Gestion déchet'lab",
     icon: Truck,
     logoSrc: "/bennespro-logo.png",
     href: import.meta.env.VITE_BENNESPRO_URL ?? "https://bennespro.vercel.app",
