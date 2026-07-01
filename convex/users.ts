@@ -110,15 +110,25 @@ export const updateMyProfile = mutation({
   },
   handler: async (ctx, args) => {
     const identity = await requireUser(ctx);
-    const profile = await getProfileByClerkId(ctx, identity.subject);
-    if (!profile) throw new Error("Profil introuvable.");
     const patch = {
       ...args,
       ...(args.firstName !== undefined ? { firstName: titleCaseName(args.firstName) } : {}),
       ...(args.lastName !== undefined ? { lastName: titleCaseName(args.lastName) } : {}),
       updatedAt: Date.now(),
     };
-    await ctx.db.patch(profile._id, patch);
+    const profile = await getProfileByClerkId(ctx, identity.subject);
+    if (profile) {
+      await ctx.db.patch(profile._id, patch);
+      return;
+    }
+    // Le profil n'existe pas encore (syncProfile pas encore passé) : on le crée
+    // pour ne jamais perdre les coordonnées saisies par le client.
+    await ctx.db.insert("users", {
+      clerkId: identity.subject,
+      email: (identity.email ?? "").toLowerCase(),
+      createdAt: Date.now(),
+      ...patch,
+    });
   },
 });
 

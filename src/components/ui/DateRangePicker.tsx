@@ -1,6 +1,6 @@
 import { format, isSameDay, setHours, setMinutes } from "date-fns";
 import { fr } from "date-fns/locale";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Clock, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
@@ -15,13 +15,11 @@ const TIME_OPTIONS = Array.from({ length: 24 }, (_, index) => {
 
 export type DateRange = { start: number | null; end: number | null };
 type TimeValue = { h: number; m: number };
-type WizardStep = "startDate" | "startTime" | "endDate" | "endTime";
+type WizardStep = "start" | "end";
 
 const WIZARD_STEPS: Array<{ key: WizardStep; label: string }> = [
-  { key: "startDate", label: "Date début" },
-  { key: "startTime", label: "Heure début" },
-  { key: "endDate", label: "Date fin" },
-  { key: "endTime", label: "Heure fin" },
+  { key: "start", label: "Début" },
+  { key: "end", label: "Fin" },
 ];
 
 export function DateRangePicker({
@@ -36,7 +34,7 @@ export function DateRangePicker({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<WizardStep>("startDate");
+  const [step, setStep] = useState<WizardStep>("start");
   const [maxVisitedStep, setMaxVisitedStep] = useState(0);
 
   const [startDay, setStartDay] = useState<Date | null>(value.start ? new Date(value.start) : null);
@@ -100,7 +98,7 @@ export function DateRangePicker({
   }
 
   function selectDay(day: Date) {
-    if (step === "startDate") {
+    if (step === "start") {
       setStartDay(day);
       const nextEndDay = !endDay || day.getTime() > endDay.getTime() ? day : endDay;
       if (nextEndDay !== endDay) setEndDay(nextEndDay);
@@ -126,8 +124,8 @@ export function DateRangePicker({
 
   const label = value.start && value.end ? rangeLabel(value, withTime) : placeholder;
   const currentStepIndex = WIZARD_STEPS.findIndex((item) => item.key === step);
-  const activeTitle = stepTitle(step);
-  const canGoNext = canContinue(step, startDay, endDay);
+  const activeTitle = stepTitle(step, withTime);
+  const canGoNext = canContinue(step, startDay);
   const canValidate = Boolean(value.start && value.end);
 
   return (
@@ -136,7 +134,7 @@ export function DateRangePicker({
         type="button"
         onClick={() => {
           setOpen((current) => !current);
-          setStep("startDate");
+          setStep("start");
           setMaxVisitedStep(value.start && value.end ? WIZARD_STEPS.length - 1 : 0);
         }}
         className={cn(
@@ -165,7 +163,7 @@ export function DateRangePicker({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
-                  Étape {currentStepIndex + 1} / 4
+                  Étape {currentStepIndex + 1} / {WIZARD_STEPS.length}
                 </p>
                 <p className="mt-1 text-base font-semibold text-[var(--foreground)]">{activeTitle}</p>
               </div>
@@ -178,7 +176,7 @@ export function DateRangePicker({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <div className="mt-3 grid grid-cols-4 gap-2">
+            <div className="mt-3 grid grid-cols-2 gap-2">
               {WIZARD_STEPS.map((item, index) => (
                 <span
                   key={item.key}
@@ -193,58 +191,51 @@ export function DateRangePicker({
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
               <SummaryItem
-                active={step === "startDate"}
-                label="Date début"
-                value={startDay ? format(startDay, "d MMM yyyy", { locale: fr }) : "À choisir"}
+                active={step === "start"}
+                label="Début"
+                value={startDay ? summaryValue(startDay, startTime, withTime) : "À choisir"}
               />
               <SummaryItem
-                active={step === "startTime"}
-                label="Heure début"
-                value={startDay && maxVisitedStep >= 1 ? formatTime(startTime) : "À choisir"}
-              />
-              <SummaryItem
-                active={step === "endDate"}
-                label="Date fin"
-                value={endDay && maxVisitedStep >= 2 ? format(endDay, "d MMM yyyy", { locale: fr }) : "À choisir"}
-              />
-              <SummaryItem
-                active={step === "endTime"}
-                label="Heure fin"
-                value={endDay && maxVisitedStep >= 3 ? formatTime(endTime) : "À choisir"}
+                active={step === "end"}
+                label="Fin"
+                value={endDay && maxVisitedStep >= 1 ? summaryValue(endDay, endTime, withTime) : "À choisir"}
               />
             </div>
           </div>
 
           <div className="p-4">
-            {step === "startDate" ? (
-              <CalendarBoard
-                selected={startDay?.getTime() ?? null}
-                rangeStart={startDay?.getTime() ?? null}
-                rangeEnd={endDay?.getTime() ?? null}
-                onSelect={selectDay}
-                compact
-              />
-            ) : null}
-            {step === "startTime" ? <TimeGrid value={startTime} onChange={selectStartTime} /> : null}
-            {step === "endDate" ? (
-              <CalendarBoard
-                selected={endDay?.getTime() ?? null}
-                rangeStart={startDay?.getTime() ?? null}
-                rangeEnd={endDay?.getTime() ?? null}
-                onSelect={selectDay}
-                compact
-                disabledBefore={startDay?.getTime() ?? null}
-              />
-            ) : null}
-            {step === "endTime" ? (
-              withTime ? (
-                <TimeGrid value={endTime} onChange={selectEndTime} isDisabled={isEndTimeDisabled} />
-              ) : (
-                <p className="rounded-xl bg-[var(--accent)] p-3 text-sm text-[var(--muted-foreground)]">
-                  Journée complète.
-                </p>
-              )
-            ) : null}
+            {step === "start" ? (
+              <div className="space-y-4">
+                <CalendarBoard
+                  selected={startDay?.getTime() ?? null}
+                  rangeStart={startDay?.getTime() ?? null}
+                  rangeEnd={endDay?.getTime() ?? null}
+                  onSelect={selectDay}
+                  compact
+                />
+                {withTime ? (
+                  <TimeSection label="Heure de début" value={startTime} onChange={selectStartTime} />
+                ) : null}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <CalendarBoard
+                  selected={endDay?.getTime() ?? null}
+                  rangeStart={startDay?.getTime() ?? null}
+                  rangeEnd={endDay?.getTime() ?? null}
+                  onSelect={selectDay}
+                  compact
+                  disabledBefore={startDay?.getTime() ?? null}
+                />
+                {withTime ? (
+                  <TimeSection label="Heure de fin" value={endTime} onChange={selectEndTime} isDisabled={isEndTimeDisabled} />
+                ) : (
+                  <p className="rounded-xl bg-[var(--accent)] p-3 text-sm text-[var(--muted-foreground)]">
+                    Journée complète.
+                  </p>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="border-t border-[var(--border)] bg-[var(--accent)] p-4">
@@ -265,7 +256,7 @@ export function DateRangePicker({
                     setStartDay(null);
                     setEndDay(null);
                     onChange({ start: null, end: null });
-                    setStep("startDate");
+                    setStep("start");
                     setMaxVisitedStep(0);
                   }}
                   className="h-10 flex-1 rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
@@ -295,7 +286,7 @@ export function DateRangePicker({
                   className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-brand-500 text-sm font-semibold text-white disabled:opacity-50"
                 >
                   <Check className="h-4 w-4" />
-                  Valider
+                  Confirmer
                 </button>
               )}
             </div>
@@ -306,7 +297,7 @@ export function DateRangePicker({
                   setStartDay(null);
                   setEndDay(null);
                   onChange({ start: null, end: null });
-                  setStep("startDate");
+                  setStep("start");
                   setMaxVisitedStep(0);
                 }}
                 className="mt-2 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--card)] text-sm font-semibold text-[var(--foreground)]"
@@ -330,6 +321,28 @@ export function DateRangePicker({
   }
 }
 
+function TimeSection({
+  label,
+  value,
+  onChange,
+  isDisabled,
+}: {
+  label: string;
+  value: TimeValue;
+  onChange: (value: TimeValue) => void;
+  isDisabled?: (value: TimeValue) => boolean;
+}) {
+  return (
+    <div>
+      <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
+        <Clock className="h-3.5 w-3.5 text-brand-600" />
+        {label}
+      </div>
+      <TimeGrid value={value} onChange={onChange} isDisabled={isDisabled} />
+    </div>
+  );
+}
+
 function TimeGrid({
   value,
   onChange,
@@ -341,7 +354,7 @@ function TimeGrid({
 }) {
   const current = formatTime(value);
   return (
-    <div className="thin-scroll grid max-h-[360px] grid-cols-2 gap-2.5 overflow-y-auto pr-1">
+    <div className="thin-scroll grid max-h-[184px] grid-cols-4 gap-2 overflow-y-auto pr-1">
       {TIME_OPTIONS.map((option) => {
         const time = parseTime(option);
         const disabled = isDisabled?.(time) ?? false;
@@ -354,7 +367,7 @@ function TimeGrid({
             }}
             disabled={disabled}
             className={cn(
-              "rounded-xl px-3 py-2.5 text-[15px] font-bold tracking-wide transition",
+              "rounded-xl px-2 py-2 text-sm font-bold tracking-wide transition",
               option === current
                 ? "bg-brand-500 text-white shadow-sm"
                 : "bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--selected)] hover:text-[var(--selected-foreground)]",
@@ -392,6 +405,11 @@ function formatTime(value: TimeValue) {
   return `${String(value.h).padStart(2, "0")}:${String(value.m).padStart(2, "0")}`;
 }
 
+function summaryValue(day: Date, time: TimeValue, withTime: boolean) {
+  const dateLabel = format(day, "d MMM yyyy", { locale: fr });
+  return withTime ? `${dateLabel} · ${formatTime(time)}` : dateLabel;
+}
+
 function rangeLabel(value: DateRange, withTime: boolean) {
   if (!value.start || !value.end) return "";
   const start = new Date(value.start);
@@ -407,18 +425,14 @@ function startOfDate(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
 }
 
-function stepTitle(step: WizardStep) {
-  const titles: Record<WizardStep, string> = {
-    startDate: "Choisissez la date de début",
-    startTime: "Choisissez l'heure de début",
-    endDate: "Choisissez la date de fin",
-    endTime: "Choisissez l'heure de fin",
-  };
-  return titles[step];
+function stepTitle(step: WizardStep, withTime: boolean) {
+  if (step === "start") {
+    return withTime ? "Choisissez la date et l'heure de début" : "Choisissez la date de début";
+  }
+  return withTime ? "Choisissez la date et l'heure de fin" : "Choisissez la date de fin";
 }
 
-function canContinue(step: WizardStep, startDay: Date | null, endDay: Date | null) {
-  if (step === "startDate" || step === "startTime") return Boolean(startDay);
-  if (step === "endDate") return Boolean(startDay && endDay);
+function canContinue(step: WizardStep, startDay: Date | null) {
+  if (step === "start") return Boolean(startDay);
   return true;
 }

@@ -10,6 +10,30 @@ export const requestType = v.union(
   v.literal("livraison"),
 );
 
+/** App « Bennes & Pro » — matériaux déposables. */
+export const bpMaterial = v.union(
+  v.literal("Réemploi"),
+  v.literal("Bois"),
+  v.literal("CSR"),
+  v.literal("Inertes/Gravats"),
+  v.literal("Laine de roche"),
+  v.literal("Laine de verre"),
+  v.literal("Menuiseries Vitrées"),
+  v.literal("Métaux"),
+  v.literal("Plastiques d'emballages et cartons"),
+  v.literal("Plastiques rigide"),
+  v.literal("Plâtres"),
+  v.literal("Tout venant/DIB non triés"),
+);
+
+/** App « Bennes & Pro » — unités de mesure. */
+export const bpUnit = v.union(
+  v.literal("kg"),
+  v.literal("m3"),
+  v.literal("tonne"),
+  v.literal("unite"),
+);
+
 /** Étape du pipeline (uniquement pour les demandes ouvertes). */
 export const requestStage = v.union(
   v.literal("nouveau"),
@@ -1149,6 +1173,54 @@ export default defineSchema(
     .index("by_clerkId", ["clerkId"])
     .index("by_clerkId_itemId", ["clerkId", "itemId"])
     .index("by_itemId", ["itemId"]),
+
+  /* ─── App « Bennes & Pro » : dépôts de déchets par les entreprises ──────── */
+
+  /** Entreprises qui déposent des déchets sur le site. */
+  bpCompanies: defineTable({
+    name: v.string(),
+    siret: v.optional(v.string()),
+    address: v.optional(v.string()),
+    contactName: v.optional(v.string()),
+    contactPhone: v.optional(v.string()),
+    contactEmail: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_name", ["name"]),
+
+  /** Véhicules appartenant à une entreprise (bennes, camions...). */
+  bpVehicles: defineTable({
+    companyId: v.id("bpCompanies"),
+    label: v.string(),
+    plate: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_company", ["companyId"]),
+
+  /** Dépôts de déchets. Les lignes de déchets sont embarquées dans le doc. */
+  bpDepots: defineTable({
+    depotNumber: v.number(),
+    companyId: v.id("bpCompanies"),
+    vehicleId: v.id("bpVehicles"),
+    depositorName: v.string(),
+    siteRef: v.string(),
+    items: v.array(
+      v.object({
+        material: bpMaterial,
+        unit: bpUnit,
+        quantity: v.number(),
+        siteRef: v.string(),
+      }),
+    ),
+    ticketPhoto: v.optional(v.id("_storage")),
+    truckExteriorPhoto: v.optional(v.id("_storage")),
+    truckInteriorPhoto: v.optional(v.id("_storage")),
+    attachments: v.array(v.id("_storage")),
+    comment: v.optional(v.string()),
+    signature: v.id("_storage"),
+    createdBy: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_company", ["companyId"])
+    .index("by_number", ["depotNumber"]),
   },
   { schemaValidation: false },
 );
