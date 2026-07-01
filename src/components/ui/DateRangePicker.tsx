@@ -1,6 +1,6 @@
 import { format, isSameDay, setHours, setMinutes } from "date-fns";
 import { fr } from "date-fns/locale";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Clock, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Clock, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
@@ -26,11 +26,13 @@ export function DateRangePicker({
   value,
   onChange,
   withTime = true,
+  allowFullDay = false,
   placeholder = "Choisir les dates",
 }: {
   value: DateRange;
   onChange: (range: DateRange) => void;
   withTime?: boolean;
+  allowFullDay?: boolean;
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -108,6 +110,19 @@ export function DateRangePicker({
     if (startDay && day.getTime() < startOfDate(startDay).getTime()) return;
     setEndDay(day);
     emit(startDay, day, startTime, endTime);
+  }
+
+  function selectFullDay() {
+    const day = startOfDate(startDay ?? endDay ?? new Date());
+    const first = parseTime(TIME_OPTIONS[0]);
+    const last = parseTime(TIME_OPTIONS[TIME_OPTIONS.length - 1]);
+    setStartDay(day);
+    setEndDay(day);
+    setStartTime(first);
+    setEndTime(last);
+    setMaxVisitedStep(WIZARD_STEPS.length - 1);
+    setStep("end");
+    emit(day, day, first, last);
   }
 
   function selectStartTime(time: TimeValue) {
@@ -239,6 +254,16 @@ export function DateRangePicker({
           </div>
 
           <div className="border-t border-[var(--border)] bg-[var(--accent)] p-4">
+            {allowFullDay && currentStepIndex === 0 ? (
+              <button
+                type="button"
+                onClick={selectFullDay}
+                className="mb-2 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-brand-500/40 bg-[var(--card)] text-sm font-semibold text-brand-600 transition hover:bg-[var(--selected)] hover:text-[var(--selected-foreground)]"
+              >
+                <Sun className="h-4 w-4" />
+                Journée entière
+              </button>
+            ) : null}
             <div className="flex gap-2">
               {currentStepIndex > 0 ? (
                 <button

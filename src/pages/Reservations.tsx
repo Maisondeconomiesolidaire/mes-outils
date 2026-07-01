@@ -149,7 +149,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
       {/* Créneau + filtres regroupés juste en dessous. */}
       <div className="premium-panel space-y-4 rounded-2xl p-4">
         <Field label="Votre créneau">
-          <DateRangePicker value={range} onChange={setRange} withTime />
+          <DateRangePicker value={range} onChange={setRange} withTime allowFullDay />
         </Field>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
