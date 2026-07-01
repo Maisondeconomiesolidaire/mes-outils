@@ -717,7 +717,7 @@ function DealDetail({ deal, onClose, onContact }: { deal: Deal; onClose: () => v
   const images = deal.imageUrls;
   const typeLabel = DEAL_TYPES.find((t) => t.key === deal.dealType)?.label;
   return (
-    <Modal open onClose={onClose} title={deal.title} className="max-w-4xl">
+    <Modal open onClose={onClose} title={deal.title} className="sm:max-w-4xl">
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
           {images.length > 0 ? (
