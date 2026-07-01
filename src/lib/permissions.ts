@@ -351,8 +351,9 @@ export const APPS: AppDefinition[] = [
   {
     key: "bennespro",
     label: "Bennes & Pro",
-    description: "Dépôts de déchets par les entreprises : bennes, matériaux et bons de dépôt.",
+    description: "Le suivi des déchets déposés par les professionnels sur nos sites.",
     icon: Truck,
+    logoSrc: "/bennespro-logo.png",
     href: import.meta.env.VITE_BENNESPRO_URL ?? "https://bennespro.vercel.app",
     external: true,
     accent: "from-amber-500 to-zinc-900",
