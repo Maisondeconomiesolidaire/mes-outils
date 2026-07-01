@@ -122,7 +122,7 @@ const depotItem = v.object({
   siteRef: v.string(),
 });
 
-async function resolveStorageUrls<T extends Record<string, unknown>>(
+async function resolveStorageUrls(
   ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
   ids: Array<Id<"_storage"> | undefined>,
 ) {

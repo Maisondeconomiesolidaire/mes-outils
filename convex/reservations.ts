@@ -207,6 +207,7 @@ export const bookRoom = mutation({
       kind: "room_reservation_confirmed",
       title: "Votre réservation de salle est confirmée",
       body: `${room.name} · ${args.title.trim()}`,
+      assetImageUrl: (room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl) ?? undefined,
       href: "/reservations?v=mine",
     });
     const email = onBehalf
@@ -519,6 +520,7 @@ export const requestVehicle = mutation({
           .filter(Boolean)
           .join(" · "),
         actorName: displayName(identity),
+        assetImageUrl: (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined,
         href: "/gotravaux?v=reservations",
       });
     }
@@ -595,6 +597,7 @@ export const decideVehicleReservation = mutation({
         .filter(Boolean)
         .join(" · "),
       actorName: displayName(identity),
+      assetImageUrl: (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined,
       href: "/reservations?v=mine",
     });
     const email = await emailForClerkId(

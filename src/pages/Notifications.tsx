@@ -15,6 +15,8 @@ type NotificationItem = {
   title: string;
   body?: string;
   actorName?: string;
+  actorImageUrl?: string;
+  assetImageUrl?: string;
   href?: string;
   read: boolean;
   createdAt: number;
@@ -59,11 +61,25 @@ export function Notifications() {
 
 function NotificationRow({ notification, onRead }: { notification: NotificationItem; onRead: () => void }) {
   const Icon = iconFor(notification.kind);
+  const photo = notification.actorImageUrl ?? notification.assetImageUrl;
   const content = (
     <div className="flex gap-4 p-4 text-left transition hover:bg-[var(--accent)]">
-      <span className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${notification.read ? "bg-[var(--accent)] text-[var(--muted-foreground)]" : "bg-brand-500 text-white"}`}>
-        <Icon className="h-5 w-5" />
-      </span>
+      {photo ? (
+        <span className="relative mt-1 h-10 w-10 shrink-0">
+          <img
+            src={photo}
+            alt={notification.actorName ?? ""}
+            className={`h-10 w-10 object-cover ${notification.actorImageUrl ? "rounded-full" : "rounded-xl"}`}
+          />
+          <span className="absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-[var(--card)] bg-brand-500 text-white">
+            <Icon className="h-3 w-3" />
+          </span>
+        </span>
+      ) : (
+        <span className={`mt-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${notification.read ? "bg-[var(--accent)] text-[var(--muted-foreground)]" : "bg-brand-500 text-white"}`}>
+          <Icon className="h-5 w-5" />
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-semibold text-[var(--foreground)]">{notification.title}</p>

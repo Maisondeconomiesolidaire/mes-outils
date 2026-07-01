@@ -301,6 +301,7 @@ export const expressDealInterest = mutation({
       title: `${interestedName} est intéressé·e par votre annonce`,
       body: deal.title,
       actorName: interestedName,
+      actorImageUrl: pictureUrl(identity),
       href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(interestedName)}`,
     });
 
@@ -380,6 +381,9 @@ export const sendMessage = mutation({
     toClerkId: v.string(),
     toName: v.string(),
     body: v.string(),
+    // Image jointe (première photo d'un bon plan) attachée au premier message.
+    attachmentImageUrl: v.optional(v.string()),
+    attachmentTitle: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await requireStaff(ctx);
@@ -394,6 +398,8 @@ export const sendMessage = mutation({
       toClerkId: args.toClerkId,
       toName: args.toName.trim() || "Utilisateur",
       body,
+      attachmentImageUrl: args.attachmentImageUrl?.trim() || undefined,
+      attachmentTitle: args.attachmentTitle?.trim() || undefined,
       createdAt: Date.now(),
     });
     await createMesoutilsNotification(ctx, {
@@ -402,6 +408,7 @@ export const sendMessage = mutation({
       title: `Nouveau message de ${displayName(identity)}`,
       body,
       actorName: displayName(identity),
+      actorImageUrl: pictureUrl(identity),
       href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(displayName(identity))}`,
     });
     return messageId;

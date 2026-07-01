@@ -165,6 +165,7 @@ export const addComment = mutation({
         title: `${displayName(identity)} a commenté votre post`,
         body,
         actorName: displayName(identity),
+        actorImageUrl: (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
         href: "/actualites?v=publications",
       });
     }
@@ -232,6 +233,7 @@ export const toggleLike = mutation({
         title: `${displayName(identity)} a liké votre post`,
         body: post.body ? post.body.slice(0, 120) : "Publication avec photo",
         actorName: displayName(identity),
+        actorImageUrl: (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
         href: "/actualites?v=publications",
       });
     }

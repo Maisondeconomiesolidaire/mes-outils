@@ -568,9 +568,15 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
   const expressInterest = useMutation(api.community.expressDealInterest);
 
   const [open, setOpen] = useState(false);
+  const [detailDeal, setDetailDeal] = useState<Deal | null>(null);
   const [form, setForm] = useState({ title: "", description: "", dealType: "pret" as DealType, price: "", from: null as number | null, to: null as number | null });
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
+
+  function contactDeal(deal: Deal) {
+    void expressInterest({ dealId: deal._id });
+    navigate(contactDealHref(deal));
+  }
 
   async function save() {
     if (!form.title.trim() || !form.description.trim()) return;
@@ -608,46 +614,51 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {deals.map((deal) => (
-            <article key={deal._id} className={cn("overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm", deal.status === "closed" && "opacity-60")}>
-              {deal.imageUrls[0] ? (
-                <img src={deal.imageUrls[0]} alt="" className="aspect-video w-full object-cover" />
-              ) : (
-                <div className="flex aspect-video items-center justify-center bg-[var(--muted)]"><Tag className="h-10 w-10 text-[var(--muted-foreground)]" /></div>
-              )}
-              <div className="p-4">
+            <article key={deal._id} className={cn("flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm transition hover:shadow-md", deal.status === "closed" && "opacity-60")}>
+              <button type="button" onClick={() => setDetailDeal(deal)} className="group relative block text-left">
+                {deal.imageUrls[0] ? (
+                  <img src={deal.imageUrls[0]} alt="" className="aspect-video w-full object-cover" />
+                ) : (
+                  <div className="flex aspect-video items-center justify-center bg-[var(--muted)]"><Tag className="h-10 w-10 text-[var(--muted-foreground)]" /></div>
+                )}
+                {deal.imageUrls.length > 1 ? (
+                  <span className="absolute bottom-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-xs font-semibold text-white">
+                    {deal.imageUrls.length} photos
+                  </span>
+                ) : null}
+              </button>
+              <div className="flex flex-1 flex-col p-4">
                 <div className="flex items-center justify-between gap-2">
                   <span className={cn("rounded-full px-2.5 py-1 text-xs font-bold", DEAL_BADGE[deal.dealType])}>
                     {DEAL_TYPES.find((t) => t.key === deal.dealType)?.label}
                   </span>
-                  {deal.dealType === "vente" && deal.price ? (
+                  {deal.price != null ? (
                     <span className="text-sm font-bold text-[var(--foreground)]">{deal.price} €</span>
                   ) : null}
                 </div>
-                <h3 className="mt-2 text-lg font-bold text-[var(--foreground)]">{deal.title}</h3>
-                <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">{deal.description}</p>
+                <button type="button" onClick={() => setDetailDeal(deal)} className="mt-2 text-left">
+                  <h3 className="text-lg font-bold text-[var(--foreground)] hover:text-brand-600">{deal.title}</h3>
+                </button>
+                <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--muted-foreground)]">{deal.description}</p>
                 {deal.availableFrom ? (
                   <p className="mt-2 text-xs text-[var(--muted-foreground)]">
                     Dispo {formatDate(deal.availableFrom)}{deal.availableTo ? ` → ${formatDate(deal.availableTo)}` : ""}
                   </p>
                 ) : null}
                 <p className="mt-2 text-xs text-[var(--muted-foreground)]">Par {deal.authorName}</p>
-                <div className="mt-3 flex gap-2">
+                <div className="mt-3 flex gap-2 pt-1">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => setDetailDeal(deal)}>
+                    Voir les détails
+                  </Button>
                   {deal.isMine ? (
                     <>
-                      <Button variant="outline" size="sm" className="flex-1" onClick={() => setStatus({ dealId: deal._id, status: deal.status === "open" ? "closed" : "open" })}>
+                      <Button variant="ghost" size="sm" onClick={() => setStatus({ dealId: deal._id, status: deal.status === "open" ? "closed" : "open" })}>
                         {deal.status === "open" ? "Clôturer" : "Rouvrir"}
                       </Button>
                       <Button variant="ghost" size="sm" onClick={() => removeDeal({ dealId: deal._id })}><Trash2 className="h-4 w-4" /></Button>
                     </>
                   ) : (
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => {
-                        void expressInterest({ dealId: deal._id });
-                        navigate(contactDealHref(deal));
-                      }}
-                    >
+                    <Button size="sm" onClick={() => contactDeal(deal)}>
                       <MessagesSquare className="h-4 w-4" /> Contacter
                     </Button>
                   )}
@@ -688,7 +699,83 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
           </div>
         </div>
       </Modal>
+
+      {detailDeal ? (
+        <DealDetail
+          deal={detailDeal}
+          onClose={() => setDetailDeal(null)}
+          onContact={() => { const deal = detailDeal; setDetailDeal(null); contactDeal(deal); }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Fiche détaillée d'un bon plan : galerie d'images en grand + infos complètes. */
+function DealDetail({ deal, onClose, onContact }: { deal: Deal; onClose: () => void; onContact: () => void }) {
+  const [active, setActive] = useState(0);
+  const images = deal.imageUrls;
+  const typeLabel = DEAL_TYPES.find((t) => t.key === deal.dealType)?.label;
+  return (
+    <Modal open onClose={onClose} title={deal.title} className="max-w-4xl">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          {images.length > 0 ? (
+            <>
+              <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
+                <img src={images[active]} alt={deal.title} className="max-h-[60vh] w-full object-contain" />
+              </div>
+              {images.length > 1 ? (
+                <div className="thin-scroll mt-3 flex gap-2 overflow-x-auto pb-1">
+                  {images.map((url, index) => (
+                    <button
+                      key={url}
+                      type="button"
+                      onClick={() => setActive(index)}
+                      className={cn(
+                        "h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition",
+                        index === active ? "border-brand-500" : "border-transparent opacity-70 hover:opacity-100",
+                      )}
+                    >
+                      <img src={url} alt="" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="flex aspect-video items-center justify-center rounded-2xl bg-[var(--muted)]">
+              <Tag className="h-12 w-12 text-[var(--muted-foreground)]" />
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col">
+          <div className="flex items-center justify-between gap-3">
+            <span className={cn("rounded-full px-3 py-1 text-xs font-bold", DEAL_BADGE[deal.dealType])}>{typeLabel}</span>
+            {deal.price != null ? <span className="text-2xl font-extrabold text-[var(--foreground)]">{deal.price} €</span> : null}
+          </div>
+          <h2 className="mt-3 text-2xl font-bold text-[var(--foreground)]">{deal.title}</h2>
+          {deal.status === "closed" ? (
+            <span className="mt-2 inline-flex w-fit rounded-full bg-[var(--accent)] px-2.5 py-1 text-xs font-bold text-[var(--muted-foreground)]">Clôturé</span>
+          ) : null}
+          <p className="mt-4 whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">{deal.description}</p>
+          {deal.availableFrom ? (
+            <p className="mt-4 text-sm text-[var(--muted-foreground)]">
+              Disponible {formatDate(deal.availableFrom)}{deal.availableTo ? ` → ${formatDate(deal.availableTo)}` : ""}
+            </p>
+          ) : null}
+          <p className="mt-2 text-sm text-[var(--muted-foreground)]">Proposé par {deal.authorName}</p>
+          {!deal.isMine ? (
+            <div className="mt-auto pt-6">
+              <Button className="w-full" onClick={onContact}>
+                <MessagesSquare className="h-4 w-4" /> Contacter {deal.authorName}
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

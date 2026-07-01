@@ -11,6 +11,8 @@ export async function createMesoutilsNotification(
     title: string;
     body?: string;
     actorName?: string;
+    actorImageUrl?: string;
+    assetImageUrl?: string;
     href?: string;
   },
 ) {
@@ -22,6 +24,8 @@ export async function createMesoutilsNotification(
     title: args.title.trim(),
     body: args.body?.trim() || undefined,
     actorName: args.actorName?.trim() || undefined,
+    actorImageUrl: args.actorImageUrl?.trim() || undefined,
+    assetImageUrl: args.assetImageUrl?.trim() || undefined,
     href: args.href,
     read: false,
     createdAt: Date.now(),

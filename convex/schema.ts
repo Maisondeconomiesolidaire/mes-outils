@@ -789,6 +789,10 @@ export default defineSchema(
     title: v.string(),
     body: v.optional(v.string()),
     actorName: v.optional(v.string()),
+    // Photo de profil de l'acteur (message, like, commentaire, intérêt).
+    actorImageUrl: v.optional(v.string()),
+    // Photo de la salle / du véhicule concerné (notifications de réservation).
+    assetImageUrl: v.optional(v.string()),
     href: v.optional(v.string()),
     read: v.boolean(),
     createdAt: v.number(),
@@ -948,6 +952,9 @@ export default defineSchema(
     toClerkId: v.string(),
     toName: v.string(),
     body: v.string(),
+    // Image jointe (ex. première photo d'un bon plan, sur le premier message).
+    attachmentImageUrl: v.optional(v.string()),
+    attachmentTitle: v.optional(v.string()),
     readAt: v.optional(v.number()),
     createdAt: v.number(),
   })

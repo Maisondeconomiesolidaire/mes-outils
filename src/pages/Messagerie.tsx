@@ -222,9 +222,13 @@ function Thread({
   async function submit() {
     const body = draft.trim();
     if (!body) return;
+    // La première image de l'annonce reste attachée au tout premier message.
+    const attachment = context?.image
+      ? { attachmentImageUrl: context.image, attachmentTitle: context.title }
+      : {};
     setDraft("");
     setContext(null);
-    await send({ toClerkId: otherClerkId, toName: otherName, body });
+    await send({ toClerkId: otherClerkId, toName: otherName, body, ...attachment });
   }
 
   return (
@@ -258,6 +262,25 @@ function Thread({
                   message.mine ? "bg-brand-500 text-white" : "bg-[var(--accent)] text-[var(--foreground)]",
                 )}
               >
+                {message.attachmentImageUrl ? (
+                  <a
+                    href={message.attachmentImageUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mb-2 block overflow-hidden rounded-xl"
+                  >
+                    <img
+                      src={message.attachmentImageUrl}
+                      alt={message.attachmentTitle ?? ""}
+                      className="max-h-56 w-full object-cover"
+                    />
+                    {message.attachmentTitle ? (
+                      <span className={cn("mt-1 block truncate text-xs font-semibold", message.mine ? "text-white/85" : "text-[var(--muted-foreground)]")}>
+                        {message.attachmentTitle}
+                      </span>
+                    ) : null}
+                  </a>
+                ) : null}
                 <p className="whitespace-pre-wrap">{message.body}</p>
                 <p className={cn("mt-1 text-[11px]", message.mine ? "text-white/70" : "text-[var(--muted-foreground)]")}>
                   {formatRelative(message.createdAt)}
