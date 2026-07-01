@@ -18,7 +18,7 @@
 set -uo pipefail
 
 CANON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # = ~/mesoutils
-SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" )
+SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" )
 
 echo "Backend canonique : $CANON/convex"
 

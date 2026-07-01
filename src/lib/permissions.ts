@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Shirt,
   Tag,
+  Truck,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -45,7 +46,7 @@ export type Access = {
 };
 
 export type AppDefinition = {
-  key: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "pointage" | "collecte";
+  key: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointage" | "collecte";
   label: string;
   description: string;
   icon: LucideIcon;
@@ -58,7 +59,7 @@ export type AppDefinition = {
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray";
+  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro";
   key: string;
   label: string;
   description: string;
@@ -287,7 +288,31 @@ export const CYCLEENBRAY_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES];
+export const BENNESPRO_PAGES: PermissionPage[] = [
+  {
+    app: "bennespro",
+    key: "bennespro:depots",
+    label: "Dépôts",
+    description: "Enregistrement des dépôts de déchets et bons de dépôt.",
+    actions: ["read", "create"],
+  },
+  {
+    app: "bennespro",
+    key: "bennespro:entreprises",
+    label: "Entreprises",
+    description: "Entreprises déposantes et leurs véhicules.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "bennespro",
+    key: "bennespro:admin",
+    label: "Admin Bennes & Pro",
+    description: "Configuration et droits de l'application Bennes & Pro.",
+    actions: ["read", "manage"],
+  },
+];
+
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
@@ -322,6 +347,16 @@ export const APPS: AppDefinition[] = [
     external: true,
     accent: "from-emerald-500 to-zinc-900",
     cardBg: "#eef7f1",
+  },
+  {
+    key: "bennespro",
+    label: "Bennes & Pro",
+    description: "Dépôts de déchets par les entreprises : bennes, matériaux et bons de dépôt.",
+    icon: Truck,
+    href: import.meta.env.VITE_BENNESPRO_URL ?? "https://bennespro.vercel.app",
+    external: true,
+    accent: "from-amber-500 to-zinc-900",
+    cardBg: "#fdf5e6",
   },
 ];
 
@@ -397,6 +432,9 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
   if (appKey === "cycleenbray") {
     return access.grants.some((grant) => grant.pageKey.startsWith("cycle:"));
   }
+  if (appKey === "bennespro") {
+    return access.grants.some((grant) => grant.pageKey.startsWith("bennespro:"));
+  }
   return access.grants.some((grant) => !grant.pageKey.includes(":"));
 }
 
@@ -406,5 +444,6 @@ export function groupPagesByApp() {
     { key: "recycapp", label: "Recyclerie", pages: RECYCAPP_PAGES },
     { key: "klyde", label: "Klyde", pages: KLYDE_PAGES },
     { key: "cycleenbray", label: "Cycle en Bray", pages: CYCLEENBRAY_PAGES },
+    { key: "bennespro", label: "Bennes & Pro", pages: BENNESPRO_PAGES },
   ] as const;
 }

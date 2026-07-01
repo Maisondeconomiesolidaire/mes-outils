@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { requireUser } from "./lib";
 
@@ -65,6 +65,63 @@ export const markRead = mutation({
     const notification = await ctx.db.get(args.notificationId);
     if (!notification || notification.recipientClerkId !== identity.subject) return;
     await ctx.db.patch(args.notificationId, { read: true });
+  },
+});
+
+/** clerkId de l'acteur encodé dans le href (`?to=<clerkId>`) des notifications. */
+function clerkIdFromHref(href: string | undefined): string | undefined {
+  if (!href) return undefined;
+  const match = href.match(/[?&]to=([^&]+)/);
+  return match ? decodeURIComponent(match[1]) : undefined;
+}
+
+/**
+ * Backfill : renseigne `actorImageUrl` sur les anciennes notifications liées à
+ * un autre utilisateur (message, intérêt annonce, like, commentaire). La photo
+ * est retrouvée depuis les messages/likes/commentaires existants, par clerkId
+ * (précis, via le href) puis par nom d'affichage en repli.
+ */
+export const backfillActorImages = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const [messages, likes, comments] = await Promise.all([
+      ctx.db.query("directMessages").collect(),
+      ctx.db.query("postLikes").collect(),
+      ctx.db.query("postComments").collect(),
+    ]);
+
+    const byClerkId = new Map<string, string>();
+    const byName = new Map<string, string>();
+    function remember(name: string | undefined, image: string | undefined | null, clerkId?: string) {
+      if (!image) return;
+      if (clerkId && !byClerkId.has(clerkId)) byClerkId.set(clerkId, image);
+      const key = name?.trim().toLowerCase();
+      if (key && !byName.has(key)) byName.set(key, image);
+    }
+    for (const message of messages) remember(message.fromName, message.fromImageUrl, message.fromClerkId);
+    for (const like of likes) remember(like.actorName, like.actorImageUrl, like.clerkId);
+    for (const comment of comments) remember(comment.authorName, comment.authorImageUrl, comment.authorClerkId);
+
+    const kinds = new Set([
+      "new_direct_message",
+      "deal_interest",
+      "post_liked",
+      "post_commented",
+    ]);
+    const notifications = await ctx.db.query("mesoutilsNotifications").collect();
+    let updated = 0;
+    for (const notification of notifications) {
+      if (notification.actorImageUrl || !kinds.has(notification.kind)) continue;
+      const clerkId = clerkIdFromHref(notification.href);
+      const image =
+        (clerkId ? byClerkId.get(clerkId) : undefined) ??
+        (notification.actorName ? byName.get(notification.actorName.trim().toLowerCase()) : undefined);
+      if (image) {
+        await ctx.db.patch(notification._id, { actorImageUrl: image });
+        updated += 1;
+      }
+    }
+    return { scanned: notifications.length, updated };
   },
 });
 

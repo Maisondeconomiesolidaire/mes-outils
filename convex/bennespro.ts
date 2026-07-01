@@ -198,11 +198,12 @@ export const createDepot = mutation({
     const identity = await requireUser(ctx);
     const all = await ctx.db.query("bpDepots").collect();
     const depotNumber = all.length + 1;
-    return await ctx.db.insert("bpDepots", {
+    const depotId = await ctx.db.insert("bpDepots", {
       ...args,
       depotNumber,
       createdBy: identity.email ?? undefined,
       createdAt: Date.now(),
     });
+    return { depotId, depotNumber };
   },
 });
