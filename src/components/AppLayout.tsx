@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { SignedIn, SignedOut, SignIn, UserButton, useClerk, useUser } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useQuery } from "convex/react";
 import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -26,13 +26,7 @@ export function AppLayout() {
               <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "dark" ? "light" : "dark")} />
             </div>
             <div className="glass-card rounded-xl border border-[var(--border)] p-4 sm:p-6">
-              {/* Routing « hash » (et non « virtual ») : un formulaire monté en
-                  pleine page doit gérer ses étapes (email → code/mot de passe →
-                  2FA) via l'URL, sinon le bouton « Continuer » ne fait rien et
-                  les clics répétés déclenchent un 429 « too many requests ».
-                  Configuration identique à celle de recycapp (qui fonctionne)
-                  avec la même clé Clerk. */}
-              <SignIn routing="hash" fallbackRedirectUrl="/" signUpUrl="#/sign-up" appearance={{ variables: { colorPrimary: "#47c667" } }} />
+              <AuthPanel />
             </div>
           </div>
         </div>
@@ -42,6 +36,45 @@ export function AppLayout() {
         <ConvexAuthenticatedShell theme={theme} setTheme={setTheme} />
       </SignedIn>
     </>
+  );
+}
+
+/**
+ * Panneau d'authentification monté en pleine page.
+ *
+ * On monte À LA FOIS `<SignIn>` et `<SignUp>` (un seul visible à la fois) et on
+ * bascule selon le hash. Sans `<SignUp>` local, le lien « m'inscrire » de
+ * `<SignIn>` (signUpUrl="#/sign-up") pointait vers une page sans composant, et
+ * Clerk retombait sur le Portail hébergé — d'où la page en anglais, aux
+ * couleurs par défaut, où il fallait recliquer sur « inscription ».
+ *
+ * Routing « hash » (et non « virtual ») : un formulaire monté en pleine page
+ * doit gérer ses étapes (email → code/mot de passe → 2FA) via l'URL, sinon le
+ * bouton « Continuer » ne fait rien et les clics répétés déclenchent un 429.
+ */
+function AuthPanel() {
+  const [isSignUp, setIsSignUp] = useState(() => window.location.hash.startsWith("#/sign-up"));
+
+  useEffect(() => {
+    // Le mode est « collant » : on ne bascule que sur les liens explicites
+    // #/sign-up et #/sign-in. Les autres hashs (#/verify-email-address,
+    // #/factor-one, #/continue…) sont des étapes internes de Clerk et ne
+    // doivent PAS faire repasser du formulaire d'inscription à la connexion.
+    const sync = () => {
+      const hash = window.location.hash;
+      if (hash.startsWith("#/sign-up")) setIsSignUp(true);
+      else if (hash.startsWith("#/sign-in")) setIsSignUp(false);
+    };
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
+
+  const appearance = { variables: { colorPrimary: "#47c667" } };
+
+  return isSignUp ? (
+    <SignUp routing="hash" fallbackRedirectUrl="/" signInUrl="#/sign-in" appearance={appearance} />
+  ) : (
+    <SignIn routing="hash" fallbackRedirectUrl="/" signUpUrl="#/sign-up" appearance={appearance} />
   );
 }
 
