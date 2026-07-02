@@ -357,7 +357,7 @@ export const APPS: AppDefinition[] = [
     href: import.meta.env.VITE_BENNESPRO_URL ?? "https://bennespro.vercel.app",
     external: true,
     accent: "from-amber-500 to-zinc-900",
-    cardBg: "#fdf5e6",
+    cardBg: "#a4cebe",
   },
 ];
 
