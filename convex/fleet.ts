@@ -93,8 +93,10 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, "flotte", "read");
+    // La flotte n'affiche que les véhicules actifs : on exclut les immobilisés
+    // (active === false) et les vendus (saleDate renseignée).
     const vehicles = (await ctx.db.query("vehicles").order("desc").collect()).filter(
-      (vehicle) => vehicle.recycappEnabled === true,
+      (vehicle) => vehicle.recycappEnabled === true && vehicle.active && !vehicle.saleDate,
     );
     const now = Date.now();
     return await Promise.all(
