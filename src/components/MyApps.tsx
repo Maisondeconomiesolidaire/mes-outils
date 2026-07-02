@@ -8,9 +8,15 @@ import { api } from "../../convex/_generated/api";
  * cartes du portail Mes Outils et ne montre que les applications auxquelles
  * l'utilisateur connecté a réellement accès (droits `permissions.myAccess`).
  *
+ * On masque toujours l'application courante (`current`) : depuis une app on ne
+ * voit que les *autres*, plus un retour vers le portail Mes Outils. Les liens
+ * pointent directement vers l'application (son CRM), pas vers le portail.
+ *
  * Fichier volontairement autonome (aucune dépendance à la lib de permissions
  * locale) pour pouvoir être copié tel quel dans chaque dépôt.
  */
+
+export type AppKey = "mesoutils" | "recycapp" | "klyde" | "cycleenbray" | "bennespro";
 
 type Access = {
   role: string;
@@ -22,7 +28,7 @@ type Access = {
 };
 
 type PortalApp = {
-  key: "recycapp" | "klyde" | "cycleenbray" | "bennespro";
+  key: AppKey;
   label: string;
   description: string;
   logoSrc: string;
@@ -34,11 +40,19 @@ const env = import.meta.env as Record<string, string | undefined>;
 
 const APPS: PortalApp[] = [
   {
+    key: "mesoutils",
+    label: "Mes Outils",
+    description: "Portail interne : accès aux applications, espace partage et réservations.",
+    logoSrc: "/mesoutils-light.png",
+    href: env.VITE_MESOUTILS_URL ?? "https://mes-outils.vercel.app",
+    cardBg: "#e6f6ec",
+  },
+  {
     key: "recycapp",
     label: "Recyclerie",
     description: "CRM de gestion pour les demandes, la boutique, le stock et les clients.",
     logoSrc: "/recyclerie-logo.png",
-    href: env.VITE_RECYCAPP_URL ?? "https://mesrecycleries.vercel.app",
+    href: env.VITE_RECYCAPP_URL ?? "https://mesrecycleries.vercel.app/crm",
     cardBg: "#ffffff",
   },
   {
@@ -54,7 +68,7 @@ const APPS: PortalApp[] = [
     label: "Cycle en Bray",
     description: "Boutique et CRM de gestion pour la Recyclerie 60 et 76.",
     logoSrc: "/cycle-en-bray-logo.webp",
-    href: env.VITE_CYCLEENBRAY_URL ?? "https://cycleenbray.vercel.app",
+    href: env.VITE_CYCLEENBRAY_URL ?? "https://cycleenbray.vercel.app/crm",
     cardBg: "#eef7f1",
   },
   {
@@ -68,9 +82,10 @@ const APPS: PortalApp[] = [
 ];
 
 /** Réplique la logique `appCanAccess` du portail Mes Outils. */
-function appCanAccess(access: Access, key: PortalApp["key"]): boolean {
+function appCanAccess(access: Access, key: AppKey): boolean {
   if (access.isAdmin || access.bootstrapMode) return true;
   if (!access.isStaff) return false;
+  if (key === "mesoutils") return access.grants.some((g) => g.pageKey.startsWith("mesoutils:"));
   if (key === "klyde") return access.grants.some((g) => g.pageKey.startsWith("klyde:"));
   if (key === "cycleenbray") return access.grants.some((g) => g.pageKey.startsWith("cycle:"));
   if (key === "bennespro") return access.grants.some((g) => g.pageKey.startsWith("bennespro:"));
@@ -79,10 +94,10 @@ function appCanAccess(access: Access, key: PortalApp["key"]): boolean {
 }
 
 /**
- * Applications accessibles à l'utilisateur.
+ * Applications accessibles à l'utilisateur, hors application courante.
  * `undefined` tant que les droits chargent ; `[]` si aucune app attribuée.
  */
-export function useMyApps(): PortalApp[] | undefined {
+export function useMyApps(current?: AppKey): PortalApp[] | undefined {
   // On ne requête `myAccess` que si l'utilisateur est authentifié : la fonction
   // lève « Non authentifié » sinon (elle est montée aussi sur des pages compte
   // accessibles déconnecté, ex. l'espace client Recyclerie / Cycle en Bray).
@@ -92,11 +107,11 @@ export function useMyApps(): PortalApp[] | undefined {
     | undefined;
   if (!isAuthenticated) return [];
   if (access === undefined) return undefined;
-  return APPS.filter((app) => appCanAccess(access, app.key));
+  return APPS.filter((app) => app.key !== current && appCanAccess(access, app.key));
 }
 
-export function MyAppsGrid() {
-  const apps = useMyApps();
+export function MyAppsGrid({ current }: { current?: AppKey }) {
+  const apps = useMyApps(current);
 
   if (apps === undefined) {
     return <p className="py-10 text-center text-sm text-zinc-500">Chargement…</p>;
@@ -104,7 +119,7 @@ export function MyAppsGrid() {
   if (apps.length === 0) {
     return (
       <p className="py-10 text-center text-sm text-zinc-500">
-        Aucune application ne vous est attribuée pour le moment.
+        Aucune autre application ne vous est attribuée pour le moment.
       </p>
     );
   }

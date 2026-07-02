@@ -98,7 +98,7 @@ export function Compte() {
       </nav>
 
       {tab === "apps" ? (
-        <MyAppsGrid />
+        <MyAppsGrid current="mesoutils" />
       ) : (
       <>
       <section className="premium-panel rounded-2xl p-5">
