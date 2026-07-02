@@ -1,4 +1,4 @@
-import { useQuery } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { ArrowUpRight } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 
@@ -83,7 +83,14 @@ function appCanAccess(access: Access, key: PortalApp["key"]): boolean {
  * `undefined` tant que les droits chargent ; `[]` si aucune app attribuée.
  */
 export function useMyApps(): PortalApp[] | undefined {
-  const access = useQuery(api.permissions.myAccess) as Access | undefined;
+  // On ne requête `myAccess` que si l'utilisateur est authentifié : la fonction
+  // lève « Non authentifié » sinon (elle est montée aussi sur des pages compte
+  // accessibles déconnecté, ex. l'espace client Recyclerie / Cycle en Bray).
+  const { isAuthenticated } = useConvexAuth();
+  const access = useQuery(api.permissions.myAccess, isAuthenticated ? {} : "skip") as
+    | Access
+    | undefined;
+  if (!isAuthenticated) return [];
   if (access === undefined) return undefined;
   return APPS.filter((app) => appCanAccess(access, app.key));
 }
