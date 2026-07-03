@@ -7,6 +7,7 @@ import { Field, Input } from "../components/ui/Field";
 import { FullSpinner } from "../components/ui/Spinner";
 import { MyAppsGrid } from "../components/MyApps";
 import { cn } from "../lib/cn";
+import { confirmPermanentDelete } from "../lib/confirm";
 
 export function Compte() {
   const { user, isLoaded } = useUser();
@@ -46,6 +47,7 @@ export function Compte() {
 
   async function removePhoto() {
     if (!user) return;
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement votre photo de profil ?")) return;
     setError(null);
     setUploadingPhoto(true);
     try {

@@ -35,6 +35,7 @@ import { formatDate, formatDateTime, formatDateTimeWithDay, relativeUnits } from
 import { canAccess } from "../lib/permissions";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
+import { confirmPermanentDelete } from "../lib/confirm";
 
 type VehicleKind = "utilitaire" | "voiture";
 type TaskPriority = "low" | "medium" | "high";
@@ -566,6 +567,11 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
     }
   }
 
+  function removeDocumentWithConfirmation(documentId: Id<"vehicleDocuments">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce document ?")) return;
+    void removeDocument({ documentId });
+  }
+
   return (
     <div className="space-y-6">
       {canEdit ? (
@@ -613,7 +619,7 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
                   <p className="truncate text-sm font-semibold text-[var(--foreground)] hover:underline">{document.name}</p>
                   <p className="text-xs text-[var(--muted-foreground)]">{DOC_CATEGORIES.find((c) => c.key === document.category)?.label} · {document.uploadedBy}</p>
                 </a>
-                {canEdit ? <button type="button" onClick={() => removeDocument({ documentId: document._id })} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button> : null}
+                {canEdit ? <button type="button" onClick={() => removeDocumentWithConfirmation(document._id)} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button> : null}
               </div>
             ))}
           </div>
@@ -828,6 +834,12 @@ function FleetCalendar({
     setSelectedReservationId(null);
   }
 
+  function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?")) return;
+    void cancel({ reservationId });
+    setSelectedReservationId(null);
+  }
+
   function handleEventClick(id: string, day?: Date) {
     const entry = entries.find((item) => item.id === id);
     if (!entry) return;
@@ -904,10 +916,7 @@ function FleetCalendar({
         onClose={() => setSelectedReservationId(null)}
         onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
-        onCancel={(reservationId) => {
-          void cancel({ reservationId });
-          setSelectedReservationId(null);
-        }}
+        onCancel={cancelReservationWithConfirmation}
       />
       <ServiceDetailsModal service={selectedService} onClose={() => setSelectedServiceId(null)} />
     </div>
@@ -1040,6 +1049,12 @@ function VehicleReservationsPanel() {
     setSelectedId(null);
   }
 
+  function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?")) return;
+    void cancel({ reservationId });
+    setSelectedId(null);
+  }
+
   return (
     <div className="space-y-6">
       {pending.length > 0 ? (
@@ -1047,7 +1062,7 @@ function VehicleReservationsPanel() {
           <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">À traiter ({pending.length})</h2></div>
           <div className="divide-y divide-[var(--border)]">
             {pending.map((r) => (
-              <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancel({ reservationId: r._id })} />
+              <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancelReservationWithConfirmation(r._id)} />
             ))}
           </div>
         </section>
@@ -1055,7 +1070,7 @@ function VehicleReservationsPanel() {
       <section className="premium-panel overflow-hidden rounded-2xl">
         <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">Historique</h2></div>
         <div className="divide-y divide-[var(--border)]">
-          {others.map((r) => <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancel({ reservationId: r._id })} />)}
+          {others.map((r) => <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancelReservationWithConfirmation(r._id)} />)}
         </div>
       </section>
 
@@ -1065,10 +1080,7 @@ function VehicleReservationsPanel() {
         onClose={() => setSelectedId(null)}
         onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
-        onCancel={(reservationId) => {
-          void cancel({ reservationId });
-          setSelectedId(null);
-        }}
+        onCancel={cancelReservationWithConfirmation}
       />
     </div>
   );

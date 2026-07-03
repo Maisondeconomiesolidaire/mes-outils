@@ -9,6 +9,7 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { ACTION_LABELS, ALL_PERMISSION_PAGES, type Action, type Grant, KNOWN_PAGE_KEYS, groupPagesByApp } from "../lib/permissions";
 import { cn } from "../lib/cn";
+import { confirmPermanentDelete } from "../lib/confirm";
 
 type CrmRole = "client" | "staff" | "admin";
 
@@ -239,6 +240,7 @@ function AccessManager() {
       if (draftRole === "client") {
         // Aucun accès : on retire l'enregistrement Convex s'il existe.
         if (selectedPerson?.grants.length || selectedPerson?.role) {
+          if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement les droits de cet utilisateur ?")) return;
           await remove({ email });
         }
         setSavedMessage("Droits modifiés avec succès");
@@ -269,6 +271,7 @@ function AccessManager() {
 
   async function removeAccess() {
     if (!selectedPerson) return;
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement les droits de cet utilisateur ?")) return;
     setSaving(true);
     setSavedMessage(null);
     try {

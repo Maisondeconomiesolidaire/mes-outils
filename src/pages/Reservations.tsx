@@ -19,6 +19,7 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { formatDateTime } from "../lib/format";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
+import { confirmPermanentDelete } from "../lib/confirm";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -479,6 +480,16 @@ function MyReservations() {
     rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
   };
 
+  function cancelReservationWithConfirmation(reservation: MyReservation) {
+    const label = reservation.kind === "room" ? "cette réservation de salle" : "cette réservation de véhicule";
+    if (!confirmPermanentDelete(`Êtes-vous sûr(e) de vouloir supprimer définitivement ${label} ?`)) return;
+    if (reservation.kind === "room") {
+      void cancelRoom({ reservationId: reservation._id as Id<"roomReservations"> });
+    } else {
+      void cancelVehicle({ reservationId: reservation._id as Id<"vehicleReservations"> });
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
@@ -510,11 +521,7 @@ function MyReservations() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() =>
-                      reservation.kind === "room"
-                        ? cancelRoom({ reservationId: reservation._id as Id<"roomReservations"> })
-                        : cancelVehicle({ reservationId: reservation._id as Id<"vehicleReservations"> })
-                    }
+                    onClick={() => cancelReservationWithConfirmation(reservation)}
                   >
                     Annuler
                   </Button>

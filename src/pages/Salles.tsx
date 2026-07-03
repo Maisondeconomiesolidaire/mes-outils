@@ -16,6 +16,7 @@ import { formatDate, formatDateTime } from "../lib/format";
 import { canAccess } from "../lib/permissions";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
+import { confirmPermanentDelete } from "../lib/confirm";
 
 type Room = {
   _id: Id<"rooms">;
@@ -286,6 +287,11 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
     byDay.set(key, [...(byDay.get(key) ?? []), reservation]);
   }
 
+  function cancelReservationWithConfirmation(reservationId: Id<"roomReservations">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de salle ?")) return;
+    void cancel({ reservationId });
+  }
+
   return (
     <div className="space-y-5">
       {Array.from(byDay.entries()).map(([day, items]) => (
@@ -309,7 +315,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
                   </div>
                   <button
                     type="button"
-                    onClick={() => cancel({ reservationId: reservation._id })}
+                    onClick={() => cancelReservationWithConfirmation(reservation._id)}
                     className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"
                     title="Annuler"
                   >

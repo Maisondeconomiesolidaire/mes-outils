@@ -39,6 +39,7 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { formatDate, formatDateTime, formatRelative } from "../lib/format";
 import { canAccess } from "../lib/permissions";
 import { cn } from "../lib/cn";
+import { confirmPermanentDelete } from "../lib/confirm";
 
 const DEAL_TYPES = [
   { key: "pret", label: "Prêt" },
@@ -122,6 +123,16 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 
   if (posts === undefined) return <FullSpinner label="Chargement..." />;
 
+  function removePostWithConfirmation(postId: Id<"posts">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce post ?")) return;
+    void removePost({ postId });
+  }
+
+  function removeCommentWithConfirmation(commentId: Id<"postComments">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce commentaire ?")) return;
+    void removeComment({ commentId });
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-5">
       {canCreate ? (
@@ -175,10 +186,10 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             canCreate={canCreate}
             onToggleLike={() => toggleLike({ postId: post._id })}
             onPin={() => pinPost({ postId: post._id, pinned: !post.pinned })}
-            onRemove={() => removePost({ postId: post._id })}
+            onRemove={() => removePostWithConfirmation(post._id)}
             onUpdate={(text) => updatePost({ postId: post._id, body: text })}
             onAddComment={(text) => addComment({ postId: post._id, body: text })}
-            onRemoveComment={(commentId) => removeComment({ commentId })}
+            onRemoveComment={removeCommentWithConfirmation}
           />
         ))
       )}
@@ -564,6 +575,11 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
 
   if (events === undefined) return <FullSpinner label="Chargement..." />;
 
+  function removeEventWithConfirmation(eventId: Id<"events">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cet événement ?")) return;
+    void removeEvent({ eventId });
+  }
+
   return (
     <div className="space-y-5">
       {canCreate ? (
@@ -605,7 +621,7 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
                     Voir les détails
                   </Button>
                   {event.canManage ? (
-                    <Button variant="ghost" size="sm" onClick={() => removeEvent({ eventId: event._id })}>
+                    <Button variant="ghost" size="sm" onClick={() => removeEventWithConfirmation(event._id)}>
                       <Trash2 className="h-4 w-4" /> Supprimer
                     </Button>
                   ) : null}
@@ -818,6 +834,11 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
 
   if (deals === undefined) return <FullSpinner label="Chargement..." />;
 
+  function removeDealWithConfirmation(dealId: Id<"dealPosts">) {
+    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce bon plan ?")) return;
+    void removeDeal({ dealId });
+  }
+
   return (
     <div className="space-y-5">
       {canCreate ? (
@@ -872,7 +893,7 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
                       <Button variant="ghost" size="sm" onClick={() => setStatus({ dealId: deal._id, status: deal.status === "open" ? "closed" : "open" })}>
                         {deal.status === "open" ? "Clôturer" : "Rouvrir"}
                       </Button>
-                      <Button variant="ghost" size="sm" onClick={() => removeDeal({ dealId: deal._id })}><Trash2 className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="sm" onClick={() => removeDealWithConfirmation(deal._id)}><Trash2 className="h-4 w-4" /></Button>
                     </>
                   ) : (
                     <Button size="sm" onClick={() => contactDeal(deal)}>
