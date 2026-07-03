@@ -228,26 +228,42 @@ export const bookRoom = mutation({
       assetImageUrl: (room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl) ?? undefined,
       href: "/reservations?v=mine",
     });
+    const requesterName = onBehalf || displayName(identity);
+    const requesterPhotoUrl =
+      (onBehalf ? await photoForClerkId(ctx, args.forClerkId) : pictureUrl(identity)) ??
+      undefined;
+    const roomImageUrl =
+      (room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl) ?? undefined;
+
     const email = onBehalf
       ? await emailForClerkId(ctx, args.forClerkId)
       : identity.email ?? null;
     if (email) {
-      const photoUrl =
-        (onBehalf ? await photoForClerkId(ctx, args.forClerkId) : pictureUrl(identity)) ??
-        undefined;
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
-        name: onBehalf || displayName(identity),
+        name: requesterName,
         assetKind: "room",
         assetName: room.name,
         label: args.title.trim(),
         start: args.start,
         end: args.end,
         state: "confirmed",
-        photoUrl,
-        ...assetImageArgs(room),
+        photoUrl: requesterPhotoUrl,
+        assetImageUrl: roomImageUrl,
       });
     }
+
+    // Email aux responsables des réservations de salle (a.still & y.prata).
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRoomReservationToManagers, {
+      requesterName,
+      requesterPhotoUrl,
+      roomName: room.name,
+      roomImageUrl,
+      label: args.title.trim(),
+      start: args.start,
+      end: args.end,
+    });
+
     return reservationId;
   },
 });

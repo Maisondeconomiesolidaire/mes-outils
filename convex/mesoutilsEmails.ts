@@ -20,9 +20,9 @@ function appUrl() {
   return (process.env.MESOUTILS_APP_URL ?? "https://mesoutils.eco-solidaire.fr").replace(/\/$/, "");
 }
 
-/** URL absolue du logo Mes Outils (servi depuis le `public/` de l'app). */
+/** URL absolue du logo Mes Outils (version détourée pour email, servie par l'app). */
 function logoUrl() {
-  return `${appUrl()}/mesoutils-light.png`;
+  return `${appUrl()}/mesoutils-email-logo.png`;
 }
 
 /** Lien absolu vers une route de l'app. */
@@ -62,7 +62,7 @@ function shell(opts: {
         <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #e6efe9;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
           <tr>
             <td style="background:linear-gradient(135deg,#ffffff,#f0faf3,#e6f6ec);padding:20px 28px;border-bottom:1px solid #e6efe9;border-top:4px solid ${BRAND};">
-              <img src="${logoUrl()}" alt="Mes Outils" height="34" style="height:34px;width:auto;display:block;border:0;outline:none;text-decoration:none;" />
+              <img src="${logoUrl()}" alt="Mes Outils" width="150" height="62" style="width:150px;height:auto;display:block;border:0;outline:none;text-decoration:none;" />
             </td>
           </tr>
           <tr>
@@ -169,19 +169,19 @@ const STATE_COPY: Record<
   { heading: string; subject: string; intro: (asset: string) => string }
 > = {
   submitted: {
-    heading: "Votre réservation a bien été soumise ✅",
+    heading: "Votre réservation a bien été soumise",
     subject: "Réservation soumise",
     intro: (asset) =>
       `Votre demande de réservation de ${asset} a bien été enregistrée. Elle est en attente de validation par un responsable — vous serez prévenu·e dès qu'une décision est prise.`,
   },
   confirmed: {
-    heading: "Votre réservation est confirmée 🎉",
+    heading: "Votre réservation est confirmée",
     subject: "Réservation confirmée",
     intro: (asset) =>
       `Votre réservation de ${asset} est confirmée. Voici le récapitulatif du créneau réservé.`,
   },
   approved: {
-    heading: "Votre réservation a été validée 🎉",
+    heading: "Votre réservation a été validée",
     subject: "Réservation validée",
     intro: (asset) =>
       `Bonne nouvelle : votre réservation de ${asset} a été validée par un responsable.`,
@@ -287,7 +287,7 @@ export const sendVehicleRequestToManagers = internalAction({
 
     const html = shell({
       preheader: `${args.requesterName} demande le véhicule « ${args.vehicleName} ».`,
-      heading: "Nouvelle demande de réservation de véhicule 🚗",
+      heading: "Nouvelle demande de réservation de véhicule",
       heroUrl,
       intro: `Une nouvelle demande de réservation de véhicule vient d'être soumise. Merci de la valider ou de la refuser.`,
       contentHtml: `
@@ -301,6 +301,61 @@ export const sendVehicleRequestToManagers = internalAction({
       await resendSend(
         email,
         `Demande de réservation · ${args.vehicleName} (${args.requesterName})`,
+        html,
+        FROM,
+      );
+    }
+  },
+});
+
+/** Adresses des responsables notifiés des réservations de salle. */
+export const ROOM_RESERVATION_MANAGER_EMAILS = [
+  "a.still@eco-solidaire.fr",
+  "y.prata@eco-solidaire.fr",
+];
+
+/** Notifie les responsables (a.still / y.prata) d'une réservation de salle. */
+export const sendRoomReservationToManagers = internalAction({
+  args: {
+    requesterName: v.string(),
+    roomName: v.string(),
+    label: v.string(),
+    start: v.number(),
+    end: v.number(),
+    note: v.optional(v.string()),
+    requesterPhotoUrl: v.optional(v.string()),
+    roomImageUrl: v.optional(v.string()),
+    roomImageStorageId: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const rows: Array<[string, string]> = [
+      ["Salle", args.roomName],
+      ["Objet", args.label],
+      ["Créneau", formatRange(args.start, args.end)],
+    ];
+    if (args.note) rows.push(["Note", args.note]);
+
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.roomImageUrl,
+      imageStorageId: args.roomImageStorageId,
+    });
+
+    const html = shell({
+      preheader: `${args.requesterName} a réservé la salle « ${args.roomName} ».`,
+      heading: "Nouvelle réservation de salle",
+      heroUrl,
+      intro: `Une nouvelle réservation de salle vient d'être enregistrée.`,
+      contentHtml: `
+        ${userChip(args.requesterName, args.requesterPhotoUrl, "Demandeur")}
+        ${detailCard(rows)}
+        ${button(appLink("/salles"), "Voir les réservations")}
+      `,
+    });
+
+    for (const email of ROOM_RESERVATION_MANAGER_EMAILS) {
+      await resendSend(
+        email,
+        `Réservation de salle · ${args.roomName} (${args.requesterName})`,
         html,
         FROM,
       );
@@ -328,7 +383,7 @@ export const sendDealInterestEmail = internalAction({
     });
     const html = shell({
       preheader: `${interestedName} est intéressé·e par votre annonce « ${dealTitle} ».`,
-      heading: `${esc(interestedName)} est intéressé·e par votre annonce 🎯`,
+      heading: `${esc(interestedName)} est intéressé·e par votre annonce`,
       heroUrl,
       intro: `Bonjour ${esc(authorName)},<br/><br/>Une personne s'intéresse à votre bon plan <strong>« ${esc(dealTitle)} »</strong>. Vous pouvez lui répondre directement depuis la messagerie de l'équipe.`,
       contentHtml: `
