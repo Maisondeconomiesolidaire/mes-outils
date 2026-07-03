@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { CalendarDays, DoorOpen, Plus, Save, Trash2, Users } from "lucide-react";
+import { CalendarDays, DoorOpen, Info, Plus, Save, Trash2, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
@@ -29,6 +29,19 @@ type Room = {
   buildingLabel?: string;
   reservable?: boolean;
   active: boolean;
+};
+
+type RoomReservation = {
+  _id: Id<"roomReservations">;
+  roomId: Id<"rooms">;
+  title: string;
+  usageType?: string;
+  attendees?: number;
+  userName: string;
+  bookedByName?: string;
+  start: number;
+  end: number;
+  notes?: string;
 };
 
 const emptyRoomForm = {
@@ -238,22 +251,15 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   const reservations = useQuery(api.reservations.listRoomReservations, {
     start: dayStart - 86_400_000,
     end: dayStart + 60 * 86_400_000,
-  }) as
-    | Array<{
-        _id: Id<"roomReservations">;
-        roomId: Id<"rooms">;
-        title: string;
-        userName: string;
-        start: number;
-        end: number;
-      }>
-    | undefined;
+  }) as RoomReservation[] | undefined;
   const cancel = useMutation(api.reservations.cancelRoomReservation);
   const roomName = new Map(rooms.map((room) => [String(room._id), room]));
+  const [selectedReservationId, setSelectedReservationId] = useState<Id<"roomReservations"> | null>(null);
 
   if (reservations === undefined) return <FullSpinner label="Chargement du planning..." />;
 
   const upcoming = [...reservations].sort((a, b) => a.start - b.start);
+  const selectedReservation = reservations.find((reservation) => reservation._id === selectedReservationId) ?? null;
   const events: CalendarEvent[] = upcoming.map((reservation) => {
     const room = roomName.get(String(reservation.roomId));
     return {
@@ -269,10 +275,23 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   if (mode === "calendar") {
     return (
       <div className="space-y-3">
-        <CalendarBoard events={events} selected={dayStart} />
+        <CalendarBoard
+          events={events}
+          selected={dayStart}
+          onEventClick={(id) => setSelectedReservationId(id as Id<"roomReservations">)}
+        />
         {upcoming.length === 0 ? (
           <p className="text-sm text-[var(--muted-foreground)]">Aucune réservation de salle sur la période affichée.</p>
         ) : null}
+        <RoomReservationDetailsModal
+          reservation={selectedReservation}
+          room={selectedReservation ? roomName.get(String(selectedReservation.roomId)) ?? null : null}
+          onClose={() => setSelectedReservationId(null)}
+          onCancel={(reservationId) => {
+            cancelReservationWithConfirmation(reservationId);
+            setSelectedReservationId(null);
+          }}
+        />
       </div>
     );
   }
@@ -303,7 +322,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
             {items.map((reservation) => {
               const room = roomName.get(String(reservation.roomId));
               return (
-                <div key={reservation._id} className="flex items-center gap-4 px-5 py-3">
+                <div key={reservation._id} className="flex flex-wrap items-center gap-4 px-5 py-3">
                   <span className="h-9 w-1.5 shrink-0 rounded-full bg-brand-500" />
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold text-[var(--foreground)]">
@@ -313,6 +332,9 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
                       {reservation.userName} · {formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}
                     </p>
                   </div>
+                  <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(reservation._id)}>
+                    <Info className="h-4 w-4" />Détails
+                  </Button>
                   <button
                     type="button"
                     onClick={() => cancelReservationWithConfirmation(reservation._id)}
@@ -327,6 +349,95 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
           </div>
         </section>
       ))}
+      <RoomReservationDetailsModal
+        reservation={selectedReservation}
+        room={selectedReservation ? roomName.get(String(selectedReservation.roomId)) ?? null : null}
+        onClose={() => setSelectedReservationId(null)}
+        onCancel={(reservationId) => {
+          cancelReservationWithConfirmation(reservationId);
+          setSelectedReservationId(null);
+        }}
+      />
+    </div>
+  );
+}
+
+function RoomReservationDetailsModal({
+  reservation,
+  room,
+  onClose,
+  onCancel,
+}: {
+  reservation: RoomReservation | null;
+  room: Room | null;
+  onClose: () => void;
+  onCancel: (reservationId: Id<"roomReservations">) => void;
+}) {
+  if (!reservation) return null;
+
+  return (
+    <Modal open onClose={onClose} title="Détail de la réservation salle" className="sm:max-w-4xl">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
+          {room?.photoUrl ? (
+            <img src={room.photoUrl} alt={room.name} className="h-full max-h-[60vh] min-h-64 w-full object-cover" />
+          ) : (
+            <div className="flex min-h-64 items-center justify-center text-[var(--muted-foreground)]">
+              <DoorOpen className="h-14 w-14" />
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-800 dark:bg-brand-500/20 dark:text-brand-200">
+              Réservation confirmée
+            </span>
+            {reservation.usageType ? (
+              <span className="rounded-full bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-[var(--muted-foreground)]">
+                {reservation.usageType}
+              </span>
+            ) : null}
+          </div>
+
+          <h2 className="mt-3 text-2xl font-bold text-[var(--foreground)]">{reservation.title}</h2>
+          <p className="mt-1 text-sm font-semibold text-[var(--muted-foreground)]">{room?.name ?? "Salle"}</p>
+
+          <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
+            <DetailItem label="Salle" value={room?.name ?? "Salle"} />
+            <DetailItem label="Bâtiment / zone" value={room?.buildingLabel ?? room?.siteLabel ?? (room?.site ? `Site ${room.site}` : "Non renseigné")} />
+            <DetailItem label="Réservé pour" value={reservation.userName} />
+            <DetailItem label="Réservé par" value={reservation.bookedByName ?? reservation.userName} />
+            <DetailItem label="Début" value={formatDateTime(reservation.start)} />
+            <DetailItem label="Fin" value={formatDateTime(reservation.end)} />
+            <DetailItem label="Participants" value={reservation.attendees ? `${reservation.attendees} personne${reservation.attendees > 1 ? "s" : ""}` : "Non renseigné"} />
+            <DetailItem label="Capacité" value={room?.capacity ? `${room.capacity} personnes` : "Non renseignée"} />
+          </dl>
+
+          {reservation.notes ? (
+            <div className="mt-4 rounded-xl border border-[var(--border)] p-3">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Note</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{reservation.notes}</p>
+            </div>
+          ) : null}
+
+          <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
+            <Button variant="ghost" onClick={onClose}>Fermer</Button>
+            <Button variant="outline" onClick={() => onCancel(reservation._id)}>
+              <Trash2 className="h-4 w-4" />Annuler la réservation
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] px-3 py-2">
+      <dt className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">{label}</dt>
+      <dd className="mt-1 font-semibold text-[var(--foreground)]">{value}</dd>
     </div>
   );
 }
