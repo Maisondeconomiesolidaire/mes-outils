@@ -2,16 +2,20 @@ import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useQuery } from "convex/react";
 import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../convex/_generated/api";
+import { PORTAL_NAV, canAccess } from "../lib/permissions";
+import { cn } from "../lib/cn";
+import { usePermissionsAccess } from "./RequirePermission";
+import { Button } from "./ui/Button";
+import { Field, Input } from "./ui/Field";
+import { FullSpinner } from "./ui/Spinner";
 
 /** Style "bouton primaire" appliqué à l'élément de navigation actif. */
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
 const CLERK_APPEARANCE = { variables: { colorPrimary: "#47c667" } };
-import { PORTAL_NAV, canAccess } from "../lib/permissions";
-import { cn } from "../lib/cn";
-import { usePermissionsAccess } from "./RequirePermission";
-import { FullSpinner } from "./ui/Spinner";
+
+type ClerkUser = NonNullable<ReturnType<typeof useUser>["user"]>;
 
 export function AppLayout() {
   const [theme, setTheme] = useTheme();
@@ -34,7 +38,7 @@ export function AppLayout() {
       </SignedOut>
 
       <SignedIn>
-        <ConvexAuthenticatedShell theme={theme} setTheme={setTheme} />
+        <RequiredNameGate theme={theme} setTheme={setTheme} />
       </SignedIn>
     </>
   );
@@ -80,6 +84,106 @@ function AuthPanel() {
       signUpUrl="/sign-up"
       appearance={CLERK_APPEARANCE}
     />
+  );
+}
+
+function RequiredNameGate({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {
+  const { isLoaded, user } = useUser();
+
+  if (!isLoaded || !user) return <FullSpinner label="Chargement de votre profil..." />;
+
+  const hasRequiredName = Boolean(user.firstName?.trim() && user.lastName?.trim());
+
+  if (!hasRequiredName) return <CompleteNameProfile user={user} theme={theme} setTheme={setTheme} />;
+
+  return <ConvexAuthenticatedShell theme={theme} setTheme={setTheme} />;
+}
+
+function CompleteNameProfile({
+  user,
+  theme,
+  setTheme,
+}: {
+  user: ClerkUser;
+  theme: "light" | "dark";
+  setTheme: (t: "light" | "dark") => void;
+}) {
+  const [firstName, setFirstName] = useState(user.firstName ?? "");
+  const [lastName, setLastName] = useState(user.lastName ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const logoSrc = theme === "dark" ? "/mesoutils-dark.png" : "/mesoutils-light.png";
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmedFirstName = firstName.trim();
+    const trimmedLastName = lastName.trim();
+
+    if (!trimmedFirstName || !trimmedLastName) {
+      setError("Le prénom et le nom sont obligatoires pour finaliser l'inscription.");
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    try {
+      await user.update({ firstName: trimmedFirstName, lastName: trimmedLastName });
+      await user.reload();
+    } catch (err) {
+      console.error("Impossible de compléter le profil Clerk", err);
+      setError("Impossible d'enregistrer votre nom et prénom. Réessayez dans un instant.");
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center px-4 py-10">
+      <div className="w-full max-w-md">
+        <div className="mb-6 flex items-center justify-between">
+          <img src={logoSrc} alt="Mes Outils" className="h-20 w-auto" />
+          <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "dark" ? "light" : "dark")} />
+        </div>
+
+        <form onSubmit={handleSubmit} className="glass-card rounded-xl border border-[var(--border)] p-6 shadow-sm">
+          <h1 className="text-center text-2xl font-semibold text-[var(--foreground)]">Finaliser l'inscription</h1>
+          <p className="mt-2 text-center text-sm leading-6 text-[var(--muted-foreground)]">
+            Renseignez votre prénom et votre nom pour accéder au portail.
+          </p>
+
+          <div className="mt-7 space-y-4">
+            <Field label="Prénom" required>
+              <Input
+                value={firstName}
+                onChange={(event) => setFirstName(event.target.value)}
+                autoComplete="given-name"
+                required
+                disabled={saving}
+              />
+            </Field>
+            <Field label="Nom" required>
+              <Input
+                value={lastName}
+                onChange={(event) => setLastName(event.target.value)}
+                autoComplete="family-name"
+                required
+                disabled={saving}
+              />
+            </Field>
+          </div>
+
+          {error ? <p className="mt-4 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600">{error}</p> : null}
+
+          <Button type="submit" size="lg" className="mt-6 w-full" disabled={saving}>
+            {saving ? "Enregistrement..." : "Continuer"}
+          </Button>
+
+          <div className="mt-5 flex justify-center">
+            <UserButton afterSignOutUrl="/sign-in" />
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
