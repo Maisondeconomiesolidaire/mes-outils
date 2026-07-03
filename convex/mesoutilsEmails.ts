@@ -55,9 +55,9 @@ function shell(opts: {
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light" />
   </head>
-  <body style="margin:0;padding:0;background:#f4f1ec;">
+  <body style="margin:0;padding:0;background:#eef4f1;">
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${esc(opts.preheader)}</div>
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f1ec;padding:24px 12px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#eef4f1;padding:24px 12px;">
       <tr><td align="center">
         <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #e6efe9;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
           <tr>
@@ -74,8 +74,8 @@ function shell(opts: {
             </td>
           </tr>
           <tr>
-            <td style="padding:22px 32px;background:#faf8f5;border-top:1px solid #f1ece5;">
-              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#c4c0b8;">
+            <td style="padding:22px 32px;background:#f4faf6;border-top:1px solid #e2ede7;">
+              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#9fb0a6;">
                 Message automatique de l'espace Mes Outils — merci de ne pas répondre à cet email.
               </p>
             </td>
@@ -130,7 +130,7 @@ function detailCard(rows: Array<[string, string]>) {
         </tr>`,
     )
     .join("");
-  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;padding:16px 18px;background:#faf8f5;border:1px solid #ece9e4;border-radius:14px;">${cells}</table>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;padding:16px 18px;background:#f4faf6;border:1px solid #e2ede7;border-radius:14px;">${cells}</table>`;
 }
 
 const dayFmt = new Intl.DateTimeFormat("fr-FR", {

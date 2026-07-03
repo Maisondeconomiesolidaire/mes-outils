@@ -146,13 +146,13 @@ export function Messagerie() {
           activeId ? "hidden lg:flex" : "flex",
         )}
       >
-        <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
+        <div className="border-b border-[var(--border)] px-4 py-3">
           <h1 className="text-lg font-semibold text-[var(--foreground)]">Messagerie</h1>
           <button
             type="button"
             onClick={() => setComposing((v) => !v)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
+              "mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-semibold transition",
               composing
                 ? "bg-[var(--accent)] text-[var(--foreground)]"
                 : "bg-brand-500 text-white hover:bg-brand-600",
