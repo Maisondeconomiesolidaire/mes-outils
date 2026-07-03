@@ -14,6 +14,7 @@ import {
   Pencil,
   Pin,
   PinOff,
+  Play,
   Plus,
   Send,
   Sparkles,
@@ -322,6 +323,9 @@ function PostCard({
               className="group relative block cursor-zoom-in overflow-hidden bg-black text-left"
             >
               <video src={url} muted playsInline preload="metadata" className="max-h-[560px] w-full object-contain" />
+              <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white shadow-lg ring-1 ring-white/30 transition group-hover:scale-105">
+                <Play className="ml-1 h-8 w-8 fill-current" />
+              </span>
               <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3 text-sm font-semibold text-white opacity-0 transition group-hover:opacity-100">
                 Ouvrir la vidéo
               </span>
