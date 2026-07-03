@@ -237,7 +237,7 @@ export const bookRoom = mutation({
 
     const email = onBehalf
       ? await emailForClerkId(ctx, args.forClerkId)
-      : identity.email ?? null;
+      : identity.email ?? await emailForClerkId(ctx, identity.subject);
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
@@ -262,6 +262,7 @@ export const bookRoom = mutation({
       label: args.title.trim(),
       start: args.start,
       end: args.end,
+      note: args.notes?.trim() || undefined,
     });
 
     return reservationId;
