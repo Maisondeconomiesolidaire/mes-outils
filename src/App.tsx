@@ -15,6 +15,8 @@ export default function App() {
   return (
     <Routes>
       <Route element={<AppLayout />}>
+        <Route path="/sign-in" element={<Portail />} />
+        <Route path="/sign-up" element={<Portail />} />
         <Route index element={<Portail />} />
         <Route path="/compte" element={<Compte />} />
         <Route

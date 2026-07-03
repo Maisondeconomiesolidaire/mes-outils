@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useQuery } from "convex/react";
 import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
@@ -49,42 +49,35 @@ export function AppLayout() {
  * Clerk retombait sur le Portail hébergé — d'où la page en anglais, aux
  * couleurs par défaut, où il fallait recliquer sur « inscription ».
  *
- * Routing « hash » (et non « virtual ») : un formulaire monté en pleine page
- * doit gérer ses étapes (email → code/mot de passe → 2FA) via l'URL, sinon le
- * bouton « Continuer » ne fait rien et les clics répétés déclenchent un 429.
+ * Routing « path » : SignIn et SignUp sont montés sur de vraies routes locales
+ * (`/sign-in` et `/sign-up`) pour éviter toute redirection vers les pages
+ * hébergées Clerk par défaut.
  */
 function AuthPanel() {
-  const [isSignUp, setIsSignUp] = useState(() => window.location.hash.startsWith("#/sign-up"));
+  const location = useLocation();
+  const isSignUp = location.pathname === "/sign-up";
 
-  useEffect(() => {
-    // Le mode est « collant » : on ne bascule que sur les liens explicites
-    // #/sign-up et #/sign-in. Les autres hashs (#/verify-email-address,
-    // #/factor-one, #/continue…) sont des étapes internes de Clerk et ne
-    // doivent PAS faire repasser du formulaire d'inscription à la connexion.
-    const sync = () => {
-      const hash = window.location.hash;
-      if (hash.startsWith("#/sign-up")) setIsSignUp(true);
-      else if (hash.startsWith("#/sign-in")) setIsSignUp(false);
-    };
-    window.addEventListener("hashchange", sync);
-    return () => window.removeEventListener("hashchange", sync);
-  }, []);
+  if (location.pathname !== "/sign-in" && location.pathname !== "/sign-up") {
+    return <Navigate to="/sign-in" replace />;
+  }
 
   // On passe aussi l'apparence directement aux composants Clerk :
   // certaines transitions SignIn -> SignUp ne réappliquent pas toujours
   // l'héritage du provider avant le premier rendu du nouveau composant.
   return isSignUp ? (
     <SignUp
-      routing="hash"
+      routing="path"
+      path="/sign-up"
       fallbackRedirectUrl="/"
-      signInUrl="/#/sign-in"
+      signInUrl="/sign-in"
       appearance={CLERK_APPEARANCE}
     />
   ) : (
     <SignIn
-      routing="hash"
+      routing="path"
+      path="/sign-in"
       fallbackRedirectUrl="/"
-      signUpUrl="/#/sign-up"
+      signUpUrl="/sign-up"
       appearance={CLERK_APPEARANCE}
     />
   );
