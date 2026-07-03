@@ -181,6 +181,13 @@ export const RECYCAPP_PAGES: PermissionPage[] = [
   },
   {
     app: "recycapp",
+    key: "reservations",
+    label: "Réservations",
+    description: "Demandes de réservation des véhicules mis à disposition de la Recyclerie.",
+    actions: ["read", "manage"],
+  },
+  {
+    app: "recycapp",
     key: "equipe",
     label: "Equipe",
     description: "Gestion des membres.",

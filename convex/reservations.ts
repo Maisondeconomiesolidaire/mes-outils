@@ -618,6 +618,99 @@ export const requestVehicle = mutation({
   },
 });
 
+/**
+ * Applique une décision (accepter/refuser) sur une réservation véhicule :
+ * contrôle de disponibilité, notification + emails au demandeur, et notice
+ * Recyclerie le cas échéant. Partagé entre la décision Mes Outils (Gotravaux)
+ * et la décision côté Recyclerie (recycapp).
+ */
+async function applyVehicleReservationDecision(
+  ctx: MutationCtx,
+  identity: Awaited<ReturnType<typeof requireUser>>,
+  args: {
+    reservationId: Id<"vehicleReservations">;
+    decision: "approved" | "rejected";
+    note?: string;
+  },
+  opts: { requireRecyclerie?: boolean } = {},
+) {
+  const reservation = await ctx.db.get(args.reservationId);
+  if (!reservation) throw new Error("Réservation introuvable.");
+  const vehicle = await ctx.db.get(reservation.vehicleId);
+  if (opts.requireRecyclerie && vehicle?.recycappEnabled !== true) {
+    throw new Error("Ce véhicule n'est pas rattaché à la Recyclerie.");
+  }
+
+  if (args.decision === "approved") {
+    await ensureVehicleAvailable(ctx, reservation.vehicleId, reservation.start, reservation.end);
+    const approvedReservations = await approvedReservationsForVehicle(ctx, reservation.vehicleId);
+    const conflict = approvedReservations.find(
+      (item) =>
+        item._id !== reservation._id &&
+        overlaps(item.start, item.end, reservation.start, reservation.end),
+    );
+    if (conflict) throw new Error("Le véhicule est déjà réservé sur ce créneau.");
+  }
+
+  await ctx.db.patch(args.reservationId, {
+    status: args.decision,
+    decisionNote: args.note?.trim() || undefined,
+    decidedBy: displayName(identity),
+    decidedAt: Date.now(),
+  });
+
+  await createMesoutilsNotification(ctx, {
+    recipientClerkId: reservation.bookedForClerkId ?? reservation.clerkId,
+    kind: "vehicle_reservation_decided",
+    title:
+      args.decision === "approved"
+        ? "Votre réservation de véhicule est approuvée"
+        : "Votre réservation de véhicule est refusée",
+    body: [vehicle?.name ?? "Véhicule", reservation.purpose, args.note?.trim()]
+      .filter(Boolean)
+      .join(" · "),
+    actorName: displayName(identity),
+    assetImageUrl: (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined,
+    href: "/reservations?v=mine",
+  });
+
+  const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+  const requesterPhotoUrl = (await photoForClerkId(ctx, recipientClerkId)) ?? undefined;
+  const vehicleImageUrl =
+    (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ?? undefined;
+  const email = await emailForClerkId(ctx, recipientClerkId);
+  if (email) {
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
+      email,
+      name: reservation.userName,
+      assetKind: "vehicle",
+      assetName: vehicle?.name ?? "Véhicule",
+      label: reservation.purpose,
+      start: reservation.start,
+      end: reservation.end,
+      state: args.decision === "approved" ? "approved" : "rejected",
+      note: args.note?.trim() || undefined,
+      photoUrl: requesterPhotoUrl,
+      assetImageUrl: vehicleImageUrl,
+    });
+  }
+
+  // Véhicule Recyclerie accepté : on prévient l'équipe (sans lien Gotravaux).
+  if (args.decision === "approved" && vehicle?.recycappEnabled === true) {
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
+      state: "approved",
+      requesterName: reservation.userName,
+      requesterPhotoUrl,
+      vehicleName: vehicle.name,
+      vehicleImageUrl,
+      label: reservation.purpose,
+      start: reservation.start,
+      end: reservation.end,
+      note: args.note?.trim() || undefined,
+    });
+  }
+}
+
 export const decideVehicleReservation = mutation({
   args: {
     reservationId: v.id("vehicleReservations"),
@@ -627,57 +720,77 @@ export const decideVehicleReservation = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "manage");
     const identity = await requireUser(ctx);
+    await applyVehicleReservationDecision(ctx, identity, args);
+  },
+});
+
+/**
+ * Décision côté Recyclerie (recycapp) : réservée aux véhicules mis à disposition
+ * de la Recyclerie, protégée par le droit `flotte` (manage).
+ */
+export const decideRecyclerieVehicleReservation = mutation({
+  args: {
+    reservationId: v.id("vehicleReservations"),
+    decision: v.union(v.literal("approved"), v.literal("rejected")),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, "reservations", "manage");
+    const identity = await requireUser(ctx);
+    await applyVehicleReservationDecision(ctx, identity, args, { requireRecyclerie: true });
+  },
+});
+
+/**
+ * Réservations des véhicules mis à disposition de la Recyclerie, pour la page
+ * « Réservations » de recycapp. Protégée par le droit `flotte` (lecture).
+ */
+export const listRecyclerieVehicleReservations = query({
+  args: {
+    status: v.optional(
+      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, "reservations", "read");
+    const vehicles = await ctx.db.query("vehicles").collect();
+    const vehicleById = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
+
+    const reservations = await ctx.db
+      .query("vehicleReservations")
+      .order("desc")
+      .take(200);
+    const filtered = reservations.filter((reservation) => {
+      if (args.status && reservation.status !== args.status) return false;
+      return vehicleById.get(String(reservation.vehicleId))?.recycappEnabled === true;
+    });
+
+    return await Promise.all(
+      filtered.map(async (reservation) => {
+        const vehicle = vehicleById.get(String(reservation.vehicleId)) ?? null;
+        return {
+          ...reservation,
+          vehicle,
+          vehiclePhotoUrl: vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : null,
+        };
+      }),
+    );
+  },
+});
+
+/** Annulation d'une réservation véhicule Recyclerie (droit `flotte` manage). */
+export const cancelRecyclerieVehicleReservation = mutation({
+  args: { reservationId: v.id("vehicleReservations") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, "reservations", "manage");
     const reservation = await ctx.db.get(args.reservationId);
-    if (!reservation) throw new Error("Réservation introuvable.");
-
-    if (args.decision === "approved") {
-      await ensureVehicleAvailable(
-        ctx,
-        reservation.vehicleId,
-        reservation.start,
-        reservation.end,
-      );
-
-      const approvedReservations = await approvedReservationsForVehicle(
-        ctx,
-        reservation.vehicleId,
-      );
-      const conflict = approvedReservations.find(
-        (item) =>
-          item._id !== reservation._id &&
-          overlaps(item.start, item.end, reservation.start, reservation.end),
-      );
-      if (conflict) {
-        throw new Error("Le véhicule est déjà réservé sur ce créneau.");
-      }
-    }
-
-    await ctx.db.patch(args.reservationId, {
-      status: args.decision,
-      decisionNote: args.note?.trim() || undefined,
-      decidedBy: displayName(identity),
-      decidedAt: Date.now(),
-    });
-
+    if (!reservation) return;
     const vehicle = await ctx.db.get(reservation.vehicleId);
-    await createMesoutilsNotification(ctx, {
-      recipientClerkId: reservation.bookedForClerkId ?? reservation.clerkId,
-      kind: "vehicle_reservation_decided",
-      title:
-        args.decision === "approved"
-          ? "Votre réservation de véhicule est approuvée"
-          : "Votre réservation de véhicule est refusée",
-      body: [vehicle?.name ?? "Véhicule", reservation.purpose, args.note?.trim()]
-        .filter(Boolean)
-        .join(" · "),
-      actorName: displayName(identity),
-      assetImageUrl: (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined,
-      href: "/reservations?v=mine",
-    });
+    if (vehicle?.recycappEnabled !== true) {
+      throw new Error("Ce véhicule n'est pas rattaché à la Recyclerie.");
+    }
+    await ctx.db.delete(args.reservationId);
     const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
-    const requesterPhotoUrl = (await photoForClerkId(ctx, recipientClerkId)) ?? undefined;
-    const vehicleImageUrl =
-      (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ?? undefined;
     const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
@@ -688,25 +801,11 @@ export const decideVehicleReservation = mutation({
         label: reservation.purpose,
         start: reservation.start,
         end: reservation.end,
-        state: args.decision === "approved" ? "approved" : "rejected",
-        note: args.note?.trim() || undefined,
-        photoUrl: requesterPhotoUrl,
-        assetImageUrl: vehicleImageUrl,
-      });
-    }
-
-    // Véhicule Recyclerie accepté : on prévient l'équipe (sans lien Gotravaux).
-    if (args.decision === "approved" && vehicle?.recycappEnabled === true) {
-      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
-        state: "approved",
-        requesterName: reservation.userName,
-        requesterPhotoUrl,
-        vehicleName: vehicle.name,
-        vehicleImageUrl,
-        label: reservation.purpose,
-        start: reservation.start,
-        end: reservation.end,
-        note: args.note?.trim() || undefined,
+        state: "cancelled",
+        photoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
+        assetImageUrl:
+          (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+          undefined,
       });
     }
   },
