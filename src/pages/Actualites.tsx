@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import {
   CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
   Image as ImageIcon,
   MapPin,
   MessageCircle,
@@ -84,6 +86,7 @@ type Post = {
   comments: Comment[];
   canManage: boolean;
 };
+type PostMedia = { kind: "image" | "video"; url: string };
 
 function Publications({ canCreate, canManage }: { canCreate: boolean; canManage: boolean }) {
   const { user } = useUser();
@@ -195,6 +198,11 @@ function PostCard({
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(post.body ?? "");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const media: PostMedia[] = [
+    ...post.imageUrls.map((url) => ({ kind: "image" as const, url })),
+    ...post.videoUrls.map((url) => ({ kind: "video" as const, url })),
+  ];
 
   function startEdit() {
     setEditDraft(post.body ?? "");
@@ -222,6 +230,7 @@ function PostCard({
   }
 
   return (
+    <>
     <article className="premium-panel animate-enter overflow-hidden rounded-2xl">
       <div className="flex items-start justify-between gap-4 p-4">
         <div className="flex min-w-0 gap-3">
@@ -284,14 +293,28 @@ function PostCard({
 
       {post.imageUrls.length > 0 ? (
         <div className={`grid gap-0.5 ${post.imageUrls.length === 1 ? "" : "grid-cols-2"}`}>
-          {post.imageUrls.map((url) => <img key={url} src={url} alt="" className="max-h-[480px] w-full object-cover" />)}
+          {post.imageUrls.map((url, index) => (
+            <button key={url} type="button" onClick={() => setViewerIndex(index)} className="block cursor-zoom-in overflow-hidden bg-black text-left">
+              <img src={url} alt="" className="max-h-[480px] w-full object-cover transition hover:opacity-95" />
+            </button>
+          ))}
         </div>
       ) : null}
 
       {post.videoUrls.length > 0 ? (
         <div className="grid gap-0.5">
-          {post.videoUrls.map((url) => (
-            <video key={url} src={url} controls playsInline preload="metadata" className="max-h-[560px] w-full bg-black object-contain" />
+          {post.videoUrls.map((url, index) => (
+            <button
+              key={url}
+              type="button"
+              onClick={() => setViewerIndex(post.imageUrls.length + index)}
+              className="group relative block cursor-zoom-in overflow-hidden bg-black text-left"
+            >
+              <video src={url} muted playsInline preload="metadata" className="max-h-[560px] w-full object-contain" />
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent px-4 py-3 text-sm font-semibold text-white opacity-0 transition group-hover:opacity-100">
+                Ouvrir la vidéo
+              </span>
+            </button>
           ))}
         </div>
       ) : null}
@@ -368,6 +391,97 @@ function PostCard({
         </div>
       ) : null}
     </article>
+    {viewerIndex != null ? (
+      <PostMediaViewer media={media} index={viewerIndex} onIndexChange={setViewerIndex} onClose={() => setViewerIndex(null)} />
+    ) : null}
+    </>
+  );
+}
+
+function PostMediaViewer({
+  media,
+  index,
+  onIndexChange,
+  onClose,
+}: {
+  media: PostMedia[];
+  index: number;
+  onIndexChange: (index: number) => void;
+  onClose: () => void;
+}) {
+  const current = media[index];
+  const hasMany = media.length > 1;
+
+  function move(delta: number) {
+    onIndexChange((index + delta + media.length) % media.length);
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "ArrowLeft" && hasMany) move(-1);
+      if (event.key === "ArrowRight" && hasMany) move(1);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  if (!current) return null;
+
+  return (
+    <Modal open onClose={onClose} title={`${index + 1} / ${media.length}`} className="bg-black text-white sm:max-w-[92vw]">
+      <div className="relative flex min-h-[65vh] items-center justify-center">
+        {hasMany ? (
+          <>
+            <button
+              type="button"
+              onClick={() => move(-1)}
+              className="absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/60 p-3 text-white transition hover:bg-black/80 sm:left-3"
+              aria-label="Média précédent"
+            >
+              <ChevronLeft className="h-6 w-6" />
+            </button>
+            <button
+              type="button"
+              onClick={() => move(1)}
+              className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/60 p-3 text-white transition hover:bg-black/80 sm:right-3"
+              aria-label="Média suivant"
+            >
+              <ChevronRight className="h-6 w-6" />
+            </button>
+          </>
+        ) : null}
+
+        {current.kind === "image" ? (
+          <img src={current.url} alt="" className="max-h-[72vh] max-w-full object-contain" />
+        ) : (
+          <video key={current.url} src={current.url} controls autoPlay playsInline className="max-h-[72vh] max-w-full bg-black object-contain" />
+        )}
+      </div>
+      {hasMany ? (
+        <div className="thin-scroll mt-4 flex justify-center gap-2 overflow-x-auto pb-1">
+          {media.map((item, itemIndex) => (
+            <button
+              key={`${item.kind}-${item.url}`}
+              type="button"
+              onClick={() => onIndexChange(itemIndex)}
+              className={cn(
+                "h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 bg-black transition",
+                itemIndex === index ? "border-brand-400" : "border-transparent opacity-60 hover:opacity-100",
+              )}
+              aria-label={`Ouvrir le média ${itemIndex + 1}`}
+            >
+              {item.kind === "image" ? (
+                <img src={item.url} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-neutral-900 text-xs font-bold text-white">
+                  Vidéo
+                </div>
+              )}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </Modal>
   );
 }
 
