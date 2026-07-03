@@ -312,6 +312,8 @@ export const expressDealInterest = mutation({
         authorName: deal.authorName,
         interestedName,
         dealTitle: deal.title,
+        interestedPhotoUrl: pictureUrl(identity),
+        dealImageStorageId: deal.images[0] ? String(deal.images[0]) : undefined,
       });
     }
   },

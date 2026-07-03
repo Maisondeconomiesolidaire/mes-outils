@@ -1061,6 +1061,72 @@ export const setCollecteType = mutation({
   },
 });
 
+/**
+ * Ajoute des photos (uploadées par l'équipe) à une catégorie d'objets d'une
+ * collecte. Fusionne avec les photos déjà présentes pour cette catégorie et
+ * s'assure que la catégorie apparaît dans `objectCategories`.
+ */
+export const addCollecteCategoryPhotos = mutation({
+  args: {
+    id: v.id("requests"),
+    category: v.string(),
+    photos: v.array(v.id("_storage")),
+  },
+  handler: async (ctx, { id, category, photos }) => {
+    await requireCrmPermission(ctx, "demandes", "update");
+    if (photos.length === 0) return;
+    const r = await ctx.db.get(id);
+    if (!r) throw new Error("Demande introuvable.");
+    if (r.type !== "collecte") throw new Error("Type de demande invalide.");
+
+    const collecte = r.collecte ?? {};
+    const categoryPhotos = [...(collecte.categoryPhotos ?? [])];
+    const existing = categoryPhotos.find((e) => e.category === category);
+    if (existing) {
+      existing.photos = [...existing.photos, ...photos];
+    } else {
+      categoryPhotos.push({ category, photos });
+    }
+    const objectCategories = collecte.objectCategories ?? [];
+    const nextCategories = objectCategories.includes(category)
+      ? objectCategories
+      : [...objectCategories, category];
+
+    await ctx.db.patch(id, {
+      collecte: { ...collecte, categoryPhotos, objectCategories: nextCategories },
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Retire une photo d'une catégorie d'objets d'une collecte (index dans la catégorie). */
+export const removeCollecteCategoryPhoto = mutation({
+  args: {
+    id: v.id("requests"),
+    category: v.string(),
+    index: v.number(),
+  },
+  handler: async (ctx, { id, category, index }) => {
+    await requireCrmPermission(ctx, "demandes", "update");
+    const r = await ctx.db.get(id);
+    if (!r) throw new Error("Demande introuvable.");
+    if (r.type !== "collecte" || !r.collecte) return;
+
+    const categoryPhotos = (r.collecte.categoryPhotos ?? [])
+      .map((entry) => {
+        if (entry.category !== category) return entry;
+        const photos = entry.photos.filter((_, i) => i !== index);
+        return { ...entry, photos };
+      })
+      .filter((entry) => entry.photos.length > 0);
+
+    await ctx.db.patch(id, {
+      collecte: { ...r.collecte, categoryPhotos },
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 /** Met à jour les coordonnées du client d'une demande (onglet Client). */
 export const updateCustomer = mutation({
   args: { id: v.id("requests"), customer: customerArg },

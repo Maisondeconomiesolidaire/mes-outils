@@ -20,7 +20,7 @@ function siteUrl() {
 }
 
 /** URL directe (octets, sans redirection) d'un fichier du stockage Convex. */
-function storageImageUrl(storageId: string) {
+export function storageImageUrl(storageId: string) {
   return `${siteUrl()}/email/image?id=${encodeURIComponent(storageId)}`;
 }
 

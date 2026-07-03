@@ -249,6 +249,19 @@ export async function emailForClerkId(
   return user?.email ?? null;
 }
 
+/** Photo de profil (URL Clerk) enregistrée pour un utilisateur, ou `null`. */
+export async function photoForClerkId(
+  ctx: QueryCtx | MutationCtx,
+  clerkId: string | undefined,
+): Promise<string | null> {
+  if (!clerkId) return null;
+  const user = await ctx.db
+    .query("users")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+    .unique();
+  return user?.imageUrl ?? null;
+}
+
 /** Compte Clerk associé à une adresse email (renseignée à la connexion). */
 export async function clerkIdForEmail(
   ctx: QueryCtx | MutationCtx,

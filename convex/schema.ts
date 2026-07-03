@@ -378,6 +378,8 @@ export default defineSchema(
     email: v.string(),
     firstName: v.optional(v.string()),
     lastName: v.optional(v.string()),
+    // Photo de profil Clerk (URL publique), pour l'afficher dans les emails.
+    imageUrl: v.optional(v.string()),
     phone: v.optional(v.string()),
     address: v.optional(v.string()),
     postalCode: v.optional(v.string()),

@@ -7,11 +7,26 @@ import {
   clerkIdForEmail,
   emailForClerkId,
   hasCrmPermission,
+  photoForClerkId,
   requireCrmPermission,
   requireUser,
 } from "./lib";
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
+
+/** Photo de profil de l'identité Clerk courante, si présente. */
+function pictureUrl(identity: unknown): string | undefined {
+  return (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined;
+}
+
+/** Args d'image d'un actif (véhicule/salle) pour les emails : proxy si stocké. */
+function assetImageArgs(asset: { photo?: unknown; photoUrl?: string }) {
+  return asset.photo
+    ? { assetImageStorageId: String(asset.photo) }
+    : asset.photoUrl
+      ? { assetImageUrl: asset.photoUrl }
+      : {};
+}
 
 const PAGE_KEY = "mesoutils:reservations";
 
@@ -217,6 +232,9 @@ export const bookRoom = mutation({
       ? await emailForClerkId(ctx, args.forClerkId)
       : identity.email ?? null;
     if (email) {
+      const photoUrl =
+        (onBehalf ? await photoForClerkId(ctx, args.forClerkId) : pictureUrl(identity)) ??
+        undefined;
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
         name: onBehalf || displayName(identity),
@@ -226,6 +244,8 @@ export const bookRoom = mutation({
         start: args.start,
         end: args.end,
         state: "confirmed",
+        photoUrl,
+        ...assetImageArgs(room),
       });
     }
     return reservationId;
@@ -247,10 +267,8 @@ export const cancelRoomReservation = mutation({
     }
     const room = await ctx.db.get(reservation.roomId);
     await ctx.db.delete(args.reservationId);
-    const email = await emailForClerkId(
-      ctx,
-      reservation.bookedForClerkId ?? reservation.clerkId,
-    );
+    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
@@ -261,6 +279,8 @@ export const cancelRoomReservation = mutation({
         start: reservation.start,
         end: reservation.end,
         state: "cancelled",
+        photoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
+        ...(room ? assetImageArgs(room) : {}),
       });
     }
   },
@@ -514,8 +534,11 @@ export const requestVehicle = mutation({
     // Les responsables sont notifiés de chaque demande de réservation véhicule :
     // notification in-app (pour ceux qui ont un compte) + email systématique.
     const requesterName = onBehalf || displayName(identity);
+    const requesterPhotoUrl =
+      (onBehalf ? await photoForClerkId(ctx, args.forClerkId) : pictureUrl(identity)) ??
+      undefined;
     const assetImageUrl =
-      (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined;
+      (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle.photoUrl) ?? undefined;
     for (const managerEmail of VEHICLE_REQUEST_NOTIFY_EMAILS) {
       const notifyClerkId = await clerkIdForEmail(ctx, managerEmail);
       if (notifyClerkId && notifyClerkId !== identity.subject) {
@@ -536,7 +559,9 @@ export const requestVehicle = mutation({
     // Email aux responsables (adresses fixes), qu'ils aient un compte ou non.
     await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendVehicleRequestToManagers, {
       requesterName,
+      requesterPhotoUrl,
       vehicleName: vehicle.name,
+      vehicleImageUrl: assetImageUrl,
       label: args.purpose.trim(),
       start: args.start,
       end: args.end,
@@ -555,6 +580,8 @@ export const requestVehicle = mutation({
         start: args.start,
         end: args.end,
         state: "submitted",
+        photoUrl: requesterPhotoUrl,
+        assetImageUrl,
       });
     }
     return reservationId;
@@ -617,10 +644,8 @@ export const decideVehicleReservation = mutation({
       assetImageUrl: (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined,
       href: "/reservations?v=mine",
     });
-    const email = await emailForClerkId(
-      ctx,
-      reservation.bookedForClerkId ?? reservation.clerkId,
-    );
+    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
@@ -632,6 +657,10 @@ export const decideVehicleReservation = mutation({
         end: reservation.end,
         state: args.decision === "approved" ? "approved" : "rejected",
         note: args.note?.trim() || undefined,
+        photoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
+        assetImageUrl:
+          (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+          undefined,
       });
     }
   },
@@ -652,10 +681,8 @@ export const cancelVehicleReservation = mutation({
     }
     const vehicle = await ctx.db.get(reservation.vehicleId);
     await ctx.db.delete(args.reservationId);
-    const email = await emailForClerkId(
-      ctx,
-      reservation.bookedForClerkId ?? reservation.clerkId,
-    );
+    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
@@ -666,6 +693,10 @@ export const cancelVehicleReservation = mutation({
         start: reservation.start,
         end: reservation.end,
         state: "cancelled",
+        photoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
+        assetImageUrl:
+          (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+          undefined,
       });
     }
   },

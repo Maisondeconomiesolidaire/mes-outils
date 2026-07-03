@@ -55,6 +55,7 @@ export const syncProfile = mutation({
 
     let profile = await getProfileByClerkId(ctx, clerkId);
     const now = Date.now();
+    const imageUrl = (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined;
 
     if (!profile) {
       const profileId = await ctx.db.insert("users", {
@@ -62,12 +63,19 @@ export const syncProfile = mutation({
         email,
         firstName: identity.givenName ? titleCaseName(identity.givenName) : undefined,
         lastName: identity.familyName ? titleCaseName(identity.familyName) : undefined,
+        imageUrl,
         createdAt: now,
         updatedAt: now,
       });
       profile = await ctx.db.get(profileId);
-    } else if (email && profile.email !== email) {
-      await ctx.db.patch(profile._id, { email, updatedAt: now });
+    } else {
+      const patch: { email?: string; imageUrl?: string; updatedAt?: number } = {};
+      if (email && profile.email !== email) patch.email = email;
+      if (imageUrl && profile.imageUrl !== imageUrl) patch.imageUrl = imageUrl;
+      if (Object.keys(patch).length > 0) {
+        patch.updatedAt = now;
+        await ctx.db.patch(profile._id, patch);
+      }
     }
 
     // Rattacher les demandes existantes créées sans compte (par email).

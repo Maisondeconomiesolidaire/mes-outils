@@ -1,6 +1,6 @@
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import { esc, resendSend } from "./emails";
+import { esc, resendSend, storageImageUrl } from "./emails";
 
 // Emails internes de l'application Mes Outils (équipe), distincts des emails
 // clients de la recyclerie (cf. `emails.ts`). Expéditeur et gabarit dédiés.
@@ -17,7 +17,7 @@ export const VEHICLE_REQUEST_MANAGER_EMAILS = [
 
 /** URL publique de l'app Mes Outils, pour les liens et le logo des emails. */
 function appUrl() {
-  return (process.env.MESOUTILS_APP_URL ?? "https://mes-outils.vercel.app").replace(/\/$/, "");
+  return (process.env.MESOUTILS_APP_URL ?? "https://mesoutils.eco-solidaire.fr").replace(/\/$/, "");
 }
 
 /** URL absolue du logo Mes Outils (servi depuis le `public/` de l'app). */
@@ -46,6 +46,7 @@ function shell(opts: {
   heading: string;
   intro: string;
   contentHtml?: string;
+  heroUrl?: string;
 }) {
   return `<!DOCTYPE html>
 <html lang="fr">
@@ -66,6 +67,7 @@ function shell(opts: {
           </tr>
           <tr>
             <td style="padding:30px 32px;">
+              ${heroImage(opts.heroUrl)}
               <h1 style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:22px;line-height:1.25;color:#18181b;">${esc(opts.heading)}</h1>
               <p style="margin:0 0 18px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.65;color:#3f3f46;">${opts.intro}</p>
               ${opts.contentHtml ?? ""}
@@ -83,6 +85,38 @@ function shell(opts: {
     </table>
   </body>
 </html>`;
+}
+
+/** URL d'image utilisable en email, depuis une URL directe ou un id de stockage. */
+function resolveImageUrl(opts: { imageUrl?: string; imageStorageId?: string }) {
+  if (opts.imageUrl) return opts.imageUrl;
+  if (opts.imageStorageId) return storageImageUrl(opts.imageStorageId);
+  return undefined;
+}
+
+/** Grande image d'illustration (photo du véhicule / de la salle / de l'annonce). */
+function heroImage(url: string | undefined) {
+  if (!url) return "";
+  return `<img src="${url}" alt="" style="display:block;width:100%;max-width:536px;height:auto;max-height:260px;object-fit:cover;border-radius:14px;border:1px solid #e6efe9;margin:0 0 22px;" />`;
+}
+
+function initials(name: string) {
+  const clean = name.trim();
+  return (clean ? clean.slice(0, 2) : "?").toUpperCase();
+}
+
+/** Ligne « avatar + nom » pour présenter un utilisateur (avec photo de profil). */
+function userChip(name: string, photoUrl?: string, sublabel?: string) {
+  const avatar = photoUrl
+    ? `<img src="${photoUrl}" alt="" width="44" height="44" style="width:44px;height:44px;border-radius:50%;object-fit:cover;display:block;border:0;" />`
+    : `<div style="width:44px;height:44px;border-radius:50%;background:${BRAND};color:#ffffff;font-family:Helvetica,Arial,sans-serif;font-size:16px;font-weight:700;text-align:center;line-height:44px;">${esc(initials(name))}</div>`;
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 20px;"><tr>
+    <td style="vertical-align:middle;padding-right:12px;">${avatar}</td>
+    <td style="vertical-align:middle;">
+      <div style="font-family:Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;color:#18181b;">${esc(name)}</div>
+      ${sublabel ? `<div style="font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#a1a1aa;">${esc(sublabel)}</div>` : ""}
+    </td>
+  </tr></table>`;
 }
 
 /** Encart mettant en avant le détail d'une réservation (créneau). */
@@ -182,6 +216,10 @@ export const sendReservationEmail = internalAction({
       v.literal("cancelled"),
     ),
     note: v.optional(v.string()),
+    // Photo de profil du demandeur + photo de l'actif (véhicule / salle).
+    photoUrl: v.optional(v.string()),
+    assetImageUrl: v.optional(v.string()),
+    assetImageStorageId: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
     const assetWord = args.assetKind === "room" ? "salle" : "véhicule";
@@ -193,11 +231,18 @@ export const sendReservationEmail = internalAction({
     ];
     if (args.note) rows.push(["Note", args.note]);
 
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.assetImageUrl,
+      imageStorageId: args.assetImageStorageId,
+    });
+
     const html = shell({
       preheader: copy.intro(`${assetWord} « ${args.assetName} »`),
       heading: copy.heading,
-      intro: `Bonjour ${esc(args.name)},<br/><br/>${esc(copy.intro(`${assetWord} « ${args.assetName} »`))}`,
+      heroUrl,
+      intro: esc(copy.intro(`${assetWord} « ${args.assetName} »`)),
       contentHtml: `
+        ${userChip(args.name, args.photoUrl, "Demandeur")}
         ${detailCard(rows)}
         ${button(appLink("/reservations?v=mine"), "Voir mes réservations")}
       `,
@@ -223,21 +268,30 @@ export const sendVehicleRequestToManagers = internalAction({
     start: v.number(),
     end: v.number(),
     note: v.optional(v.string()),
+    requesterPhotoUrl: v.optional(v.string()),
+    vehicleImageUrl: v.optional(v.string()),
+    vehicleImageStorageId: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
     const rows: Array<[string, string]> = [
-      ["Demandeur", args.requesterName],
       ["Véhicule", args.vehicleName],
       ["Motif", args.label],
       ["Créneau", formatRange(args.start, args.end)],
     ];
     if (args.note) rows.push(["Note", args.note]);
 
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.vehicleImageUrl,
+      imageStorageId: args.vehicleImageStorageId,
+    });
+
     const html = shell({
       preheader: `${args.requesterName} demande le véhicule « ${args.vehicleName} ».`,
       heading: "Nouvelle demande de réservation de véhicule 🚗",
-      intro: `<strong>${esc(args.requesterName)}</strong> vient de soumettre une demande de réservation de véhicule. Merci de la valider ou de la refuser.`,
+      heroUrl,
+      intro: `Une nouvelle demande de réservation de véhicule vient d'être soumise. Merci de la valider ou de la refuser.`,
       contentHtml: `
+        ${userChip(args.requesterName, args.requesterPhotoUrl, "Demandeur")}
         ${detailCard(rows)}
         ${button(appLink("/gotravaux?v=reservations"), "Valider la demande")}
       `,
@@ -262,13 +316,25 @@ export const sendDealInterestEmail = internalAction({
     authorName: v.string(),
     interestedName: v.string(),
     dealTitle: v.string(),
+    interestedPhotoUrl: v.optional(v.string()),
+    dealImageUrl: v.optional(v.string()),
+    dealImageStorageId: v.optional(v.string()),
   },
-  handler: async (_ctx, { email, authorName, interestedName, dealTitle }) => {
+  handler: async (_ctx, args) => {
+    const { email, authorName, interestedName, dealTitle } = args;
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.dealImageUrl,
+      imageStorageId: args.dealImageStorageId,
+    });
     const html = shell({
       preheader: `${interestedName} est intéressé·e par votre annonce « ${dealTitle} ».`,
       heading: `${esc(interestedName)} est intéressé·e par votre annonce 🎯`,
-      intro: `Bonjour ${esc(authorName)},<br/><br/><strong>${esc(interestedName)}</strong> s'intéresse à votre bon plan <strong>« ${esc(dealTitle)} »</strong>. Vous pouvez lui répondre directement depuis la messagerie de l'équipe.`,
-      contentHtml: button(appLink("/messagerie"), "Ouvrir la messagerie"),
+      heroUrl,
+      intro: `Bonjour ${esc(authorName)},<br/><br/>Une personne s'intéresse à votre bon plan <strong>« ${esc(dealTitle)} »</strong>. Vous pouvez lui répondre directement depuis la messagerie de l'équipe.`,
+      contentHtml: `
+        ${userChip(interestedName, args.interestedPhotoUrl, "Intéressé·e")}
+        ${button(appLink("/messagerie"), "Ouvrir la messagerie")}
+      `,
     });
     await resendSend(
       email,

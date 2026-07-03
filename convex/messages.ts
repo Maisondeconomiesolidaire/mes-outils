@@ -44,8 +44,15 @@ export const listForRequest = query({
 });
 
 export const sendMessage = mutation({
-  args: { requestId: v.id("requests"), body: v.string() },
-  handler: async (ctx, { requestId, body }) => {
+  args: {
+    requestId: v.id("requests"),
+    body: v.string(),
+    // Côté depuis lequel le message est envoyé (portail client ou CRM). Un même
+    // utilisateur peut être à la fois admin ET client : c'est le portail utilisé
+    // qui détermine le côté, pas ses permissions.
+    as: v.optional(v.union(v.literal("client"), v.literal("staff"))),
+  },
+  handler: async (ctx, { requestId, body, as }) => {
     const trimmed = body.trim();
     if (!trimmed) throw new Error("Message vide.");
     const { identity, request, staff } = await requireRequestParticipant(
@@ -55,8 +62,26 @@ export const sendMessage = mutation({
       "reply",
     );
 
+    const isOwner = !!request.userId && request.userId === identity.subject;
+
+    // Le rôle effectif du message est déterminé par le côté d'envoi (`as`),
+    // avec vérification des droits : on ne peut écrire comme « staff » qu'avec
+    // la permission CRM, et comme « client » qu'en étant le propriétaire de la
+    // demande. À défaut d'`as`, on retombe sur la capacité (compat ascendante).
+    let senderRole: "client" | "staff";
+    if (as === "staff") {
+      if (!staff) throw new Error("Accès refusé.");
+      senderRole = "staff";
+    } else if (as === "client") {
+      if (!isOwner) throw new Error("Accès refusé.");
+      senderRole = "client";
+    } else {
+      senderRole = staff ? "staff" : "client";
+    }
+    const fromStaff = senderRole === "staff";
+
     let senderName: string;
-    if (staff) {
+    if (fromStaff) {
       senderName = identity.name ?? identity.email ?? "Administrateur";
     } else {
       const profile = await ctx.db
@@ -73,18 +98,18 @@ export const sendMessage = mutation({
     const now = Date.now();
     const messageId = await ctx.db.insert("messages", {
       requestId,
-      senderRole: staff ? "staff" : "client",
+      senderRole,
       senderName,
       senderClerkId: identity.subject,
       body: trimmed,
       createdAt: now,
       // Le message est lu par son auteur d'office.
-      readByStaffAt: staff ? now : undefined,
-      readByClientAt: staff ? undefined : now,
+      readByStaffAt: fromStaff ? now : undefined,
+      readByClientAt: fromStaff ? undefined : now,
     });
 
     // Notifier le staff quand un client écrit.
-    if (!staff) {
+    if (!fromStaff) {
       await ctx.db.insert("notifications", {
         kind: "new_message",
         title: "Nouveau message client",
@@ -111,9 +136,26 @@ export const sendMessage = mutation({
 });
 
 export const markRead = mutation({
-  args: { requestId: v.id("requests") },
-  handler: async (ctx, { requestId }) => {
-    const { staff } = await requireRequestParticipant(ctx, requestId, "messages", "read");
+  args: {
+    requestId: v.id("requests"),
+    // Côté depuis lequel on consulte la conversation (voir sendMessage).
+    as: v.optional(v.union(v.literal("client"), v.literal("staff"))),
+  },
+  handler: async (ctx, { requestId, as }) => {
+    const { identity, request, staff } = await requireRequestParticipant(
+      ctx,
+      requestId,
+      "messages",
+      "read",
+    );
+    const isOwner = !!request.userId && request.userId === identity.subject;
+
+    // Le côté de lecture suit le portail utilisé, pas les permissions.
+    let asStaff: boolean;
+    if (as === "staff") asStaff = staff;
+    else if (as === "client") asStaff = !isOwner && staff; // non-propriétaire => reste staff
+    else asStaff = staff;
+
     const now = Date.now();
     const messages = await ctx.db
       .query("messages")
@@ -122,10 +164,10 @@ export const markRead = mutation({
 
     await Promise.all(
       messages.map((m) => {
-        if (staff && m.senderRole === "client" && !m.readByStaffAt) {
+        if (asStaff && m.senderRole === "client" && !m.readByStaffAt) {
           return ctx.db.patch(m._id, { readByStaffAt: now });
         }
-        if (!staff && m.senderRole === "staff" && !m.readByClientAt) {
+        if (!asStaff && m.senderRole === "staff" && !m.readByClientAt) {
           return ctx.db.patch(m._id, { readByClientAt: now });
         }
         return Promise.resolve();
