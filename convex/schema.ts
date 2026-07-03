@@ -753,6 +753,7 @@ export default defineSchema(
     authorImageUrl: v.optional(v.string()),
     body: v.string(),
     images: v.array(v.id("_storage")),
+    videos: v.optional(v.array(v.id("_storage"))),
     pinned: v.optional(v.boolean()),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),

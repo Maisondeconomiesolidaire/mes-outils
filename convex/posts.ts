@@ -28,6 +28,9 @@ async function enrichPost(
   const imageUrls = (
     await Promise.all(post.images.map((image) => ctx.storage.getUrl(image)))
   ).filter((value): value is string => Boolean(value));
+  const videoUrls = (
+    await Promise.all((post.videos ?? []).map((video) => ctx.storage.getUrl(video)))
+  ).filter((value): value is string => Boolean(value));
 
   const [comments, likes] = await Promise.all([
     ctx.db
@@ -56,6 +59,7 @@ async function enrichPost(
   return {
     ...post,
     imageUrls,
+    videoUrls,
     comments: commentsWithMeta,
     likesCount: likes.length,
     latestLikeName: likes.length > 0 ? latestLikeName : undefined,
@@ -91,12 +95,13 @@ export const create = mutation({
   args: {
     body: v.string(),
     images: v.optional(v.array(v.id("_storage"))),
+    videos: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
     const body = args.body.trim();
-    if (!body && !(args.images?.length ?? 0)) {
+    if (!body && !(args.images?.length ?? 0) && !(args.videos?.length ?? 0)) {
       throw new Error("Le post est vide.");
     }
 
@@ -107,6 +112,7 @@ export const create = mutation({
         (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
       body,
       images: args.images ?? [],
+      videos: args.videos ?? [],
       pinned: false,
       createdAt: Date.now(),
     });
@@ -118,6 +124,7 @@ export const update = mutation({
     postId: v.id("posts"),
     body: v.string(),
     images: v.optional(v.array(v.id("_storage"))),
+    videos: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
@@ -129,10 +136,11 @@ export const update = mutation({
     }
     const body = args.body.trim();
     const images = args.images ?? post.images;
-    if (!body && images.length === 0) {
+    const videos = args.videos ?? post.videos ?? [];
+    if (!body && images.length === 0 && videos.length === 0) {
       throw new Error("Le post est vide.");
     }
-    await ctx.db.patch(args.postId, { body, images, editedAt: Date.now() });
+    await ctx.db.patch(args.postId, { body, images, videos, editedAt: Date.now() });
   },
 });
 
@@ -231,7 +239,11 @@ export const toggleLike = mutation({
         recipientClerkId: post.authorClerkId,
         kind: "post_liked",
         title: `${displayName(identity)} a liké votre post`,
-        body: post.body ? post.body.slice(0, 120) : "Publication avec photo",
+        body: post.body
+          ? post.body.slice(0, 120)
+          : (post.videos?.length ?? 0) > 0
+            ? "Publication avec vidéo"
+            : "Publication avec photo",
         actorName: displayName(identity),
         actorImageUrl: (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
         href: "/actualites?v=publications",

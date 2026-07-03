@@ -31,6 +31,7 @@ import { DateRangePicker } from "../components/ui/DateRangePicker";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
+import { MediaUpload } from "../components/ui/MediaUpload";
 import { PhotoUpload } from "../components/ui/PhotoUpload";
 import { FullSpinner } from "../components/ui/Spinner";
 import { formatDate, formatDateTime, formatRelative } from "../lib/format";
@@ -75,6 +76,7 @@ type Post = {
   editedAt?: number;
   pinned?: boolean;
   imageUrls: string[];
+  videoUrls: string[];
   likedByMe: boolean;
   likesCount: number;
   latestLikeName?: string;
@@ -97,17 +99,19 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 
   const [body, setBody] = useState("");
   const [images, setImages] = useState<Id<"_storage">[]>([]);
-  const [showPhoto, setShowPhoto] = useState(false);
+  const [videos, setVideos] = useState<Id<"_storage">[]>([]);
+  const [showMedia, setShowMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
-    if (!body.trim() && images.length === 0) return;
+    if (!body.trim() && images.length === 0 && videos.length === 0) return;
     setSubmitting(true);
     try {
-      await createPost({ body, images });
+      await createPost({ body, images, videos });
       setBody("");
       setImages([]);
-      setShowPhoto(false);
+      setVideos([]);
+      setShowMedia(false);
     } finally {
       setSubmitting(false);
     }
@@ -129,16 +133,26 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
               rows={body ? 3 : 1}
             />
           </div>
-          {showPhoto ? <PhotoUpload value={images} onChange={setImages} className="mt-3 pl-[60px]" /> : null}
+          {showMedia ? (
+            <MediaUpload
+              images={images}
+              videos={videos}
+              onChange={(next) => {
+                setImages(next.images);
+                setVideos(next.videos);
+              }}
+              className="mt-3 pl-[60px]"
+            />
+          ) : null}
           <div className="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3">
             <button
               type="button"
-              onClick={() => setShowPhoto((current) => !current)}
-              className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition", showPhoto ? "bg-brand-50 text-brand-700" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]")}
+              onClick={() => setShowMedia((current) => !current)}
+              className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition", showMedia ? "bg-brand-50 text-brand-700" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]")}
             >
-              <ImageIcon className="h-4 w-4" /> Photo
+              <ImageIcon className="h-4 w-4" /> Photo/vidéo
             </button>
-            <Button onClick={submit} disabled={submitting || (!body.trim() && images.length === 0)}>
+            <Button onClick={submit} disabled={submitting || (!body.trim() && images.length === 0 && videos.length === 0)}>
               <Send className="h-4 w-4" /> {submitting ? "Publication..." : "Publier"}
             </Button>
           </div>
@@ -189,7 +203,7 @@ function PostCard({
 
   async function saveEdit() {
     const text = editDraft.trim();
-    if (!text && post.imageUrls.length === 0) return;
+    if (!text && post.imageUrls.length === 0 && post.videoUrls.length === 0) return;
     setSavingEdit(true);
     try {
       await onUpdate(text);
@@ -259,7 +273,7 @@ function PostCard({
             <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={savingEdit}>
               <X className="h-4 w-4" /> Annuler
             </Button>
-            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editDraft.trim() && post.imageUrls.length === 0)}>
+            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editDraft.trim() && post.imageUrls.length === 0 && post.videoUrls.length === 0)}>
               {savingEdit ? "Enregistrement..." : "Enregistrer"}
             </Button>
           </div>
@@ -271,6 +285,14 @@ function PostCard({
       {post.imageUrls.length > 0 ? (
         <div className={`grid gap-0.5 ${post.imageUrls.length === 1 ? "" : "grid-cols-2"}`}>
           {post.imageUrls.map((url) => <img key={url} src={url} alt="" className="max-h-[480px] w-full object-cover" />)}
+        </div>
+      ) : null}
+
+      {post.videoUrls.length > 0 ? (
+        <div className="grid gap-0.5">
+          {post.videoUrls.map((url) => (
+            <video key={url} src={url} controls playsInline preload="metadata" className="max-h-[560px] w-full bg-black object-contain" />
+          ))}
         </div>
       ) : null}
 
@@ -361,6 +383,7 @@ function likeSummary(latestLikeName: string | undefined, likesCount: number) {
 type EventItem = {
   _id: Id<"events">;
   authorName: string;
+  authorImageUrl?: string;
   title: string;
   description?: string;
   location?: string;
@@ -376,6 +399,7 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
   const removeEvent = useMutation(api.community.removeEvent);
   const generatePost = useAction(api.community.generateEventPost);
   const [open, setOpen] = useState(false);
+  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [form, setForm] = useState({ title: "", description: "", location: "", start: null as number | null, end: null as number | null });
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
@@ -440,14 +464,18 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
           {events.map((event) => (
             <article key={event._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
-              {event.imageUrls[0] ? (
-                <img src={event.imageUrls[0]} alt="" className="aspect-video w-full object-cover" />
-              ) : (
-                <div className="flex aspect-video items-center justify-center bg-brand-50"><PartyPopper className="h-10 w-10 text-brand-500" /></div>
-              )}
+              <button type="button" onClick={() => setDetailEvent(event)} className="block w-full text-left">
+                {event.imageUrls[0] ? (
+                  <img src={event.imageUrls[0]} alt="" className="aspect-video w-full object-cover" />
+                ) : (
+                  <div className="flex aspect-video items-center justify-center bg-brand-50"><PartyPopper className="h-10 w-10 text-brand-500" /></div>
+                )}
+              </button>
               <div className="p-4">
                 <p className="text-xs font-bold uppercase tracking-wide text-brand-600">{event.start ? formatDate(event.start) : "Date à venir"}</p>
-                <h3 className="mt-1 text-lg font-bold text-[var(--foreground)]">{event.title}</h3>
+                <button type="button" onClick={() => setDetailEvent(event)} className="mt-1 text-left">
+                  <h3 className="text-lg font-bold text-[var(--foreground)] hover:text-brand-600">{event.title}</h3>
+                </button>
                 {event.start ? (
                   <p className="mt-1 text-sm text-[var(--muted-foreground)]">
                     {formatDateTime(event.start)}{event.end ? ` → ${formatDateTime(event.end)}` : ""}
@@ -458,11 +486,16 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
                 ) : null}
                 {event.description ? <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{event.description}</p> : null}
                 <p className="mt-3 text-xs text-[var(--muted-foreground)]">Proposé par {event.authorName}</p>
-                {event.canManage ? (
-                  <Button variant="ghost" size="sm" className="mt-2" onClick={() => removeEvent({ eventId: event._id })}>
-                    <Trash2 className="h-4 w-4" /> Supprimer
+                <div className="mt-3 flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setDetailEvent(event)}>
+                    Voir les détails
                   </Button>
-                ) : null}
+                  {event.canManage ? (
+                    <Button variant="ghost" size="sm" onClick={() => removeEvent({ eventId: event._id })}>
+                      <Trash2 className="h-4 w-4" /> Supprimer
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             </article>
           ))}
@@ -512,7 +545,77 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
           </div>
         </div>
       </Modal>
+
+      {detailEvent ? (
+        <EventDetail event={detailEvent} onClose={() => setDetailEvent(null)} />
+      ) : null}
     </div>
+  );
+}
+
+function EventDetail({ event, onClose }: { event: EventItem; onClose: () => void }) {
+  const [active, setActive] = useState(0);
+  return (
+    <Modal open onClose={onClose} title={event.title} className="sm:max-w-4xl">
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          {event.imageUrls.length > 0 ? (
+            <>
+              <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
+                <img src={event.imageUrls[active]} alt={event.title} className="max-h-[60vh] w-full object-contain" />
+              </div>
+              {event.imageUrls.length > 1 ? (
+                <div className="thin-scroll mt-3 flex gap-2 overflow-x-auto pb-1">
+                  {event.imageUrls.map((url, index) => (
+                    <button
+                      key={url}
+                      type="button"
+                      onClick={() => setActive(index)}
+                      className={cn(
+                        "h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition",
+                        index === active ? "border-brand-500" : "border-transparent opacity-70 hover:opacity-100",
+                      )}
+                    >
+                      <img src={url} alt="" className="h-full w-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <div className="flex aspect-video items-center justify-center rounded-2xl bg-brand-50">
+              <PartyPopper className="h-12 w-12 text-brand-500" />
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col">
+          <p className="text-xs font-bold uppercase tracking-wide text-brand-600">
+            {event.start ? formatDate(event.start) : "Date à venir"}
+          </p>
+          <h2 className="mt-2 text-2xl font-bold text-[var(--foreground)]">{event.title}</h2>
+          {event.start ? (
+            <p className="mt-3 text-sm text-[var(--muted-foreground)]">
+              {formatDateTime(event.start)}{event.end ? ` → ${formatDateTime(event.end)}` : ""}
+            </p>
+          ) : null}
+          {event.location ? (
+            <p className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--foreground)]">
+              <MapPin className="h-4 w-4 text-brand-600" />{event.location}
+            </p>
+          ) : null}
+          {event.description ? (
+            <p className="mt-5 whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">{event.description}</p>
+          ) : (
+            <p className="mt-5 text-sm text-[var(--muted-foreground)]">Aucune description pour le moment.</p>
+          )}
+          <div className="mt-auto flex items-center gap-3 pt-6">
+            <Avatar name={event.authorName} src={event.authorImageUrl} size="sm" />
+            <p className="text-sm text-[var(--muted-foreground)]">Proposé par {event.authorName}</p>
+          </div>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
