@@ -4,6 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { ArrowLeft, MessagesSquare, Plus, Search, Send, Tag, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Input, Textarea } from "../components/ui/Field";
@@ -123,7 +124,7 @@ function ConversationList({
   );
 }
 
-type DealContext = { title: string; description?: string; image?: string; type?: string; price?: string };
+type DealContext = { dealId?: Id<"dealPosts">; title: string; description?: string; image?: string; type?: string; price?: string };
 
 export function Messagerie() {
   const { user } = useUser();
@@ -134,8 +135,10 @@ export function Messagerie() {
 
   const prefill = searchParams.get("prefill") ?? undefined;
   const ctxTitle = searchParams.get("ctxTitle");
+  const ctxDealId = searchParams.get("ctxDealId") as Id<"dealPosts"> | null;
   const dealContext: DealContext | null = ctxTitle
     ? {
+        dealId: ctxDealId ?? undefined,
         title: ctxTitle,
         description: searchParams.get("ctxDesc") ?? undefined,
         image: searchParams.get("ctxImage") ?? undefined,
@@ -271,7 +274,7 @@ function Thread({
       : {};
     setDraft("");
     setContext(null);
-    await send({ toClerkId: otherClerkId, toName: otherName, body, ...attachment });
+    await send({ toClerkId: otherClerkId, toName: otherName, body, dealId: context?.dealId, ...attachment });
   }
 
   return (

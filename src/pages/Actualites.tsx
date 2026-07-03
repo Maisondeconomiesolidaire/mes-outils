@@ -784,6 +784,7 @@ function contactDealHref(deal: Deal) {
     to: deal.authorClerkId,
     name: deal.authorName,
     prefill,
+    ctxDealId: deal._id,
     ctxTitle: deal.title,
   });
   if (deal.imageUrls[0]) params.set("ctxImage", deal.imageUrls[0]);
@@ -807,7 +808,6 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
   const createDeal = useMutation(api.community.createDeal);
   const removeDeal = useMutation(api.community.removeDeal);
   const setStatus = useMutation(api.community.setDealStatus);
-  const expressInterest = useMutation(api.community.expressDealInterest);
 
   const [open, setOpen] = useState(false);
   const [detailDeal, setDetailDeal] = useState<Deal | null>(null);
@@ -816,7 +816,6 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
   const [saving, setSaving] = useState(false);
 
   function contactDeal(deal: Deal) {
-    void expressInterest({ dealId: deal._id });
     navigate(contactDealHref(deal));
   }
 

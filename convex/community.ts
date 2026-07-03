@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { action, env, internalQuery, mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import {
@@ -46,6 +46,44 @@ async function resolveImages(ctx: QueryCtx | MutationCtx, images: Id<"_storage">
   if (!images?.length) return [];
   const urls = await Promise.all(images.map((id) => ctx.storage.getUrl(id)));
   return urls.filter((value): value is string => Boolean(value));
+}
+
+async function notifyDealInterest(
+  ctx: MutationCtx,
+  deal: Doc<"dealPosts">,
+  identity: {
+    subject: string;
+    name?: string | null;
+    givenName?: string | null;
+    familyName?: string | null;
+    email?: string | null;
+  },
+) {
+  // On ne se notifie pas soi-même.
+  if (deal.authorClerkId === identity.subject) return;
+
+  const interestedName = displayName(identity);
+  await createMesoutilsNotification(ctx, {
+    recipientClerkId: deal.authorClerkId,
+    kind: "deal_interest",
+    title: `${interestedName} est intéressé·e par votre annonce`,
+    body: deal.title,
+    actorName: interestedName,
+    actorImageUrl: pictureUrl(identity),
+    href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(interestedName)}`,
+  });
+
+  const email = await emailForClerkId(ctx, deal.authorClerkId);
+  if (email) {
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendDealInterestEmail, {
+      email,
+      authorName: deal.authorName,
+      interestedName,
+      dealTitle: deal.title,
+      interestedPhotoUrl: pictureUrl(identity),
+      dealImageStorageId: deal.images[0] ? String(deal.images[0]) : undefined,
+    });
+  }
 }
 
 /* ─── Événements ─────────────────────────────────────────────────────────── */
@@ -291,31 +329,7 @@ export const expressDealInterest = mutation({
     const identity = await requireStaff(ctx);
     const deal = await ctx.db.get(args.dealId);
     if (!deal) throw new Error("Bon plan introuvable.");
-    // On ne se notifie pas soi-même.
-    if (deal.authorClerkId === identity.subject) return;
-
-    const interestedName = displayName(identity);
-    await createMesoutilsNotification(ctx, {
-      recipientClerkId: deal.authorClerkId,
-      kind: "deal_interest",
-      title: `${interestedName} est intéressé·e par votre annonce`,
-      body: deal.title,
-      actorName: interestedName,
-      actorImageUrl: pictureUrl(identity),
-      href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(interestedName)}`,
-    });
-
-    const email = await emailForClerkId(ctx, deal.authorClerkId);
-    if (email) {
-      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendDealInterestEmail, {
-        email,
-        authorName: deal.authorName,
-        interestedName,
-        dealTitle: deal.title,
-        interestedPhotoUrl: pictureUrl(identity),
-        dealImageStorageId: deal.images[0] ? String(deal.images[0]) : undefined,
-      });
-    }
+    await notifyDealInterest(ctx, deal, identity);
   },
 });
 
@@ -386,6 +400,7 @@ export const sendMessage = mutation({
     // Image jointe (première photo d'un bon plan) attachée au premier message.
     attachmentImageUrl: v.optional(v.string()),
     attachmentTitle: v.optional(v.string()),
+    dealId: v.optional(v.id("dealPosts")),
   },
   handler: async (ctx, args) => {
     const identity = await requireStaff(ctx);
@@ -413,6 +428,12 @@ export const sendMessage = mutation({
       actorImageUrl: pictureUrl(identity),
       href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(displayName(identity))}`,
     });
+    if (args.dealId) {
+      const deal = await ctx.db.get(args.dealId);
+      if (deal?.authorClerkId === args.toClerkId) {
+        await notifyDealInterest(ctx, deal, identity);
+      }
+    }
     return messageId;
   },
 });
