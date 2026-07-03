@@ -6,7 +6,7 @@ import { ArrowLeft, MessagesSquare, Plus, Search, Send, Tag, X } from "lucide-re
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Input } from "../components/ui/Field";
+import { Input, Textarea } from "../components/ui/Field";
 import { FullSpinner } from "../components/ui/Spinner";
 import { formatRelative } from "../lib/format";
 import { cn } from "../lib/cn";
@@ -30,7 +30,7 @@ function useActiveConversation(conversations: Conversation[] | undefined) {
   const to = searchParams.get("to");
   const name = searchParams.get("name");
 
-  const activeId = to ?? conversations?.[0]?.clerkId ?? null;
+  const activeId = to ?? null;
   const activeName =
     name ??
     conversations?.find((conversation) => conversation.clerkId === activeId)?.name ??
@@ -40,14 +40,26 @@ function useActiveConversation(conversations: Conversation[] | undefined) {
     const next = new URLSearchParams(searchParams);
     next.set("to", conversation.clerkId);
     next.set("name", conversation.name);
-    setSearchParams(next, { replace: true });
+    next.delete("prefill");
+    next.delete("ctxTitle");
+    next.delete("ctxDesc");
+    next.delete("ctxImage");
+    next.delete("ctxType");
+    next.delete("ctxPrice");
+    setSearchParams(next);
   }
 
   function clear() {
     const next = new URLSearchParams(searchParams);
     next.delete("to");
     next.delete("name");
-    setSearchParams(next, { replace: true });
+    next.delete("prefill");
+    next.delete("ctxTitle");
+    next.delete("ctxDesc");
+    next.delete("ctxImage");
+    next.delete("ctxType");
+    next.delete("ctxPrice");
+    setSearchParams(next);
   }
 
   return { activeId, activeName, select, clear };
@@ -225,6 +237,7 @@ function Thread({
   const [draft, setDraft] = useState("");
   const [context, setContext] = useState<DealContext | null>(dealContext ?? null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Pré-remplit le message (façon "leboncoin") une seule fois par conversation/annonce.
   useEffect(() => {
@@ -239,6 +252,13 @@ function Thread({
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages, markRead, otherClerkId]);
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 128)}px`;
+  }, [draft]);
 
   const grouped = useMemo(() => messages ?? [], [messages]);
 
@@ -255,8 +275,8 @@ function Thread({
   }
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--card)]">
-      <header className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3.5 sm:px-5">
+    <section className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[var(--card)]">
+      <header className="shrink-0 flex items-center gap-3 border-b border-[var(--border)] px-4 py-3.5 sm:px-5">
         <button
           type="button"
           onClick={onBack}
@@ -269,7 +289,7 @@ function Thread({
         <p className="font-semibold text-[var(--foreground)]">{otherName}</p>
       </header>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-4 sm:p-5">
         {messages === undefined ? (
           <FullSpinner label="Chargement..." />
         ) : grouped.length === 0 ? (
@@ -316,7 +336,7 @@ function Thread({
       </div>
 
       {context ? (
-        <div className="flex items-start gap-3 border-t border-[var(--border)] bg-[var(--accent)] px-3 py-2.5">
+        <div className="shrink-0 flex items-start gap-3 border-t border-[var(--border)] bg-[var(--accent)] px-3 py-2.5">
           {context.image ? (
             <img src={context.image} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
           ) : (
@@ -347,9 +367,11 @@ function Thread({
         </div>
       ) : null}
 
-      <div className="flex items-center gap-2 border-t border-[var(--border)] p-3">
+      <div className="shrink-0 border-t border-[var(--border)] bg-[var(--card)] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        <div className="flex items-end gap-2">
         <Avatar name={meName} src={meImage} size="sm" />
-        <Input
+        <Textarea
+          ref={textareaRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
@@ -359,11 +381,13 @@ function Thread({
             }
           }}
           placeholder="Votre message..."
-          className="rounded-full"
+          rows={1}
+          className="max-h-32 min-h-11 resize-none overflow-y-auto rounded-2xl py-2.5"
         />
-        <Button onClick={submit} disabled={!draft.trim()}>
+        <Button onClick={submit} disabled={!draft.trim()} className="h-11 w-11 shrink-0 p-0">
           <Send className="h-4 w-4" />
         </Button>
+        </div>
       </div>
     </section>
   );
