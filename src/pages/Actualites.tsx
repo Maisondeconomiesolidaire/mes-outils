@@ -439,8 +439,13 @@ function PostMediaViewer({
   if (!current) return null;
 
   return (
-    <Modal open onClose={onClose} title={`${index + 1} / ${media.length}`} className="bg-black text-white sm:max-w-[92vw]">
-      <div className="relative flex min-h-[65vh] items-center justify-center">
+    <Modal
+      open
+      onClose={onClose}
+      title={`${index + 1} / ${media.length}`}
+      className="border-white/15 bg-black text-white [--accent:rgba(255,255,255,0.12)] [--border:rgba(255,255,255,0.16)] [--foreground:#ffffff] [--muted-foreground:rgba(255,255,255,0.72)] sm:h-[92vh] sm:w-[96vw] sm:max-w-[96vw]"
+    >
+      <div className="relative flex min-h-[55vh] items-center justify-center sm:min-h-[68vh]">
         {hasMany ? (
           <>
             <button
@@ -463,9 +468,9 @@ function PostMediaViewer({
         ) : null}
 
         {current.kind === "image" ? (
-          <img src={current.url} alt="" className="max-h-[72vh] max-w-full object-contain" />
+          <img src={current.url} alt="" className="max-h-[70vh] max-w-full object-contain sm:max-h-[74vh]" />
         ) : (
-          <video key={current.url} src={current.url} controls autoPlay playsInline className="max-h-[72vh] max-w-full bg-black object-contain" />
+          <video key={current.url} src={current.url} controls autoPlay playsInline className="max-h-[70vh] max-w-full bg-black object-contain sm:max-h-[74vh]" />
         )}
       </div>
       {hasMany ? (
