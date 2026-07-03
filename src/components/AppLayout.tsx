@@ -53,9 +53,10 @@ export function AppLayout() {
  * Clerk retombait sur le Portail hébergé — d'où la page en anglais, aux
  * couleurs par défaut, où il fallait recliquer sur « inscription ».
  *
- * Routing « path » : SignIn et SignUp sont montés sur de vraies routes locales
- * (`/sign-in` et `/sign-up`) pour éviter toute redirection vers les pages
- * hébergées Clerk par défaut.
+ * Les pages restent locales (`/sign-in` et `/sign-up`), mais les étapes
+ * internes Clerk utilisent le routing hash. Ça évite un changement de route
+ * React au passage vers la vérification email, qui remontait le composant et
+ * pouvait déclencher un second envoi de code.
  */
 function AuthPanel() {
   const location = useLocation();
@@ -71,16 +72,14 @@ function AuthPanel() {
   // l'héritage du provider avant le premier rendu du nouveau composant.
   return isSignUp ? (
     <SignUp
-      routing="path"
-      path="/sign-up"
+      routing="hash"
       fallbackRedirectUrl="/"
       signInUrl="/sign-in"
       appearance={CLERK_APPEARANCE}
     />
   ) : (
     <SignIn
-      routing="path"
-      path="/sign-in"
+      routing="hash"
       fallbackRedirectUrl="/"
       signUpUrl="/sign-up"
       appearance={CLERK_APPEARANCE}
