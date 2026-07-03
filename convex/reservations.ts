@@ -583,6 +583,20 @@ export const requestVehicle = mutation({
       end: args.end,
     });
 
+    // Véhicule mis à disposition de la Recyclerie : on prévient son équipe.
+    if (vehicle.recycappEnabled === true) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
+        state: "submitted",
+        requesterName,
+        requesterPhotoUrl,
+        vehicleName: vehicle.name,
+        vehicleImageUrl: assetImageUrl,
+        label: args.purpose.trim(),
+        start: args.start,
+        end: args.end,
+      });
+    }
+
     const email = onBehalf
       ? await emailForClerkId(ctx, args.forClerkId)
       : identity.email ?? null;
@@ -661,6 +675,9 @@ export const decideVehicleReservation = mutation({
       href: "/reservations?v=mine",
     });
     const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    const requesterPhotoUrl = (await photoForClerkId(ctx, recipientClerkId)) ?? undefined;
+    const vehicleImageUrl =
+      (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ?? undefined;
     const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
@@ -673,10 +690,23 @@ export const decideVehicleReservation = mutation({
         end: reservation.end,
         state: args.decision === "approved" ? "approved" : "rejected",
         note: args.note?.trim() || undefined,
-        photoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
-        assetImageUrl:
-          (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
-          undefined,
+        photoUrl: requesterPhotoUrl,
+        assetImageUrl: vehicleImageUrl,
+      });
+    }
+
+    // Véhicule Recyclerie accepté : on prévient l'équipe (sans lien Gotravaux).
+    if (args.decision === "approved" && vehicle?.recycappEnabled === true) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
+        state: "approved",
+        requesterName: reservation.userName,
+        requesterPhotoUrl,
+        vehicleName: vehicle.name,
+        vehicleImageUrl,
+        label: reservation.purpose,
+        start: reservation.start,
+        end: reservation.end,
+        note: args.note?.trim() || undefined,
       });
     }
   },

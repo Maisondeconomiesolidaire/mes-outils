@@ -314,6 +314,71 @@ export const ROOM_RESERVATION_MANAGER_EMAILS = [
   "y.prata@eco-solidaire.fr",
 ];
 
+/**
+ * Équipe Recyclerie prévenue quand un véhicule mis à sa disposition est
+ * réservé (demande soumise) puis acceptée. Sans lien : pas d'accès à Gotravaux.
+ */
+export const RECYCLERIE_VEHICLE_NOTICE_EMAILS = [
+  "a.dargent@eco-solidaire.fr",
+  "e.carette@eco-solidaire.fr",
+  "s.tiennot@eco-solidaire.fr",
+];
+
+export const sendRecyclerieVehicleNotice = internalAction({
+  args: {
+    state: v.union(v.literal("submitted"), v.literal("approved")),
+    requesterName: v.string(),
+    vehicleName: v.string(),
+    label: v.string(),
+    start: v.number(),
+    end: v.number(),
+    note: v.optional(v.string()),
+    requesterPhotoUrl: v.optional(v.string()),
+    vehicleImageUrl: v.optional(v.string()),
+    vehicleImageStorageId: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const approved = args.state === "approved";
+    const intro = approved
+      ? "Une réservation vient d'être acceptée pour un véhicule de la Recyclerie."
+      : "Une demande de réservation vient d'être effectuée pour un véhicule de la Recyclerie.";
+    const heading = approved
+      ? "Réservation acceptée pour un véhicule de la Recyclerie"
+      : "Demande de réservation pour un véhicule de la Recyclerie";
+
+    const rows: Array<[string, string]> = [
+      ["Véhicule", args.vehicleName],
+      ["Motif", args.label],
+      ["Créneau", formatRange(args.start, args.end)],
+    ];
+    if (args.note) rows.push(["Note", args.note]);
+
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.vehicleImageUrl,
+      imageStorageId: args.vehicleImageStorageId,
+    });
+
+    const html = shell({
+      preheader: intro,
+      heading,
+      heroUrl,
+      intro,
+      // Pas de bouton : ces destinataires n'ont pas accès à Gotravaux.
+      contentHtml: `
+        ${userChip(args.requesterName, args.requesterPhotoUrl, "Demandeur")}
+        ${detailCard(rows)}
+      `,
+    });
+
+    const subject = approved
+      ? `Réservation acceptée · ${args.vehicleName} (Recyclerie)`
+      : `Demande de réservation · ${args.vehicleName} (Recyclerie)`;
+    for (const email of RECYCLERIE_VEHICLE_NOTICE_EMAILS) {
+      await resendSend(email, subject, html, FROM);
+    }
+  },
+});
+
 /** Notifie les responsables (a.still / y.prata) d'une réservation de salle. */
 export const sendRoomReservationToManagers = internalAction({
   args: {
