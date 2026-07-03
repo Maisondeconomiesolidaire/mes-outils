@@ -7,6 +7,7 @@ import { api } from "../../convex/_generated/api";
 
 /** Style "bouton primaire" appliqué à l'élément de navigation actif. */
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
+const CLERK_APPEARANCE = { variables: { colorPrimary: "#47c667" } };
 import { PORTAL_NAV, canAccess } from "../lib/permissions";
 import { cn } from "../lib/cn";
 import { usePermissionsAccess } from "./RequirePermission";
@@ -69,12 +70,23 @@ function AuthPanel() {
     return () => window.removeEventListener("hashchange", sync);
   }, []);
 
-  // L'apparence (couleur de marque, français) est héritée du `<ClerkProvider>`,
-  // pour rester identique aux autres portails de connexion.
+  // On passe aussi l'apparence directement aux composants Clerk :
+  // certaines transitions SignIn -> SignUp ne réappliquent pas toujours
+  // l'héritage du provider avant le premier rendu du nouveau composant.
   return isSignUp ? (
-    <SignUp routing="hash" fallbackRedirectUrl="/" signInUrl="#/sign-in" />
+    <SignUp
+      routing="hash"
+      fallbackRedirectUrl="/"
+      signInUrl="/#/sign-in"
+      appearance={CLERK_APPEARANCE}
+    />
   ) : (
-    <SignIn routing="hash" fallbackRedirectUrl="/" signUpUrl="#/sign-up" />
+    <SignIn
+      routing="hash"
+      fallbackRedirectUrl="/"
+      signUpUrl="/#/sign-up"
+      appearance={CLERK_APPEARANCE}
+    />
   );
 }
 
