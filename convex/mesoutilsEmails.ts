@@ -297,14 +297,12 @@ export const sendVehicleRequestToManagers = internalAction({
       `,
     });
 
-    for (const email of VEHICLE_REQUEST_MANAGER_EMAILS) {
-      await resendSend(
-        email,
-        `Demande de réservation · ${args.vehicleName} (${args.requesterName})`,
-        html,
-        FROM,
-      );
-    }
+    await resendSend(
+      VEHICLE_REQUEST_MANAGER_EMAILS,
+      `Demande de réservation · ${args.vehicleName} (${args.requesterName})`,
+      html,
+      FROM,
+    );
   },
 });
 
@@ -373,9 +371,7 @@ export const sendRecyclerieVehicleNotice = internalAction({
     const subject = approved
       ? `Réservation acceptée · ${args.vehicleName} (Recyclerie)`
       : `Demande de réservation · ${args.vehicleName} (Recyclerie)`;
-    for (const email of RECYCLERIE_VEHICLE_NOTICE_EMAILS) {
-      await resendSend(email, subject, html, FROM);
-    }
+    await resendSend(RECYCLERIE_VEHICLE_NOTICE_EMAILS, subject, html, FROM);
   },
 });
 
@@ -417,14 +413,12 @@ export const sendRoomReservationToManagers = internalAction({
       `,
     });
 
-    for (const email of ROOM_RESERVATION_MANAGER_EMAILS) {
-      await resendSend(
-        email,
-        `Réservation de salle · ${args.roomName} (${args.requesterName})`,
-        html,
-        FROM,
-      );
-    }
+    await resendSend(
+      ROOM_RESERVATION_MANAGER_EMAILS,
+      `Réservation de salle · ${args.roomName} (${args.requesterName})`,
+      html,
+      FROM,
+    );
   },
 });
 

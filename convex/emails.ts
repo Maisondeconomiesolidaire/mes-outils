@@ -189,7 +189,7 @@ function shell(opts: {
 }
 
 export async function resendSend(
-  to: string,
+  to: string | string[],
   subject: string,
   html: string,
   from: string = FROM,
@@ -199,8 +199,13 @@ export async function resendSend(
     console.warn("RESEND_API_KEY non configurée — email ignoré.");
     return;
   }
-  const email = to.trim();
-  if (!email) return;
+  // Un SEUL appel Resend, même pour plusieurs destinataires (évite de dépasser
+  // la limite de 2 requêtes/seconde de Resend qui faisait silencieusement
+  // échouer une partie des emails managers).
+  const recipients = (Array.isArray(to) ? to : [to])
+    .map((email) => email.trim())
+    .filter(Boolean);
+  if (recipients.length === 0) return;
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -208,7 +213,7 @@ export async function resendSend(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ from, to: [email], subject, html }),
+    body: JSON.stringify({ from, to: recipients, subject, html }),
   });
 
   if (!response.ok) {

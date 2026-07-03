@@ -254,7 +254,8 @@ export const bookRoom = mutation({
     }
 
     // Email aux responsables des réservations de salle (a.still & y.prata).
-    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRoomReservationToManagers, {
+    // Décalé pour ne pas dépasser la limite Resend (2 req/s) avec l'email au demandeur.
+    await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendRoomReservationToManagers, {
       requesterName,
       requesterPhotoUrl,
       roomName: room.name,
@@ -574,7 +575,7 @@ export const requestVehicle = mutation({
     }
 
     // Email aux responsables (adresses fixes), qu'ils aient un compte ou non.
-    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendVehicleRequestToManagers, {
+    await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendVehicleRequestToManagers, {
       requesterName,
       requesterPhotoUrl,
       vehicleName: vehicle.name,
@@ -586,7 +587,7 @@ export const requestVehicle = mutation({
 
     // Véhicule mis à disposition de la Recyclerie : on prévient son équipe.
     if (vehicle.recycappEnabled === true) {
-      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
+      await ctx.scheduler.runAfter(2400, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
         state: "submitted",
         requesterName,
         requesterPhotoUrl,
@@ -698,7 +699,7 @@ async function applyVehicleReservationDecision(
 
   // Véhicule Recyclerie accepté : on prévient l'équipe (sans lien Gotravaux).
   if (args.decision === "approved" && vehicle?.recycappEnabled === true) {
-    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
+    await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
       state: "approved",
       requesterName: reservation.userName,
       requesterPhotoUrl,
