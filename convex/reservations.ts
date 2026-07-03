@@ -17,7 +17,10 @@ const PAGE_KEY = "mesoutils:reservations";
 
 // Destinataire unique des notifications « nouvelle demande de réservation
 // véhicule » : seul ce compte est prévenu de chaque demande.
-const VEHICLE_REQUEST_NOTIFY_EMAIL = "f.henry@eco-solidaire.fr";
+const VEHICLE_REQUEST_NOTIFY_EMAILS = [
+  "f.henry@eco-solidaire.fr",
+  "y.prata@eco-solidaire.fr",
+];
 
 function ensureRange(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
@@ -508,22 +511,36 @@ export const requestVehicle = mutation({
       createdAt: Date.now(),
     });
 
-    // Une seule personne est notifiée de chaque demande de réservation véhicule.
+    // Les responsables sont notifiés de chaque demande de réservation véhicule :
+    // notification in-app (pour ceux qui ont un compte) + email systématique.
     const requesterName = onBehalf || displayName(identity);
-    const notifyClerkId = await clerkIdForEmail(ctx, VEHICLE_REQUEST_NOTIFY_EMAIL);
-    if (notifyClerkId && notifyClerkId !== identity.subject) {
-      await createMesoutilsNotification(ctx, {
-        recipientClerkId: notifyClerkId,
-        kind: "vehicle_reservation_request",
-        title: "Nouvelle demande de réservation de véhicule",
-        body: [vehicle.name, requesterName, args.purpose.trim()]
-          .filter(Boolean)
-          .join(" · "),
-        actorName: displayName(identity),
-        assetImageUrl: (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined,
-        href: "/gotravaux?v=reservations",
-      });
+    const assetImageUrl =
+      (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : undefined) ?? undefined;
+    for (const managerEmail of VEHICLE_REQUEST_NOTIFY_EMAILS) {
+      const notifyClerkId = await clerkIdForEmail(ctx, managerEmail);
+      if (notifyClerkId && notifyClerkId !== identity.subject) {
+        await createMesoutilsNotification(ctx, {
+          recipientClerkId: notifyClerkId,
+          kind: "vehicle_reservation_request",
+          title: "Nouvelle demande de réservation de véhicule",
+          body: [vehicle.name, requesterName, args.purpose.trim()]
+            .filter(Boolean)
+            .join(" · "),
+          actorName: displayName(identity),
+          assetImageUrl,
+          href: "/gotravaux?v=reservations",
+        });
+      }
     }
+
+    // Email aux responsables (adresses fixes), qu'ils aient un compte ou non.
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendVehicleRequestToManagers, {
+      requesterName,
+      vehicleName: vehicle.name,
+      label: args.purpose.trim(),
+      start: args.start,
+      end: args.end,
+    });
 
     const email = onBehalf
       ? await emailForClerkId(ctx, args.forClerkId)

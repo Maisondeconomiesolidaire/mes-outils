@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
-import { ArrowLeft, MessagesSquare, Send, Tag, X } from "lucide-react";
+import { ArrowLeft, MessagesSquare, Plus, Search, Send, Tag, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -118,6 +118,7 @@ export function Messagerie() {
   const conversations = useConversations();
   const { activeId, activeName, select, clear } = useActiveConversation(conversations);
   const [searchParams] = useSearchParams();
+  const [composing, setComposing] = useState(false);
 
   const prefill = searchParams.get("prefill") ?? undefined;
   const ctxTitle = searchParams.get("ctxTitle");
@@ -145,11 +146,33 @@ export function Messagerie() {
           activeId ? "hidden lg:flex" : "flex",
         )}
       >
-        <div className="border-b border-[var(--border)] px-4 py-3">
+        <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h1 className="text-lg font-semibold text-[var(--foreground)]">Messagerie</h1>
+          <button
+            type="button"
+            onClick={() => setComposing((v) => !v)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition",
+              composing
+                ? "bg-[var(--accent)] text-[var(--foreground)]"
+                : "bg-brand-500 text-white hover:bg-brand-600",
+            )}
+          >
+            {composing ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {composing ? "Fermer" : "Nouvelle conversation"}
+          </button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          <ConversationList conversations={conversations} activeId={activeId} onSelect={select} />
+          {composing ? (
+            <NewConversationPanel
+              onPick={(person) => {
+                select(person);
+                setComposing(false);
+              }}
+            />
+          ) : (
+            <ConversationList conversations={conversations} activeId={activeId} onSelect={select} />
+          )}
         </div>
       </div>
 
@@ -343,6 +366,53 @@ function Thread({
         </Button>
       </div>
     </section>
+  );
+}
+
+type StaffResult = { clerkId: string; name: string; email: string };
+
+/** Recherche d'un membre de l'équipe pour démarrer une nouvelle conversation. */
+function NewConversationPanel({ onPick }: { onPick: (person: { clerkId: string; name: string }) => void }) {
+  const [query, setQuery] = useState("");
+  const results = useQuery(api.community.searchStaff, { query }) as StaffResult[] | undefined;
+
+  return (
+    <div className="flex min-h-0 flex-col">
+      <div className="relative mb-2 px-1">
+        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+        <Input
+          autoFocus
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Rechercher un membre par nom..."
+          className="rounded-full pl-9"
+        />
+      </div>
+      {results === undefined ? (
+        <p className="px-3 py-6 text-center text-sm text-[var(--muted-foreground)]">Recherche...</p>
+      ) : results.length === 0 ? (
+        <p className="px-3 py-6 text-center text-sm text-[var(--muted-foreground)]">
+          Aucun membre trouvé.
+        </p>
+      ) : (
+        <div className="space-y-1">
+          {results.map((person) => (
+            <button
+              key={person.clerkId}
+              type="button"
+              onClick={() => onPick({ clerkId: person.clerkId, name: person.name })}
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-[var(--accent)]"
+            >
+              <Avatar name={person.name} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-[var(--foreground)]">{person.name}</span>
+                <span className="block truncate text-xs text-[var(--muted-foreground)]">{person.email}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

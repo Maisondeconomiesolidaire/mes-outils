@@ -31,7 +31,7 @@ import { VehicleSearchSelect } from "../components/ui/VehicleSearchSelect";
 import { DatePicker } from "../components/ui/DatePicker";
 import { FullSpinner } from "../components/ui/Spinner";
 import { useUpload } from "../lib/useUpload";
-import { formatDate, formatDateTime, relativeUnits } from "../lib/format";
+import { formatDate, formatDateTime, formatDateTimeWithDay, relativeUnits } from "../lib/format";
 import { canAccess } from "../lib/permissions";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
@@ -1103,7 +1103,7 @@ function ReservationRow({ reservation, canManage, onOpen, onCancel }: { reservat
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-[var(--foreground)]">{reservation.vehicle?.name ?? "Véhicule"}</p><StatusBadge status={reservation.status} /></div>
         <p className="mt-1 text-sm text-[var(--muted-foreground)]">{reservation.userName}{reservation.bookedByName ? ` (par ${reservation.bookedByName})` : ""} · {reservation.purpose}</p>
-        <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}</p>
+        <p className="text-xs text-[var(--muted-foreground)]">{formatDateTimeWithDay(reservation.start)} → {formatDateTimeWithDay(reservation.end)}</p>
       </div>
       <div className="flex items-center gap-2">
         <Button size="sm" variant={reservation.status === "pending" && canManage ? "primary" : "secondary"} onClick={onOpen}>
@@ -1166,8 +1166,8 @@ function ReservationDetailsModal({
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <DetailItem label="Demandeur" value={reservation.userName} />
           <DetailItem label="Réservé par" value={reservation.bookedByName ?? reservation.userName} />
-          <DetailItem label="Début" value={formatDateTime(reservation.start)} />
-          <DetailItem label="Fin" value={formatDateTime(reservation.end)} />
+          <DetailItem label="Début" value={formatDateTimeWithDay(reservation.start)} />
+          <DetailItem label="Fin" value={formatDateTimeWithDay(reservation.end)} />
           <DetailItem label="Usage" value={usageLabel} />
           <DetailItem label="Km estimés" value={reservation.expectedKm !== undefined ? `${reservation.expectedKm.toLocaleString("fr-FR")} km` : "Non renseigné"} />
         </dl>

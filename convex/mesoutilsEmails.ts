@@ -5,24 +5,36 @@ import { esc, resendSend } from "./emails";
 // Emails internes de l'application Mes Outils (équipe), distincts des emails
 // clients de la recyclerie (cf. `emails.ts`). Expéditeur et gabarit dédiés.
 const FROM = "Mes Outils <no-reply@mesoutils.eco-solidaire.fr>";
-const BRAND = "#f1104f";
+// Vert de marque Mes Outils (identique au `brand-500` de l'app).
+const BRAND = "#47c667";
+const BRAND_DARK = "#2fa855";
 
-/** URL publique de l'app Mes Outils, pour les liens des emails (optionnelle). */
+/** Adresses des responsables notifiés des demandes de réservation de véhicule. */
+export const VEHICLE_REQUEST_MANAGER_EMAILS = [
+  "f.henry@eco-solidaire.fr",
+  "y.prata@eco-solidaire.fr",
+];
+
+/** URL publique de l'app Mes Outils, pour les liens et le logo des emails. */
 function appUrl() {
-  return (process.env.MESOUTILS_APP_URL ?? "").replace(/\/$/, "");
+  return (process.env.MESOUTILS_APP_URL ?? "https://mes-outils.vercel.app").replace(/\/$/, "");
 }
 
-/** Lien absolu vers une route de l'app, ou `null` si l'URL n'est pas configurée. */
+/** URL absolue du logo Mes Outils (servi depuis le `public/` de l'app). */
+function logoUrl() {
+  return `${appUrl()}/mesoutils-light.png`;
+}
+
+/** Lien absolu vers une route de l'app. */
 function appLink(path: string) {
-  const base = appUrl();
-  return base ? `${base}${path}` : null;
+  return `${appUrl()}${path}`;
 }
 
 /** Bouton « à toute épreuve » (table + lien). Rien si `href` est nul. */
 function button(href: string | null, label: string) {
   if (!href) return "";
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:0 0 22px;">
-    <tr><td style="border-radius:12px;background:${BRAND};">
+    <tr><td style="border-radius:12px;background:${BRAND_DARK};">
       <a href="${href}" target="_blank" style="display:inline-block;padding:13px 24px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;line-height:1;color:#ffffff;text-decoration:none;border-radius:12px;">${esc(label)}</a>
     </td></tr>
   </table>`;
@@ -46,10 +58,10 @@ function shell(opts: {
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${esc(opts.preheader)}</div>
     <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f1ec;padding:24px 12px;">
       <tr><td align="center">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #ece9e4;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #e6efe9;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
           <tr>
-            <td style="background:linear-gradient(135deg,#ffffff,#fff7ef,#ffe9d6);padding:22px 28px;border-bottom:1px solid #f1ece5;">
-              <span style="font-family:Helvetica,Arial,sans-serif;font-size:17px;font-weight:800;color:${BRAND};">Mes Outils</span>
+            <td style="background:linear-gradient(135deg,#ffffff,#f0faf3,#e6f6ec);padding:20px 28px;border-bottom:1px solid #e6efe9;border-top:4px solid ${BRAND};">
+              <img src="${logoUrl()}" alt="Mes Outils" height="34" style="height:34px;width:auto;display:block;border:0;outline:none;text-decoration:none;" />
             </td>
           </tr>
           <tr>
@@ -196,6 +208,49 @@ export const sendReservationEmail = internalAction({
       html,
       FROM,
     );
+  },
+});
+
+/**
+ * Notifie les responsables (f.henry / y.prata) d'une nouvelle demande de
+ * réservation de véhicule, avec un lien direct vers la validation.
+ */
+export const sendVehicleRequestToManagers = internalAction({
+  args: {
+    requesterName: v.string(),
+    vehicleName: v.string(),
+    label: v.string(),
+    start: v.number(),
+    end: v.number(),
+    note: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const rows: Array<[string, string]> = [
+      ["Demandeur", args.requesterName],
+      ["Véhicule", args.vehicleName],
+      ["Motif", args.label],
+      ["Créneau", formatRange(args.start, args.end)],
+    ];
+    if (args.note) rows.push(["Note", args.note]);
+
+    const html = shell({
+      preheader: `${args.requesterName} demande le véhicule « ${args.vehicleName} ».`,
+      heading: "Nouvelle demande de réservation de véhicule 🚗",
+      intro: `<strong>${esc(args.requesterName)}</strong> vient de soumettre une demande de réservation de véhicule. Merci de la valider ou de la refuser.`,
+      contentHtml: `
+        ${detailCard(rows)}
+        ${button(appLink("/gotravaux?v=reservations"), "Valider la demande")}
+      `,
+    });
+
+    for (const email of VEHICLE_REQUEST_MANAGER_EMAILS) {
+      await resendSend(
+        email,
+        `Demande de réservation · ${args.vehicleName} (${args.requesterName})`,
+        html,
+        FROM,
+      );
+    }
   },
 });
 

@@ -445,6 +445,49 @@ export const markThreadRead = mutation({
   },
 });
 
+/**
+ * Recherche des membres de l'équipe (par nom ou email) pour démarrer une
+ * nouvelle conversation sans passer par une interaction de l'app. On ne renvoie
+ * que les personnes staff/admin déjà connectées (joignables via leur clerkId),
+ * hors soi-même.
+ */
+export const searchStaff = query({
+  args: { query: v.string() },
+  handler: async (ctx, { query }) => {
+    const identity = await requireStaff(ctx);
+    const needle = query.trim().toLowerCase();
+
+    const perms = await ctx.db.query("crmPermissions").collect();
+    const results: Array<{ clerkId: string; name: string; email: string }> = [];
+    const seen = new Set<string>();
+
+    for (const perm of perms) {
+      if (!perm.active) continue;
+      if (perm.role === "client") continue;
+      const email = perm.email.trim().toLowerCase();
+      if (!email) continue;
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", email))
+        .first();
+      if (!user) continue; // jamais connecté → pas de clerkId, injoignable
+      if (user.clerkId === identity.subject) continue;
+      if (seen.has(user.clerkId)) continue;
+      const name =
+        perm.name?.trim() ||
+        [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+        email;
+      if (needle && !name.toLowerCase().includes(needle) && !email.includes(needle)) {
+        continue;
+      }
+      seen.add(user.clerkId);
+      results.push({ clerkId: user.clerkId, name, email });
+    }
+
+    return results.sort((a, b) => a.name.localeCompare(b.name, "fr")).slice(0, 25);
+  },
+});
+
 /* ─── Annuaire staff (pour réserver au nom d'un collègue) ────────────────── */
 
 type ClerkDirectoryUser = {
