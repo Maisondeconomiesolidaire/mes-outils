@@ -69,12 +69,12 @@ function AuthPanel() {
     return () => window.removeEventListener("hashchange", sync);
   }, []);
 
-  const appearance = { variables: { colorPrimary: "#47c667" } };
-
+  // L'apparence (couleur de marque, français) est héritée du `<ClerkProvider>`,
+  // pour rester identique aux autres portails de connexion.
   return isSignUp ? (
-    <SignUp routing="hash" fallbackRedirectUrl="/" signInUrl="#/sign-in" appearance={appearance} />
+    <SignUp routing="hash" fallbackRedirectUrl="/" signInUrl="#/sign-in" />
   ) : (
-    <SignIn routing="hash" fallbackRedirectUrl="/" signUpUrl="#/sign-up" appearance={appearance} />
+    <SignIn routing="hash" fallbackRedirectUrl="/" signUpUrl="#/sign-up" />
   );
 }
 

@@ -1,10 +1,10 @@
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 
-// Adresse d'expédition. En test (pas encore de domaine vérifié), on utilise
-// l'adresse fournie par Resend. À remplacer par une adresse @votre-domaine
-// une fois le domaine vérifié sur resend.com.
-const FROM = "Cycle en Bray <onboarding@resend.dev>";
+// Adresse d'expédition. Domaine `mesoutils.eco-solidaire.fr` vérifié sur Resend
+// (partagé par toutes les apps de l'écosystème) — meilleure délivrabilité que
+// l'ancienne adresse de test onboarding@resend.dev.
+const FROM = "Cycle en Bray <no-reply@mesoutils.eco-solidaire.fr>";
 
 /** URL publique de l'app (liens des emails). À régler via `npx convex env set APP_URL`. */
 function appUrl() {

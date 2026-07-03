@@ -4,7 +4,7 @@ import { esc, resendSend } from "./emails";
 
 // Emails internes de l'application Mes Outils (équipe), distincts des emails
 // clients de la recyclerie (cf. `emails.ts`). Expéditeur et gabarit dédiés.
-const FROM = "Mes Outils <onboarding@resend.dev>";
+const FROM = "Mes Outils <no-reply@mesoutils.eco-solidaire.fr>";
 const BRAND = "#f1104f";
 
 /** URL publique de l'app Mes Outils, pour les liens des emails (optionnelle). */
