@@ -290,6 +290,11 @@ export default defineSchema(
       ),
     ),
     collecteType: v.optional(collecteType),
+    // Dernier modificateur par champ (clé = nom du champ) — affiché « Modifié
+    // par … » sous chaque champ du CRM. `by` = persona ou nom du compte.
+    fieldEdits: v.optional(
+      v.record(v.string(), v.object({ by: v.string(), at: v.number() })),
+    ),
     // --- Gestion interne (onglet Gestion du CRM) ---
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     assignedTo: v.optional(v.id("teamMembers")),

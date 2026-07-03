@@ -1,12 +1,27 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { customerFullName, requireCrmPermission } from "./lib";
+import { customerFullName, requireCrmPermission, requireStaff } from "./lib";
 
 export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, "equipe", "read");
     return await ctx.db.query("teamMembers").order("desc").collect();
+  },
+});
+
+/**
+ * Liste des encadrants (membres actifs de l'équipe) pour la sélection de persona
+ * sur le compte partagé accueil. Accessible à tout staff (pas de droit `equipe`).
+ */
+export const listPersonas = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    const members = await ctx.db.query("teamMembers").order("asc").collect();
+    return members
+      .filter((member) => member.active)
+      .map((member) => ({ _id: member._id, name: member.name, role: member.role ?? null }));
   },
 });
 

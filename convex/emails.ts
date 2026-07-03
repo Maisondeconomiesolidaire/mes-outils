@@ -4,7 +4,7 @@ import { v } from "convex/values";
 // Adresse d'expédition. Domaine `mesoutils.eco-solidaire.fr` vérifié sur Resend
 // (partagé par toutes les apps de l'écosystème) — meilleure délivrabilité que
 // l'ancienne adresse de test onboarding@resend.dev.
-const FROM = "Cycle en Bray <no-reply@mesoutils.eco-solidaire.fr>";
+const FROM = "Recyclerie <no-reply@mesoutils.eco-solidaire.fr>";
 
 /** URL publique de l'app (liens des emails). À régler via `npx convex env set APP_URL`. */
 function appUrl() {
