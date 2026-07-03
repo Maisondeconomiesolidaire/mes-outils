@@ -126,6 +126,17 @@ async function createNewRequestNotification(
       article: await emailArticlePreview(ctx, request),
     });
   }
+
+  // Email à l'équipe recyclerie (accueil / e.carette / s.tiennot) — décalé pour
+  // rester sous la limite Resend (2 req/s) avec l'email client.
+  if (request) {
+    await ctx.scheduler.runAfter(1200, internal.emails.sendNewRequestToStaff, {
+      type: request.type,
+      reference: request.reference ?? String(request._id).slice(-6),
+      customerName: customerFullName(request.customer),
+      article: await emailArticlePreview(ctx, request),
+    });
+  }
 }
 
 async function generateReference(ctx: MutationCtx): Promise<string> {

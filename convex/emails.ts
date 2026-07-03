@@ -293,6 +293,35 @@ export const sendRequestConfirmation = internalAction({
   },
 });
 
+/** Staff prévenu à chaque nouvelle demande (aérogommage, collecte, etc.). */
+const NEW_REQUEST_STAFF_EMAILS = [
+  "accueil.recyclerie@eco-solidaire.fr",
+  "e.carette@eco-solidaire.fr",
+  "s.tiennot@eco-solidaire.fr",
+];
+
+export const sendNewRequestToStaff = internalAction({
+  args: {
+    type: v.string(),
+    reference: v.string(),
+    customerName: v.string(),
+    article: articleArg,
+  },
+  handler: async (_ctx, { type, reference, customerName, article }) => {
+    const label = typeLabel(type);
+    const html = shell({
+      preheader: `Nouvelle demande ${label} de ${customerName} (#${reference}).`,
+      heading: "Nouvelle demande reçue",
+      intro: `Une nouvelle demande <strong>${esc(label)}</strong> vient d'être créée par <strong>${esc(customerName)}</strong> (référence <strong>#${esc(reference)}</strong>).`,
+      contentHtml: `
+        ${buildArticleCard(article)}
+        <div style="margin:0 0 22px;">${button(`${appUrl()}/crm/notifications`, "Voir la demande")}</div>
+      `,
+    });
+    await resendSend(NEW_REQUEST_STAFF_EMAILS, `Nouvelle demande · ${label} #${reference}`, html);
+  },
+});
+
 /** Notification au client d'un nouveau message du staff. */
 export const sendNewMessage = internalAction({
   args: {
