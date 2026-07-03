@@ -36,15 +36,18 @@ type PortalApp = {
   cardBg: string;
 };
 
-const env = import.meta.env as Record<string, string | undefined>;
-
+// URLs de production des applications de l'écosystème. Volontairement codées en
+// dur (et non via des variables d'environnement) : les tuiles « Mes applications »
+// doivent pointer vers EXACTEMENT les mêmes liens dans toutes les apps déployées.
+// Passer par une variable (.env.local ou Vercel) laissait un lien dériver vers
+// localhost sur certaines apps (ex. Klyd → Recyclerie).
 const APPS: PortalApp[] = [
   {
     key: "mesoutils",
     label: "Mes Outils",
     description: "Portail interne : accès aux applications, espace partage et réservations.",
     logoSrc: "/mesoutils-light.png",
-    href: env.VITE_MESOUTILS_URL ?? "https://mes-outils.vercel.app",
+    href: "https://mes-outils.vercel.app",
     cardBg: "#e6f6ec",
   },
   {
@@ -52,7 +55,7 @@ const APPS: PortalApp[] = [
     label: "Recyclerie",
     description: "CRM de gestion pour les demandes, la boutique, le stock et les clients.",
     logoSrc: "/recyclerie-logo.png",
-    href: env.VITE_RECYCAPP_URL ?? "https://mesrecycleries.vercel.app/crm",
+    href: "https://mesrecycleries.vercel.app/crm",
     cardBg: "#ffffff",
   },
   {
@@ -60,7 +63,7 @@ const APPS: PortalApp[] = [
     label: "Klyd",
     description: "Boutique textile : stock, mise en ligne et suivi des commandes.",
     logoSrc: "/klyd-logo.png",
-    href: env.VITE_KLYD_URL ?? "https://klyd.vercel.app",
+    href: "https://klyd.vercel.app",
     cardBg: "#f6eee5",
   },
   {
@@ -68,7 +71,7 @@ const APPS: PortalApp[] = [
     label: "Cycle en Bray",
     description: "Boutique et CRM de gestion pour la Recyclerie 60 et 76.",
     logoSrc: "/cycle-en-bray-logo.webp",
-    href: env.VITE_CYCLEENBRAY_URL ?? "https://cycleenbray.vercel.app/crm",
+    href: "https://cycleenbray.vercel.app/crm",
     cardBg: "#eef7f1",
   },
   {
@@ -76,7 +79,7 @@ const APPS: PortalApp[] = [
     label: "Bennes & Pro",
     description: "Gestion déchet'lab",
     logoSrc: "/bennespro-logo.png",
-    href: env.VITE_BENNESPRO_URL ?? "https://bennespro.vercel.app",
+    href: "https://bennespro.vercel.app",
     cardBg: "#a4cebe",
   },
 ];
