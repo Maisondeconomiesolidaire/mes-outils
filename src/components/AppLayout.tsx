@@ -59,9 +59,10 @@ export function AppLayout() {
  */
 function AuthPanel() {
   const location = useLocation();
-  const isSignUp = location.pathname === "/sign-up";
+  const isSignIn = location.pathname.startsWith("/sign-in");
+  const isSignUp = location.pathname.startsWith("/sign-up");
 
-  if (location.pathname !== "/sign-in" && location.pathname !== "/sign-up") {
+  if (!isSignIn && !isSignUp) {
     return <Navigate to="/sign-in" replace />;
   }
 
