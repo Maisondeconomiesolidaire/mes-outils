@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import { internalMutation, mutation, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { requireCrmPermission, requireUser } from "./lib";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
@@ -140,9 +140,28 @@ export const update = mutation({
     if (!body && images.length === 0 && videos.length === 0) {
       throw new Error("Le post est vide.");
     }
+    // Libère les fichiers retirés du post (sinon ils restent orphelins).
+    const kept = new Set<Id<"_storage">>([...images, ...videos]);
+    await deleteStorageFiles(
+      ctx,
+      [...post.images, ...(post.videos ?? [])].filter((id) => !kept.has(id)),
+    );
     await ctx.db.patch(args.postId, { body, images, videos, editedAt: Date.now() });
   },
 });
+
+/** Supprime des fichiers du storage en ignorant ceux déjà absents. */
+async function deleteStorageFiles(ctx: MutationCtx, ids: Id<"_storage">[]) {
+  await Promise.all(
+    ids.map(async (id) => {
+      try {
+        await ctx.storage.delete(id);
+      } catch {
+        // Fichier déjà supprimé : rien à faire.
+      }
+    }),
+  );
+}
 
 export const addComment = mutation({
   args: {
@@ -277,7 +296,32 @@ export const remove = mutation({
       ...comments.map((comment) => ctx.db.delete(comment._id)),
       ...likes.map((like) => ctx.db.delete(like._id)),
     ]);
+    // Libère aussi les fichiers du post (images + vidéos).
+    await deleteStorageFiles(ctx, [...post.images, ...(post.videos ?? [])]);
     await ctx.db.delete(args.postId);
+  },
+});
+
+/**
+ * Maintenance : retire toutes les vidéos des posts et supprime leurs fichiers
+ * du storage (les vidéos servies depuis Convex explosent le data egress).
+ * À lancer via `npx convex run posts:removeAllPostVideos`.
+ */
+export const removeAllPostVideos = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const posts = await ctx.db.query("posts").collect();
+    let removedFiles = 0;
+    let touchedPosts = 0;
+    for (const post of posts) {
+      const videos = post.videos ?? [];
+      if (videos.length === 0) continue;
+      await deleteStorageFiles(ctx, videos);
+      await ctx.db.patch(post._id, { videos: [] });
+      removedFiles += videos.length;
+      touchedPosts += 1;
+    }
+    return { touchedPosts, removedFiles };
   },
 });
 

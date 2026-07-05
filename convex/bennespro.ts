@@ -1,8 +1,18 @@
-import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import {
+  env,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
+import { v, type Infer } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 import { requireCrmPermission, requireUser } from "./lib";
-import { bpMaterial, bpUnit } from "./schema";
+import { bpBilling, bpMaterial, bpUnit } from "./schema";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
 
@@ -196,14 +206,275 @@ export const createDepot = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "bennespro:depots", "create");
     const identity = await requireUser(ctx);
-    const all = await ctx.db.query("bpDepots").collect();
-    const depotNumber = all.length + 1;
+    // Dernier numéro via l'index (évite de charger toute la table).
+    const last = await ctx.db
+      .query("bpDepots")
+      .withIndex("by_number")
+      .order("desc")
+      .first();
+    const depotNumber = (last?.depotNumber ?? 0) + 1;
+
+    // Seul le DIB est facturé, au poids (kg / tonne), au tarif courant.
+    const weightKg = dibWeightKg(args.items);
+    const priceCentsPerKg = await readDibPrice(ctx);
+    const amountCents = Math.round(weightKg * priceCentsPerKg);
+    const billing =
+      amountCents > 0
+        ? { weightKg, priceCentsPerKg, amountCents, status: "pending" as const }
+        : undefined;
+
     const depotId = await ctx.db.insert("bpDepots", {
       ...args,
       depotNumber,
+      billing,
       createdBy: identity.email ?? undefined,
       createdAt: Date.now(),
     });
+    if (billing) {
+      await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
+    }
     return { depotId, depotNumber };
+  },
+});
+
+/* ─── DIB : réglages & facturation Stripe ─────────────────────────────────── */
+
+/** Matériau facturé (seul flux payant, au kg). */
+const DIB_MATERIAL = "Tout venant/DIB non triés";
+
+/** Prix par défaut : 34 centimes d'euro le kilo. */
+const DEFAULT_DIB_PRICE_CENTS_PER_KG = 34;
+
+const SETTINGS_KEY = "bennespro";
+
+type DepotItems = Array<{ material: string; unit: string; quantity: number }>;
+
+/** Poids DIB facturable en kg (les lignes en m³ / unité ne sont pas facturables). */
+function dibWeightKg(items: DepotItems): number {
+  let kg = 0;
+  for (const item of items) {
+    if (item.material !== DIB_MATERIAL) continue;
+    if (item.unit === "kg") kg += item.quantity;
+    else if (item.unit === "tonne") kg += item.quantity * 1000;
+  }
+  return Math.round(kg * 100) / 100;
+}
+
+async function readDibPrice(ctx: QueryCtx | MutationCtx): Promise<number> {
+  const settings = await ctx.db
+    .query("bpSettings")
+    .withIndex("by_key", (q) => q.eq("key", SETTINGS_KEY))
+    .unique();
+  return settings?.dibPriceCentsPerKg ?? DEFAULT_DIB_PRICE_CENTS_PER_KG;
+}
+
+export const getDibSettings = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "bennespro:depots", "read");
+    return {
+      priceCentsPerKg: await readDibPrice(ctx),
+      stripeConfigured: Boolean(env.BENNESPRO_STRIPE_SECRET_KEY),
+    };
+  },
+});
+
+export const setDibPrice = mutation({
+  args: { priceCentsPerKg: v.number() },
+  handler: async (ctx, { priceCentsPerKg }) => {
+    await requireCrmPermission(ctx, "bennespro:depots", "update");
+    const identity = await requireUser(ctx);
+    if (!Number.isFinite(priceCentsPerKg) || priceCentsPerKg <= 0 || priceCentsPerKg > 100000) {
+      throw new Error("Prix DIB invalide.");
+    }
+    const rounded = Math.round(priceCentsPerKg * 100) / 100;
+    const settings = await ctx.db
+      .query("bpSettings")
+      .withIndex("by_key", (q) => q.eq("key", SETTINGS_KEY))
+      .unique();
+    if (settings) {
+      await ctx.db.patch(settings._id, {
+        dibPriceCentsPerKg: rounded,
+        updatedAt: Date.now(),
+        updatedBy: identity.email ?? undefined,
+      });
+    } else {
+      await ctx.db.insert("bpSettings", {
+        key: SETTINGS_KEY,
+        dibPriceCentsPerKg: rounded,
+        updatedAt: Date.now(),
+        updatedBy: identity.email ?? undefined,
+      });
+    }
+  },
+});
+
+/** (Re)facture le DIB d'un dépôt — utilisé pour les dépôts anciens ou en erreur. */
+export const billDepot = mutation({
+  args: { depotId: v.id("bpDepots") },
+  handler: async (ctx, { depotId }) => {
+    await requireCrmPermission(ctx, "bennespro:depots", "update");
+    const depot = await ctx.db.get(depotId);
+    if (!depot) throw new Error("Dépôt introuvable.");
+    if (depot.billing?.status === "invoiced") {
+      throw new Error("Ce dépôt est déjà facturé.");
+    }
+    const weightKg = dibWeightKg(depot.items);
+    if (weightKg <= 0) {
+      throw new Error("Aucun poids DIB facturable (kg ou tonne) sur ce dépôt.");
+    }
+    const priceCentsPerKg = await readDibPrice(ctx);
+    const amountCents = Math.round(weightKg * priceCentsPerKg);
+    await ctx.db.patch(depotId, {
+      billing: { weightKg, priceCentsPerKg, amountCents, status: "pending" },
+    });
+    await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
+  },
+});
+
+export const depotForBilling = internalQuery({
+  args: { depotId: v.id("bpDepots") },
+  handler: async (ctx, { depotId }) => {
+    const depot = await ctx.db.get(depotId);
+    if (!depot) return null;
+    const company = await ctx.db.get(depot.companyId);
+    return { depot, company };
+  },
+});
+
+export const saveCompanyStripeCustomer = internalMutation({
+  args: { companyId: v.id("bpCompanies"), stripeCustomerId: v.string() },
+  handler: async (ctx, { companyId, stripeCustomerId }) => {
+    await ctx.db.patch(companyId, { stripeCustomerId });
+  },
+});
+
+export const saveDepotBilling = internalMutation({
+  args: { depotId: v.id("bpDepots"), billing: bpBilling },
+  handler: async (ctx, { depotId, billing }) => {
+    await ctx.db.patch(depotId, { billing });
+  },
+});
+
+async function stripeRequest(
+  secretKey: string,
+  path: string,
+  params: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const res = await fetch(`https://api.stripe.com/v1/${path}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: new URLSearchParams(params),
+  });
+  const json = (await res.json()) as {
+    error?: { message?: string };
+    [key: string]: unknown;
+  };
+  if (!res.ok) {
+    throw new Error(json.error?.message ?? `Stripe ${path} a échoué (${res.status}).`);
+  }
+  return json;
+}
+
+/**
+ * Facture le DIB d'un dépôt via Stripe : client (créé au besoin et mémorisé
+ * sur l'entreprise), facture `send_invoice` à 30 jours, envoi par email si
+ * l'entreprise a un email de contact.
+ */
+export const invoiceDepotDib = internalAction({
+  args: { depotId: v.id("bpDepots") },
+  handler: async (ctx, { depotId }) => {
+    const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
+      await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
+    if (!data?.depot.billing || data.depot.billing.status === "invoiced") return;
+    const { depot, company } = data;
+    const billing: Infer<typeof bpBilling> = { ...depot.billing! };
+
+    async function fail(message: string) {
+      await ctx.runMutation(internal.bennespro.saveDepotBilling, {
+        depotId,
+        billing: { ...billing, status: "error", error: message },
+      });
+    }
+
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    if (!secretKey) {
+      await fail("Clé Stripe non configurée (BENNESPRO_STRIPE_SECRET_KEY).");
+      return;
+    }
+    if (!company) {
+      await fail("Entreprise introuvable.");
+      return;
+    }
+
+    try {
+      // 1. Client Stripe de l'entreprise (créé une seule fois).
+      let customerId = company.stripeCustomerId;
+      if (!customerId) {
+        const customer = await stripeRequest(secretKey, "customers", {
+          name: company.name,
+          ...(company.contactEmail ? { email: company.contactEmail } : {}),
+          ...(company.contactPhone ? { phone: company.contactPhone } : {}),
+          "metadata[bpCompanyId]": company._id,
+          ...(company.siret ? { "metadata[siret]": company.siret } : {}),
+        });
+        customerId = customer.id as string;
+        await ctx.runMutation(internal.bennespro.saveCompanyStripeCustomer, {
+          companyId: company._id,
+          stripeCustomerId: customerId,
+        });
+      }
+
+      const depotRef = `Bon de dépôt n° ${String(depot.depotNumber).padStart(4, "0")}`;
+
+      // 2. Facture vide (paiement à réception, 30 jours).
+      const invoice = await stripeRequest(secretKey, "invoices", {
+        customer: customerId,
+        collection_method: "send_invoice",
+        days_until_due: "30",
+        currency: "eur",
+        description: depotRef,
+        pending_invoice_items_behavior: "exclude",
+        "metadata[bpDepotId]": depot._id,
+        "metadata[bpDepotNumber]": String(depot.depotNumber),
+      });
+      const invoiceId = invoice.id as string;
+
+      // 3. Ligne DIB.
+      const priceEuros = (billing.priceCentsPerKg / 100).toFixed(2).replace(".", ",");
+      await stripeRequest(secretKey, "invoiceitems", {
+        customer: customerId,
+        invoice: invoiceId,
+        amount: String(billing.amountCents),
+        currency: "eur",
+        description: `DIB (tout-venant non trié) — ${billing.weightKg} kg × ${priceEuros} €/kg — ${depotRef}`,
+      });
+
+      // 4. Finalisation (+ envoi par email si possible).
+      const finalized = await stripeRequest(secretKey, `invoices/${invoiceId}/finalize`, {
+        auto_advance: "false",
+      });
+      if (company.contactEmail) {
+        await stripeRequest(secretKey, `invoices/${invoiceId}/send`, {});
+      }
+
+      await ctx.runMutation(internal.bennespro.saveDepotBilling, {
+        depotId,
+        billing: {
+          ...billing,
+          status: "invoiced",
+          stripeInvoiceId: invoiceId,
+          stripeInvoiceUrl:
+            (finalized.hosted_invoice_url as string | undefined) ?? undefined,
+          error: undefined,
+          invoicedAt: Date.now(),
+        },
+      });
+    } catch (err) {
+      await fail(err instanceof Error ? err.message : "Erreur Stripe inconnue.");
+    }
   },
 });

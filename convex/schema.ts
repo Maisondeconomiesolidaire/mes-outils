@@ -34,6 +34,25 @@ export const bpUnit = v.union(
   v.literal("unite"),
 );
 
+/** App « Bennes & Pro » — facturation Stripe du DIB d'un dépôt. */
+export const bpBilling = v.object({
+  /** Poids DIB facturable en kg (lignes kg + tonnes converties). */
+  weightKg: v.number(),
+  /** Prix appliqué, en centimes d'euro par kg. */
+  priceCentsPerKg: v.number(),
+  /** Montant total en centimes d'euro. */
+  amountCents: v.number(),
+  status: v.union(
+    v.literal("pending"),
+    v.literal("invoiced"),
+    v.literal("error"),
+  ),
+  stripeInvoiceId: v.optional(v.string()),
+  stripeInvoiceUrl: v.optional(v.string()),
+  error: v.optional(v.string()),
+  invoicedAt: v.optional(v.number()),
+});
+
 /** Étape du pipeline (uniquement pour les demandes ouvertes). */
 export const requestStage = v.union(
   v.literal("nouveau"),
@@ -1199,8 +1218,19 @@ export default defineSchema(
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
     contactEmail: v.optional(v.string()),
+    /** Client Stripe associé (facturation du DIB). */
+    stripeCustomerId: v.optional(v.string()),
     createdAt: v.number(),
   }).index("by_name", ["name"]),
+
+  /** Réglages Bennes & Pro (doc unique, key = "bennespro"). */
+  bpSettings: defineTable({
+    key: v.string(),
+    /** Prix du DIB en centimes d'euro par kg (défaut : 34). */
+    dibPriceCentsPerKg: v.optional(v.number()),
+    updatedAt: v.optional(v.number()),
+    updatedBy: v.optional(v.string()),
+  }).index("by_key", ["key"]),
 
   /** Véhicules appartenant à une entreprise (bennes, camions...). */
   bpVehicles: defineTable({
@@ -1231,6 +1261,8 @@ export default defineSchema(
     attachments: v.array(v.id("_storage")),
     comment: v.optional(v.string()),
     signature: v.id("_storage"),
+    /** Facturation Stripe du DIB (seul flux facturé, au poids). */
+    billing: v.optional(bpBilling),
     createdBy: v.optional(v.string()),
     createdAt: v.number(),
   })

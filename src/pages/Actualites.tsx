@@ -307,7 +307,7 @@ function PostCard({
         <div className={`grid gap-0.5 ${post.imageUrls.length === 1 ? "" : "grid-cols-2"}`}>
           {post.imageUrls.map((url, index) => (
             <button key={url} type="button" onClick={() => setViewerIndex(index)} className="block cursor-zoom-in overflow-hidden bg-black text-left">
-              <img src={url} alt="" className="max-h-[480px] w-full object-cover transition hover:opacity-95" />
+              <img src={url} alt="" loading="lazy" decoding="async" className="max-h-[480px] w-full object-cover transition hover:opacity-95" />
             </button>
           ))}
         </div>
@@ -322,7 +322,7 @@ function PostCard({
               onClick={() => setViewerIndex(post.imageUrls.length + index)}
               className="group relative block cursor-zoom-in overflow-hidden bg-black text-left"
             >
-              <video src={url} muted playsInline preload="metadata" className="max-h-[560px] w-full object-contain" />
+              <video src={url} muted playsInline preload="none" className="aspect-video max-h-[560px] w-full bg-black object-contain" />
               <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-black/65 text-white shadow-lg ring-1 ring-white/30 transition group-hover:scale-105">
                 <Play className="ml-1 h-8 w-8 fill-current" />
               </span>

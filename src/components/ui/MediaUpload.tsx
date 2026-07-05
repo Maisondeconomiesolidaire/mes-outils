@@ -4,6 +4,9 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { cn } from "../../lib/cn";
 import { useUpload } from "../../lib/useUpload";
 
+const MAX_VIDEO_MB = 25;
+const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024;
+
 type LocalMedia = {
   storageId: Id<"_storage">;
   previewUrl: string;
@@ -25,6 +28,7 @@ export function MediaUpload({
   const inputRef = useRef<HTMLInputElement>(null);
   const [media, setMedia] = useState<LocalMedia[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (images.length === 0 && videos.length === 0 && media.length > 0) {
@@ -35,10 +39,17 @@ export function MediaUpload({
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
     setUploading(true);
+    setError(null);
     try {
       const added: LocalMedia[] = [];
       for (const file of Array.from(files)) {
         if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) continue;
+        // Les vidéos servies depuis Convex comptent dans le data egress à
+        // chaque lecture : on plafonne leur taille.
+        if (file.type.startsWith("video/") && file.size > MAX_VIDEO_BYTES) {
+          setError(`« ${file.name} » dépasse ${MAX_VIDEO_MB} Mo. Compressez la vidéo avant de la publier.`);
+          continue;
+        }
         const storageId = await upload(file);
         added.push({
           storageId,
@@ -107,6 +118,7 @@ export function MediaUpload({
           <span className="text-xs font-medium">Ajouter</span>
         </button>
       </div>
+      {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
       <input
         ref={inputRef}
         type="file"
