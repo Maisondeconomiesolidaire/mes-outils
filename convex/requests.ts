@@ -12,6 +12,7 @@ import {
   isVeloComplete,
   isLivraisonComplete,
   normalizeCustomer,
+  requireUser,
   titleCaseName,
 } from "./lib";
 import {
@@ -155,6 +156,45 @@ function requestArticleIds(request: {
       ...(request.article?.articleId ? [request.article.articleId] : []),
     ]),
   );
+}
+
+const PERMANENT_DELETE_EMAIL = "lahmerselim@gmail.com";
+
+async function requirePermanentDeleteAccess(ctx: MutationCtx) {
+  const identity = await requireUser(ctx);
+  if (identity.email?.trim().toLowerCase() !== PERMANENT_DELETE_EMAIL) {
+    throw new Error("Suppression définitive non autorisée.");
+  }
+  return identity;
+}
+
+function requestStorageIds(request: Doc<"requests">) {
+  const ids = new Set<Id<"_storage">>();
+  for (const id of request.photos ?? []) ids.add(id);
+  for (const id of request.beforePhotos ?? []) ids.add(id);
+  for (const id of request.afterPhotos ?? []) ids.add(id);
+  for (const item of request.aerogommage ?? []) {
+    for (const id of item.photos ?? []) ids.add(id);
+  }
+  for (const entry of request.collecte?.categoryPhotos ?? []) {
+    for (const id of entry.photos ?? []) ids.add(id);
+  }
+  if (request.livraison?.articlePhoto) ids.add(request.livraison.articlePhoto);
+  if (request.livraison?.referencePhoto) ids.add(request.livraison.referencePhoto);
+  return [...ids];
+}
+
+async function deleteStorageBestEffort(ctx: MutationCtx, ids: Id<"_storage">[]) {
+  let deleted = 0;
+  for (const id of ids) {
+    try {
+      await ctx.storage.delete(id);
+      deleted++;
+    } catch {
+      // Le fichier peut déjà avoir été retiré ou être partagé ailleurs.
+    }
+  }
+  return deleted;
 }
 
 // ---------------------------------------------------------------------------
@@ -752,6 +792,111 @@ export const setOutcome = mutation({
         await ctx.db.patch(articleId, { status: articleStatus });
       }
     }
+  },
+});
+
+export const deleteForever = mutation({
+  args: { id: v.id("requests") },
+  handler: async (ctx, { id }) => {
+    await requirePermanentDeleteAccess(ctx);
+    const request = await ctx.db.get(id);
+    if (!request) return { deleted: false };
+
+    let messagesDeleted = 0;
+    let notificationsDeleted = 0;
+    let documentsDeleted = 0;
+    let trackingLinksDeleted = 0;
+    let tourneeStopsRemoved = 0;
+    let articleReservationsReleased = 0;
+
+    const requestPhotoIds = requestStorageIds(request);
+
+    const messages = await ctx.db
+      .query("messages")
+      .withIndex("by_requestId", (q) => q.eq("requestId", id))
+      .collect();
+    for (const message of messages) {
+      await ctx.db.delete(message._id);
+      messagesDeleted++;
+    }
+
+    const notifications = await ctx.db
+      .query("notifications")
+      .withIndex("by_requestId", (q) => q.eq("requestId", id))
+      .collect();
+    for (const notification of notifications) {
+      await ctx.db.delete(notification._id);
+      notificationsDeleted++;
+    }
+
+    const requestDocuments = await ctx.db
+      .query("requestDocuments")
+      .withIndex("by_requestId", (q) => q.eq("requestId", id))
+      .collect();
+    const documentStorageIds: Id<"_storage">[] = [];
+    for (const document of requestDocuments) {
+      if (!document.sourceDocumentId) documentStorageIds.push(document.storageId);
+      await ctx.db.delete(document._id);
+      documentsDeleted++;
+    }
+
+    const trackingLinks = await ctx.db
+      .query("tourneeTrackingLinks")
+      .withIndex("by_requestId", (q) => q.eq("requestId", id))
+      .collect();
+    for (const link of trackingLinks) {
+      await ctx.db.delete(link._id);
+      trackingLinksDeleted++;
+    }
+
+    const tournees = await ctx.db.query("tournees").take(500);
+    for (const tournee of tournees) {
+      const stops = tournee.stops.filter((stop) => {
+        if (stop.requestId !== id) return true;
+        tourneeStopsRemoved++;
+        return false;
+      });
+      if (stops.length !== tournee.stops.length) {
+        await ctx.db.patch(tournee._id, {
+          stops: stops.map((stop, index) => ({ ...stop, order: index })),
+        });
+      }
+    }
+
+    const publicDrafts = await ctx.db.query("publicStripeCheckoutDrafts").take(500);
+    for (const draft of publicDrafts) {
+      if (draft.requestId === id) {
+        await ctx.db.patch(draft._id, { requestId: undefined });
+      }
+    }
+
+    if (request.type === "article") {
+      for (const articleId of requestArticleIds(request)) {
+        const article = await ctx.db.get(articleId);
+        if (article?.status === "reserve") {
+          await ctx.db.patch(articleId, { status: "disponible" });
+          articleReservationsReleased++;
+        }
+      }
+    }
+
+    const storageDeleted = await deleteStorageBestEffort(ctx, [
+      ...requestPhotoIds,
+      ...documentStorageIds,
+    ]);
+
+    await ctx.db.delete(id);
+
+    return {
+      deleted: true,
+      messagesDeleted,
+      notificationsDeleted,
+      documentsDeleted,
+      trackingLinksDeleted,
+      tourneeStopsRemoved,
+      articleReservationsReleased,
+      storageDeleted,
+    };
   },
 });
 

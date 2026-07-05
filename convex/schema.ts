@@ -488,7 +488,8 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_read_and_createdAt", ["read", "createdAt"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_requestId", ["requestId"]),
 
   teamMembers: defineTable({
     name: v.string(),
