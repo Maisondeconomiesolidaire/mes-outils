@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { normalizeCustomer, titleCaseName } from "./lib";
 import { resolveProcess } from "./processes";
+import { Id } from "./_generated/dataModel";
 
 const rawField = v.object({ key: v.string(), value: v.string() });
 const legacyRow = v.object({
@@ -124,6 +125,14 @@ function cleanObject<T extends Record<string, unknown>>(value: T): T {
   ) as T;
 }
 
+function importedOpenPatch(updatedAt: number) {
+  return {
+    stage: "validation" as const,
+    completedSteps: 1,
+    processLog: [{ step: 0, by: "Import Bubble", at: updatedAt }],
+  };
+}
+
 export const importRecycappLegacy = internalMutation({
   args: {
     customers: v.array(customerPayload),
@@ -179,7 +188,7 @@ export const importRecycappLegacy = internalMutation({
         .first();
       const payload = cleanObject({
         type: "collecte" as const,
-        stage: "nouveau" as const,
+        stage: imported.outcome === "open" ? ("validation" as const) : ("nouveau" as const),
         outcome: imported.outcome,
         lostReason: imported.outcome === "perdue" ? ("autre" as const) : undefined,
         lostReasonDetails:
@@ -188,7 +197,11 @@ export const importRecycappLegacy = internalMutation({
         complete: imported.complete,
         collecteType: imported.collecteType,
         processSteps,
-        completedSteps: 0,
+        completedSteps: imported.outcome === "open" ? 1 : 0,
+        processLog:
+          imported.outcome === "open"
+            ? [{ step: 0, by: "Import Bubble", at: imported.updatedAt }]
+            : undefined,
         site: imported.site,
         customer: normalizeCustomer(imported.customer),
         comment: imported.comment,
@@ -223,12 +236,13 @@ export const importRecycappLegacy = internalMutation({
         .first();
       const payload = cleanObject({
         type: "aerogommage" as const,
-        stage: "nouveau" as const,
+        stage: "validation" as const,
         outcome: "open" as const,
         requestOrigin: "external" as const,
         complete: imported.complete,
         processSteps: resolveProcess("aerogommage"),
-        completedSteps: 0,
+        completedSteps: 1,
+        processLog: [{ step: 0, by: "Import Bubble", at: imported.updatedAt }],
         site: imported.site,
         customer: normalizeCustomer(imported.customer),
         comment: imported.comment,
@@ -277,6 +291,151 @@ export const importRecycappLegacy = internalMutation({
       customersUpdated,
       requestsInserted,
       requestsUpdated,
+    };
+  },
+});
+
+function shouldDeleteTestRequest(request: {
+  customer: { firstName: string; lastName: string };
+}) {
+  const fullName = `${request.customer.firstName} ${request.customer.lastName}`
+    .trim()
+    .toLocaleLowerCase("fr-FR");
+  return (
+    fullName === "selim lahmer" ||
+    fullName === "mes iuui" ||
+    fullName === "mes luui"
+  );
+}
+
+function requestArticleIds(request: {
+  article?: { articleId: Id<"articles"> };
+  articles?: Array<{ articleId: Id<"articles"> }>;
+}) {
+  return Array.from(
+    new Set([
+      ...(request.articles ?? []).map((article) => article.articleId),
+      ...(request.article?.articleId ? [request.article.articleId] : []),
+    ]),
+  );
+}
+
+export const cleanupRecycappAfterLegacyImport = internalMutation({
+  args: { dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, { dryRun }) => {
+    const requests = await ctx.db.query("requests").take(500);
+    const deleteTargets = requests.filter(shouldDeleteTestRequest);
+    const importedToAdvance = requests.filter(
+      (request) =>
+        request.legacyImport &&
+        request.outcome === "open" &&
+        (request.completedSteps ?? 0) === 0,
+    );
+
+    if (dryRun) {
+      return {
+        dryRun: true,
+        deleteTargets: deleteTargets.map((request) => ({
+          id: request._id,
+          reference: request.reference,
+          type: request.type,
+          customer: `${request.customer.firstName} ${request.customer.lastName}`,
+          outcome: request.outcome,
+        })),
+        importedToAdvance: importedToAdvance.length,
+      };
+    }
+
+    let messagesDeleted = 0;
+    let notificationsDeleted = 0;
+    let documentsDeleted = 0;
+    let trackingLinksDeleted = 0;
+    let tourneeStopsRemoved = 0;
+    let articleReservationsReleased = 0;
+    const deleteIds = new Set(deleteTargets.map((request) => request._id));
+
+    for (const request of deleteTargets) {
+      const messages = await ctx.db
+        .query("messages")
+        .withIndex("by_requestId", (q) => q.eq("requestId", request._id))
+        .collect();
+      for (const message of messages) {
+        await ctx.db.delete(message._id);
+        messagesDeleted++;
+      }
+
+      const docs = await ctx.db
+        .query("requestDocuments")
+        .withIndex("by_requestId", (q) => q.eq("requestId", request._id))
+        .collect();
+      for (const doc of docs) {
+        await ctx.db.delete(doc._id);
+        documentsDeleted++;
+      }
+
+      const trackingLinks = await ctx.db
+        .query("tourneeTrackingLinks")
+        .withIndex("by_requestId", (q) => q.eq("requestId", request._id))
+        .collect();
+      for (const link of trackingLinks) {
+        await ctx.db.delete(link._id);
+        trackingLinksDeleted++;
+      }
+
+      if (request.type === "article") {
+        for (const articleId of requestArticleIds(request)) {
+          const article = await ctx.db.get(articleId);
+          if (article?.status === "reserve") {
+            await ctx.db.patch(articleId, { status: "disponible" });
+            articleReservationsReleased++;
+          }
+        }
+      }
+    }
+
+    const notifications = await ctx.db.query("notifications").collect();
+    for (const notification of notifications) {
+      if (deleteIds.has(notification.requestId)) {
+        await ctx.db.delete(notification._id);
+        notificationsDeleted++;
+      }
+    }
+
+    const tournees = await ctx.db.query("tournees").collect();
+    for (const tournee of tournees) {
+      const stops = tournee.stops.filter((stop) => {
+        if (!stop.requestId || !deleteIds.has(stop.requestId)) return true;
+        tourneeStopsRemoved++;
+        return false;
+      });
+      if (stops.length !== tournee.stops.length) {
+        await ctx.db.patch(tournee._id, {
+          stops: stops.map((stop, index) => ({ ...stop, order: index })),
+        });
+      }
+    }
+
+    for (const request of importedToAdvance) {
+      await ctx.db.patch(request._id, {
+        ...importedOpenPatch(request.updatedAt),
+        updatedAt: Date.now(),
+      });
+    }
+
+    for (const request of deleteTargets) {
+      await ctx.db.delete(request._id);
+    }
+
+    return {
+      dryRun: false,
+      requestsDeleted: deleteTargets.length,
+      importedAdvanced: importedToAdvance.length,
+      messagesDeleted,
+      notificationsDeleted,
+      documentsDeleted,
+      trackingLinksDeleted,
+      tourneeStopsRemoved,
+      articleReservationsReleased,
     };
   },
 });
