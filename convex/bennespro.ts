@@ -832,6 +832,7 @@ const legacyDepot = v.object({
   depositorName: v.string(),
   siteRef: v.string(),
   materials: v.array(bpMaterial),
+  items: v.optional(v.array(depotItem)),
   createdAt: v.number(),
   comment: v.optional(v.string()),
   invoiceId: v.optional(v.string()),
@@ -867,6 +868,16 @@ function normalizedKey(value: string): string {
 
 function sameOptional(a: string | undefined, b: string | undefined) {
   return (a ?? "") === (b ?? "");
+}
+
+function billingWeightKg(items: Array<Infer<typeof depotItem>>): number {
+  let kg = 0;
+  for (const item of items) {
+    if (item.material !== DIB_MATERIAL) continue;
+    if (item.unit === "kg") kg += item.quantity;
+    else if (item.unit === "tonne") kg += item.quantity * 1000;
+  }
+  return Math.round(kg * 100) / 100;
 }
 
 async function findCompanyByLegacy(
@@ -996,10 +1007,20 @@ export const adminImportLegacyBennesProData = internalMutation({
         }
       }
       const invoice = depot.invoiceId ? invoicesById.get(depot.invoiceId) : undefined;
+      const items =
+        depot.items && depot.items.length > 0
+          ? depot.items
+          : depot.materials.map((material) => ({
+              material,
+              unit: "unite" as const,
+              quantity: 1,
+              siteRef: depot.siteRef,
+            }));
+      const weightKg = billingWeightKg(items);
       const billing: Infer<typeof bpBilling> | undefined = invoice
         ? {
-            weightKg: 0,
-            priceCentsPerKg: 0,
+            weightKg,
+            priceCentsPerKg: weightKg > 0 ? Math.round((invoice.amountCents / weightKg) * 100) / 100 : 0,
             amountCents: invoice.amountCents,
             vatRate: invoice.vatRate,
             status: "invoiced",
@@ -1010,12 +1031,6 @@ export const adminImportLegacyBennesProData = internalMutation({
             ...(invoice.invoicedAt ? { invoicedAt: invoice.invoicedAt } : {}),
           }
         : undefined;
-      const items = depot.materials.map((material) => ({
-        material,
-        unit: "unite" as const,
-        quantity: 1,
-        siteRef: depot.siteRef,
-      }));
       const existing = await ctx.db
         .query("bpDepots")
         .withIndex("by_number", (q) => q.eq("depotNumber", depot.depotNumber))
