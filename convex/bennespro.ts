@@ -1181,6 +1181,52 @@ export const adminWipeDepot = internalMutation({
   },
 });
 
+/** Supprime les entreprises de test/import inconnu, avec leurs dépôts et véhicules. */
+export const adminDeleteTestAndUnknownCompanies = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const companies = await ctx.db.query("bpCompanies").collect();
+    const targets = companies.filter((company) => {
+      const name = normalizedKey(company.name);
+      return name.includes("test") || name.includes("inconnu");
+    });
+
+    let depotsDeleted = 0;
+    let vehiclesDeleted = 0;
+    const deletedCompanies: string[] = [];
+
+    for (const company of targets) {
+      const depots = await ctx.db
+        .query("bpDepots")
+        .withIndex("by_company", (q) => q.eq("companyId", company._id))
+        .collect();
+      for (const depot of depots) {
+        await ctx.db.delete(depot._id);
+        depotsDeleted += 1;
+      }
+
+      const vehicles = await ctx.db
+        .query("bpVehicles")
+        .withIndex("by_company", (q) => q.eq("companyId", company._id))
+        .collect();
+      for (const vehicle of vehicles) {
+        await ctx.db.delete(vehicle._id);
+        vehiclesDeleted += 1;
+      }
+
+      await ctx.db.delete(company._id);
+      deletedCompanies.push(company.name);
+    }
+
+    return {
+      companiesDeleted: deletedCompanies.length,
+      deletedCompanies,
+      depotsDeleted,
+      vehiclesDeleted,
+    };
+  },
+});
+
 /**
  * Supprime un dépôt de test : annule (void) la facture Stripe si elle existe,
  * puis efface le dépôt (et l'entreprise si demandé).
