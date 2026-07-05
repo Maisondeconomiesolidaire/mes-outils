@@ -120,6 +120,9 @@ export function CalendarBoard({
                   end: new Date(rangeEnd),
                 })
               : false;
+          const isRangeStart = rangeStart ? isSameDay(day, new Date(rangeStart)) : false;
+          const isRangeEnd = rangeEnd ? isSameDay(day, new Date(rangeEnd)) : false;
+          const isRangeEdge = isRangeStart || isRangeEnd;
 
           return (
             <button
@@ -136,12 +139,13 @@ export function CalendarBoard({
                 disabled && "cursor-not-allowed opacity-35 hover:bg-[var(--card)]",
                 isSelected && "bg-[var(--selected)] ring-2 ring-inset ring-brand-500",
                 !disabled && !isSelected && inRange && "bg-[var(--selected)]",
+                !disabled && isRangeEdge && "ring-2 ring-inset ring-brand-500",
               )}
             >
               <span
                 className={cn(
                   "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",
-                  isSelected ? "bg-brand-500 text-white" : "text-[var(--foreground)]",
+                  isSelected || isRangeEdge ? "bg-brand-500 text-white" : "text-[var(--foreground)]",
                 )}
               >
                 {format(day, "d")}

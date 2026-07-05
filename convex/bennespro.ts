@@ -1,4 +1,5 @@
 import {
+  action,
   env,
   internalAction,
   internalMutation,
@@ -10,8 +11,9 @@ import {
 } from "./_generated/server";
 import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internal } from "./_generated/api";
-import { requireCrmPermission, requireUser } from "./lib";
+import { api, internal } from "./_generated/api";
+import { accessAllows, requireCrmPermission, requireUser } from "./lib";
+import { resendSend } from "./emails";
 import { bpBilling, bpMaterial, bpUnit } from "./schema";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
@@ -242,8 +244,8 @@ export const createDepot = mutation({
 /** Matériau facturé (seul flux payant, au kg). */
 const DIB_MATERIAL = "Tout venant/DIB non triés";
 
-/** Prix par défaut : 34 centimes d'euro le kilo. */
-const DEFAULT_DIB_PRICE_CENTS_PER_KG = 34;
+/** Prix par défaut : 32 centimes d'euro le kilo. */
+const DEFAULT_DIB_PRICE_CENTS_PER_KG = 32;
 
 const SETTINGS_KEY = "bennespro";
 
@@ -476,5 +478,153 @@ export const invoiceDepotDib = internalAction({
     } catch (err) {
       await fail(err instanceof Error ? err.message : "Erreur Stripe inconnue.");
     }
+  },
+});
+
+/** Envoie le lien de la facture Stripe par email à l'entreprise du dépôt. */
+export const sendInvoiceEmail = action({
+  args: { depotId: v.id("bpDepots") },
+  handler: async (ctx, { depotId }): Promise<{ sentTo: string }> => {
+    // Annotations explicites : évite la circularité de types (fonction du même module).
+    const access: {
+      isAdmin?: boolean;
+      bootstrapMode?: boolean;
+      grants: Array<{ pageKey: string; actions: string[] }>;
+    } = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, "bennespro:depots", "read")) {
+      throw new Error("Accès insuffisant.");
+    }
+    const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
+      await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
+    if (!data) throw new Error("Dépôt introuvable.");
+    const { depot, company } = data;
+    if (!depot.billing?.stripeInvoiceUrl) {
+      throw new Error("Aucune facture Stripe pour ce dépôt.");
+    }
+    const email = company?.contactEmail?.trim();
+    if (!email) {
+      throw new Error("Cette entreprise n'a pas d'email de contact. Ajoutez-le dans sa fiche.");
+    }
+
+    const ref = `Bon de dépôt n° ${String(depot.depotNumber).padStart(4, "0")}`;
+    const amount = (depot.billing.amountCents / 100).toFixed(2).replace(".", ",");
+    const date = new Date(depot.createdAt).toLocaleDateString("fr-FR");
+    const html = `<!doctype html>
+<html lang="fr"><body style="margin:0;background:#f4f7f6;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8e4;">
+      <tr><td style="background:#14332f;padding:20px 28px;">
+        <p style="margin:0;color:#ffffff;font-size:18px;font-weight:bold;">Déchet'Lab — Bennes &amp; Pro</p>
+      </td></tr>
+      <tr><td style="padding:28px;">
+        <p style="margin:0 0 12px;font-size:15px;color:#1c2422;">Bonjour${company?.contactName ? ` ${company.contactName}` : ""},</p>
+        <p style="margin:0 0 16px;font-size:14px;line-height:22px;color:#3d4a46;">
+          Veuillez trouver ci-dessous votre facture pour le dépôt de déchets
+          <strong>${ref}</strong> du ${date} (DIB : ${depot.billing.weightKg}&nbsp;kg — <strong>${amount}&nbsp;€</strong>).
+        </p>
+        <p style="margin:0 0 24px;">
+          <a href="${depot.billing.stripeInvoiceUrl}" style="display:inline-block;background:#2aa79b;color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;padding:12px 22px;border-radius:8px;">
+            Voir et régler la facture
+          </a>
+        </p>
+        <p style="margin:0;font-size:12px;line-height:18px;color:#8a9691;">
+          Le paiement s'effectue en ligne de façon sécurisée via Stripe.
+          Message automatique — merci de ne pas répondre à cet email.
+        </p>
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+
+    await resendSend(
+      email,
+      `Votre facture — ${ref} (${amount} €)`,
+      html,
+      "Déchet'Lab <no-reply@mesoutils.eco-solidaire.fr>",
+    );
+    return { sentTo: email };
+  },
+});
+
+/* ─── Maintenance (CLI uniquement) ────────────────────────────────────────── */
+
+/** Force le prix DIB (centimes/kg) — `npx convex run bennespro:adminSetDibPrice '{"priceCentsPerKg":32}'`. */
+export const adminSetDibPrice = internalMutation({
+  args: { priceCentsPerKg: v.number() },
+  handler: async (ctx, { priceCentsPerKg }) => {
+    const settings = await ctx.db
+      .query("bpSettings")
+      .withIndex("by_key", (q) => q.eq("key", SETTINGS_KEY))
+      .unique();
+    if (settings) {
+      await ctx.db.patch(settings._id, { dibPriceCentsPerKg: priceCentsPerKg, updatedAt: Date.now() });
+    } else {
+      await ctx.db.insert("bpSettings", {
+        key: SETTINGS_KEY,
+        dibPriceCentsPerKg: priceCentsPerKg,
+        updatedAt: Date.now(),
+      });
+    }
+  },
+});
+
+/** Supprime un dépôt (fichiers inclus) et, au besoin, son entreprise + véhicules. */
+export const adminWipeDepot = internalMutation({
+  args: { depotId: v.id("bpDepots"), alsoCompany: v.optional(v.boolean()) },
+  handler: async (ctx, { depotId, alsoCompany }) => {
+    const depot = await ctx.db.get(depotId);
+    if (!depot) return;
+    const files = [
+      depot.ticketPhoto,
+      depot.truckExteriorPhoto,
+      depot.truckInteriorPhoto,
+      depot.signature,
+      ...depot.attachments,
+    ].filter((id): id is Id<"_storage"> => Boolean(id));
+    for (const fileId of files) {
+      try {
+        await ctx.storage.delete(fileId);
+      } catch {
+        // Fichier déjà absent.
+      }
+    }
+    await ctx.db.delete(depotId);
+    if (alsoCompany) {
+      const vehicles = await ctx.db
+        .query("bpVehicles")
+        .withIndex("by_company", (q) => q.eq("companyId", depot.companyId))
+        .collect();
+      for (const vehicle of vehicles) await ctx.db.delete(vehicle._id);
+      const company = await ctx.db.get(depot.companyId);
+      if (company) await ctx.db.delete(company._id);
+    }
+  },
+});
+
+/**
+ * Supprime un dépôt de test : annule (void) la facture Stripe si elle existe,
+ * puis efface le dépôt (et l'entreprise si demandé).
+ * `npx convex run bennespro:adminDeleteTestDepot '{"depotId":"…","alsoCompany":true}'`
+ */
+export const adminDeleteTestDepot = internalAction({
+  args: { depotId: v.id("bpDepots"), alsoCompany: v.optional(v.boolean()) },
+  handler: async (ctx, { depotId, alsoCompany }): Promise<{ voided: boolean; deleted: boolean }> => {
+    const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
+      await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
+    if (!data) return { voided: false, deleted: false };
+
+    let voided = false;
+    const invoiceId = data.depot.billing?.stripeInvoiceId;
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    if (invoiceId && secretKey) {
+      try {
+        await stripeRequest(secretKey, `invoices/${invoiceId}/void`, {});
+        voided = true;
+      } catch (err) {
+        console.warn("Impossible d'annuler la facture Stripe :", err);
+      }
+    }
+    await ctx.runMutation(internal.bennespro.adminWipeDepot, { depotId, alsoCompany });
+    return { voided, deleted: true };
   },
 });

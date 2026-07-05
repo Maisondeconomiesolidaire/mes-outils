@@ -100,8 +100,11 @@ export const create = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
+    if (args.videos?.length) {
+      throw new Error("Les vidéos ne sont plus acceptées dans les publications.");
+    }
     const body = args.body.trim();
-    if (!body && !(args.images?.length ?? 0) && !(args.videos?.length ?? 0)) {
+    if (!body && !(args.images?.length ?? 0)) {
       throw new Error("Le post est vide.");
     }
 
@@ -134,10 +137,13 @@ export const update = mutation({
     if (post.authorClerkId !== identity.subject) {
       throw new Error("Modification non autorisée.");
     }
+    if (args.videos?.length) {
+      throw new Error("Les vidéos ne sont plus acceptées dans les publications.");
+    }
     const body = args.body.trim();
     const images = args.images ?? post.images;
-    const videos = args.videos ?? post.videos ?? [];
-    if (!body && images.length === 0 && videos.length === 0) {
+    const videos: Id<"_storage">[] = [];
+    if (!body && images.length === 0) {
       throw new Error("Le post est vide.");
     }
     // Libère les fichiers retirés du post (sinon ils restent orphelins).

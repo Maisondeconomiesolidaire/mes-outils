@@ -1,64 +1,52 @@
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Loader2, Play, X } from "lucide-react";
+import { ImagePlus, Loader2, X } from "lucide-react";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { cn } from "../../lib/cn";
 import { useUpload } from "../../lib/useUpload";
 
-const MAX_VIDEO_MB = 25;
-const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024;
-
 type LocalMedia = {
   storageId: Id<"_storage">;
   previewUrl: string;
-  kind: "image" | "video";
 };
 
+/**
+ * Upload de photos pour les publications. Les vidéos ne sont plus acceptées :
+ * servies depuis Convex, elles faisaient exploser le data egress.
+ */
 export function MediaUpload({
   images,
-  videos,
   onChange,
   className,
 }: {
   images: Id<"_storage">[];
-  videos: Id<"_storage">[];
-  onChange: (next: { images: Id<"_storage">[]; videos: Id<"_storage">[] }) => void;
+  onChange: (images: Id<"_storage">[]) => void;
   className?: string;
 }) {
   const upload = useUpload();
   const inputRef = useRef<HTMLInputElement>(null);
   const [media, setMedia] = useState<LocalMedia[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (images.length === 0 && videos.length === 0 && media.length > 0) {
+    if (images.length === 0 && media.length > 0) {
       setMedia([]);
     }
-  }, [images.length, media.length, videos.length]);
+  }, [images.length, media.length]);
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
     setUploading(true);
-    setError(null);
     try {
       const added: LocalMedia[] = [];
       for (const file of Array.from(files)) {
-        if (!file.type.startsWith("image/") && !file.type.startsWith("video/")) continue;
-        // Les vidéos servies depuis Convex comptent dans le data egress à
-        // chaque lecture : on plafonne leur taille.
-        if (file.type.startsWith("video/") && file.size > MAX_VIDEO_BYTES) {
-          setError(`« ${file.name} » dépasse ${MAX_VIDEO_MB} Mo. Compressez la vidéo avant de la publier.`);
-          continue;
-        }
+        if (!file.type.startsWith("image/")) continue;
         const storageId = await upload(file);
         added.push({
           storageId,
           previewUrl: URL.createObjectURL(file),
-          kind: file.type.startsWith("video/") ? "video" : "image",
         });
       }
-      const next = [...media, ...added];
-      update(next);
+      update([...media, ...added]);
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -67,10 +55,7 @@ export function MediaUpload({
 
   function update(next: LocalMedia[]) {
     setMedia(next);
-    onChange({
-      images: next.filter((item) => item.kind === "image").map((item) => item.storageId),
-      videos: next.filter((item) => item.kind === "video").map((item) => item.storageId),
-    });
+    onChange(next.map((item) => item.storageId));
   }
 
   function remove(storageId: Id<"_storage">) {
@@ -85,16 +70,7 @@ export function MediaUpload({
             key={item.storageId}
             className="group relative aspect-square overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)]"
           >
-            {item.kind === "video" ? (
-              <>
-                <video src={item.previewUrl} className="h-full w-full object-cover" muted playsInline />
-                <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
-                  <Play className="h-3 w-3 fill-current" /> Vidéo
-                </span>
-              </>
-            ) : (
-              <img src={item.previewUrl} alt="" className="h-full w-full object-cover" />
-            )}
+            <img src={item.previewUrl} alt="" className="h-full w-full object-cover" />
             <button
               type="button"
               onClick={() => remove(item.storageId)}
@@ -118,11 +94,10 @@ export function MediaUpload({
           <span className="text-xs font-medium">Ajouter</span>
         </button>
       </div>
-      {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,video/*"
+        accept="image/*"
         multiple
         className="hidden"
         onChange={(event) => handleFiles(event.target.files)}

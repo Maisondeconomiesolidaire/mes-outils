@@ -104,18 +104,16 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 
   const [body, setBody] = useState("");
   const [images, setImages] = useState<Id<"_storage">[]>([]);
-  const [videos, setVideos] = useState<Id<"_storage">[]>([]);
   const [showMedia, setShowMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
-    if (!body.trim() && images.length === 0 && videos.length === 0) return;
+    if (!body.trim() && images.length === 0) return;
     setSubmitting(true);
     try {
-      await createPost({ body, images, videos });
+      await createPost({ body, images });
       setBody("");
       setImages([]);
-      setVideos([]);
       setShowMedia(false);
     } finally {
       setSubmitting(false);
@@ -149,15 +147,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             />
           </div>
           {showMedia ? (
-            <MediaUpload
-              images={images}
-              videos={videos}
-              onChange={(next) => {
-                setImages(next.images);
-                setVideos(next.videos);
-              }}
-              className="mt-3 pl-[60px]"
-            />
+            <MediaUpload images={images} onChange={setImages} className="mt-3 pl-[60px]" />
           ) : null}
           <div className="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3">
             <button
@@ -165,9 +155,9 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
               onClick={() => setShowMedia((current) => !current)}
               className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition", showMedia ? "bg-brand-50 text-brand-700" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]")}
             >
-              <ImageIcon className="h-4 w-4" /> Photo/vidéo
+              <ImageIcon className="h-4 w-4" /> Photo
             </button>
-            <Button onClick={submit} disabled={submitting || (!body.trim() && images.length === 0 && videos.length === 0)}>
+            <Button onClick={submit} disabled={submitting || (!body.trim() && images.length === 0)}>
               <Send className="h-4 w-4" /> {submitting ? "Publication..." : "Publier"}
             </Button>
           </div>

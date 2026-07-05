@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
-import { CalendarCheck, CarFront, DoorOpen, MapPin, MessagesSquare, Search, Users } from "lucide-react";
+import { format } from "date-fns";
+import { fr } from "date-fns/locale";
+import { CalendarCheck, CarFront, Clock, DoorOpen, MapPin, MessagesSquare, Search, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -12,7 +14,6 @@ import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Checkbox } from "../components/ui/Checkbox";
-import { DateRangePicker, type DateRange } from "../components/ui/DateRangePicker";
 import { Modal } from "../components/ui/Modal";
 import { PersonSelect, type Person } from "../components/ui/PersonSelect";
 import { FullSpinner } from "../components/ui/Spinner";
@@ -33,15 +34,31 @@ const ROOM_USAGES = [
   "Autre",
 ] as const;
 
-type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: string; buildingLabel?: string; capacity?: number; photoUrl?: string | null };
-type Vehicle = { _id: Id<"vehicles">; name: string; plate?: string; kind: string; brand?: string; model?: string; seats?: number; reservablePro?: boolean; reservablePersonal?: boolean; site?: "60" | "76"; siteLabel?: string; photoUrl?: string | null };
+/** Heures proposées (pas de 30 min, 06:00 → 22:00). */
+const TIME_OPTIONS = Array.from({ length: 33 }, (_, index) => {
+  const minutes = 6 * 60 + index * 30;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+});
 
-function defaultSlot(): DateRange {
-  const s = new Date();
-  s.setHours(9, 0, 0, 0);
-  const e = new Date(s);
-  e.setHours(10, 0, 0, 0);
-  return { start: s.getTime(), end: e.getTime() };
+type Occupied = { userName: string; start: number; end: number } | null;
+type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: string; buildingLabel?: string; capacity?: number; photoUrl?: string | null; occupiedBy?: Occupied };
+type Vehicle = { _id: Id<"vehicles">; name: string; plate?: string; kind: string; brand?: string; model?: string; seats?: number; reservablePro?: boolean; reservablePersonal?: boolean; site?: "60" | "76"; siteLabel?: string; photoUrl?: string | null; occupiedBy?: Occupied; unavailableReason?: string | null };
+
+type DaySelection = { start: number; end: number };
+
+function startOfDayMs(input: number | Date): number {
+  const date = new Date(input);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function withTime(dayMs: number, time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  const date = new Date(dayMs);
+  date.setHours(h, m, 0, 0);
+  return date.getTime();
 }
 
 export function Reservations() {
@@ -60,15 +77,47 @@ export function Reservations() {
 function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const access = usePermissionsAccess();
   const canCreate = canAccess(access, "mesoutils:reservations", "create");
-  const [range, setRange] = useState<DateRange>(defaultSlot);
+
+  // Sélection sur le calendrier : 1 clic = jour unique, 2ᵉ clic = fin de plage.
+  const [days, setDays] = useState<DaySelection>(() => {
+    const today = startOfDayMs(Date.now());
+    return { start: today, end: today };
+  });
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("10:00");
+  const [fullDay, setFullDay] = useState(false);
+
+  function handleDayClick(day: Date) {
+    const clicked = startOfDayMs(day);
+    setDays((current) => {
+      // Nouvelle sélection si : rien, plage déjà complète, ou clic avant le début.
+      if (current.start !== current.end || clicked < current.start) {
+        return { start: clicked, end: clicked };
+      }
+      return { start: current.start, end: clicked };
+    });
+  }
+
+  const range = useMemo(() => {
+    const start = fullDay ? days.start : withTime(days.start, startTime);
+    const end = fullDay ? withTime(days.end, "23:59") : withTime(days.end, endTime);
+    return { start, end };
+  }, [days, startTime, endTime, fullDay]);
+  const rangeValid = range.start < range.end;
+
+  const durationDays = Math.round((days.end - days.start) / 86_400_000) + 1;
+  const summary =
+    days.start === days.end
+      ? format(new Date(days.start), "EEEE d MMMM yyyy", { locale: fr })
+      : `${format(new Date(days.start), "EEE d MMM", { locale: fr })} → ${format(new Date(days.end), "EEE d MMM yyyy", { locale: fr })}`;
+
   const [query, setQuery] = useState("");
   const [minSeats, setMinSeats] = useState("");
   const [usage, setUsage] = useState<"all" | "pro" | "personal">("all");
   const [minCapacity, setMinCapacity] = useState("");
 
-  const hasRange = Boolean(range.start && range.end);
-  const rooms = useQuery(api.reservations.availableRooms, hasRange && tab === "rooms" ? { start: range.start!, end: range.end! } : "skip") as Room[] | undefined;
-  const vehicles = useQuery(api.reservations.availableVehicles, hasRange && tab === "vehicles" ? { start: range.start!, end: range.end! } : "skip") as Vehicle[] | undefined;
+  const rooms = useQuery(api.reservations.listRoomsForSlot, rangeValid && tab === "rooms" ? { start: range.start, end: range.end } : "skip") as Room[] | undefined;
+  const vehicles = useQuery(api.reservations.listVehiclesForSlot, rangeValid && tab === "vehicles" ? { start: range.start, end: range.end } : "skip") as Vehicle[] | undefined;
 
   const bookRoom = useMutation(api.reservations.bookRoom);
   const requestVehicle = useMutation(api.reservations.requestVehicle);
@@ -107,12 +156,13 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const attendeesValue = Number(attendees) || 0;
   const overCapacity = Boolean(bookingRoom?.capacity && attendeesValue > bookingRoom.capacity);
   const canSubmit =
+    rangeValid &&
     Boolean(label.trim()) &&
     (!bookingRoom || (attendeesValue >= 1 && !overCapacity)) &&
     (!bookingVehicle || !willTransport || Boolean(transportDetails.trim()));
 
   async function submitBooking() {
-    if (!range.start || !range.end || !canSubmit) return;
+    if (!rangeValid || !canSubmit) return;
     setSubmitting(true); setError(null);
     try {
       if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
@@ -140,19 +190,49 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   });
 
   const loading = tab === "rooms" ? rooms === undefined : vehicles === undefined;
-  const count = tab === "rooms" ? filteredRooms.length : filteredVehicles.length;
+  const freeCount = tab === "rooms"
+    ? filteredRooms.filter((room) => !room.occupiedBy).length
+    : filteredVehicles.filter((vehicle) => !vehicle.occupiedBy && !vehicle.unavailableReason).length;
 
   return (
     <div className="space-y-5">
-      {/* Calendrier / mini-agenda tout en haut. */}
-      <Agenda tab={tab} range={range} />
+      {/* Calendrier : les réservations existantes s'affichent, et on clique
+          directement sur le jour de début puis le jour de fin. */}
+      <Agenda tab={tab} days={days} onDayClick={handleDayClick} />
 
-      {/* Créneau + filtres regroupés juste en dessous. */}
+      {/* Créneau sélectionné : résumé + heures. */}
       <div className="premium-panel space-y-4 rounded-2xl p-4">
-        <Field label="Votre créneau">
-          <DateRangePicker value={range} onChange={setRange} withTime allowFullDay />
-        </Field>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3.5 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
+            <CalendarCheck className="h-4 w-4" />
+            {summary}
+          </span>
+          <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
+            {durationDays} jour{durationDays > 1 ? "s" : ""}
+          </span>
+          <p className="w-full text-xs text-[var(--muted-foreground)] sm:w-auto">
+            Cliquez sur un jour du calendrier (début), puis un second (fin). Un seul clic = ce jour uniquement.
+          </p>
+        </div>
+
         <div className="flex flex-wrap items-end gap-3">
+          <FilterField label="Heure de début">
+            <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
+          </FilterField>
+          <FilterField label="Heure de fin">
+            <TimeSelect value={endTime} onChange={setEndTime} disabled={fullDay} />
+          </FilterField>
+          <div className="pb-2">
+            <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
+          </div>
+          {!rangeValid ? (
+            <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              L'heure de fin doit être après l'heure de début.
+            </p>
+          ) : null}
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
           <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
             <Search className="h-4 w-4 text-brand-600" />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "rooms" ? "Rechercher une salle" : "Rechercher un véhicule"} className="w-full bg-transparent text-sm font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]" />
@@ -179,57 +259,64 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
               </select>
             </FilterField>
           )}
-          <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{count} disponible{count > 1 ? "s" : ""}</span>
+          <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{freeCount} disponible{freeCount > 1 ? "s" : ""}</span>
         </div>
       </div>
 
-      {!hasRange ? (
-        <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Choisissez un créneau" description="Sélectionnez une date et des horaires pour voir les disponibilités." />
+      {!rangeValid ? (
+        <EmptyState icon={<Clock className="h-8 w-8" />} title="Créneau invalide" description="Corrigez les heures de début et de fin pour voir les disponibilités." />
       ) : loading ? (
         <FullSpinner label="Recherche des disponibilités..." />
       ) : tab === "rooms" ? (
         filteredRooms.length === 0 ? (
-          <EmptyState icon={<DoorOpen className="h-8 w-8" />} title="Aucune salle disponible" description="Aucune salle libre sur ce créneau (ou ne correspond aux filtres)." />
+          <EmptyState icon={<DoorOpen className="h-8 w-8" />} title="Aucune salle" description="Aucune salle ne correspond aux filtres." />
         ) : (
           <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-            {filteredRooms.map((room) => (
-              <article key={room._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
-                <AssetImage src={room.photoUrl} icon={<DoorOpen className="h-10 w-10" />} />
-                <div className="p-4">
-                  <h2 className="text-lg font-bold text-[var(--foreground)]">{room.name}</h2>
-                  <p className="mt-1 text-sm text-[var(--muted-foreground)]">{room.buildingLabel || room.siteLabel || (room.site ? `Site ${room.site}` : "Site —")}</p>
-                  <div className="mt-3 flex items-center gap-1.5 text-sm text-[var(--muted-foreground)]"><Users className="h-4 w-4" />{room.capacity ? `${room.capacity} personnes` : "Capacité —"}</div>
-                  {canCreate ? <Button className="mt-4 w-full" onClick={() => openBooking(room, null)}>Réserver</Button> : null}
-                </div>
-              </article>
-            ))}
+            {filteredRooms.map((room) => {
+              const occupied = room.occupiedBy ?? null;
+              return (
+                <article key={room._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+                  <AssetImage src={room.photoUrl} icon={<DoorOpen className="h-10 w-10" />} occupied={occupied} />
+                  <div className="p-4">
+                    <h2 className="text-lg font-bold text-[var(--foreground)]">{room.name}</h2>
+                    <p className="mt-1 text-sm text-[var(--muted-foreground)]">{room.buildingLabel || room.siteLabel || (room.site ? `Site ${room.site}` : "Site —")}</p>
+                    <div className="mt-3 flex items-center gap-1.5 text-sm text-[var(--muted-foreground)]"><Users className="h-4 w-4" />{room.capacity ? `${room.capacity} personnes` : "Capacité —"}</div>
+                    {canCreate && !occupied ? <Button className="mt-4 w-full" onClick={() => openBooking(room, null)}>Réserver</Button> : null}
+                  </div>
+                </article>
+              );
+            })}
           </section>
         )
       ) : filteredVehicles.length === 0 ? (
-        <EmptyState icon={<CarFront className="h-8 w-8" />} title="Aucun véhicule disponible" description="Aucun véhicule libre sur ce créneau (ou ne correspond aux filtres)." />
+        <EmptyState icon={<CarFront className="h-8 w-8" />} title="Aucun véhicule" description="Aucun véhicule ne correspond aux filtres." />
       ) : (
         <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-          {filteredVehicles.map((vehicle) => (
-            <article key={vehicle._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
-              <AssetImage src={vehicle.photoUrl} icon={<CarFront className="h-10 w-10" />} />
-              <div className="p-4">
-                <h2 className="text-lg font-bold text-[var(--foreground)]">{vehicle.name}</h2>
-                <p className="mt-1 text-sm text-[var(--muted-foreground)]">{[vehicle.brand, vehicle.model, vehicle.plate].filter(Boolean).join(" · ") || vehicle.kind}</p>
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--muted-foreground)]">
-                  <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" />{vehicle.seats ?? "—"} places</span>
-                  <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4" />{vehicle.siteLabel ?? (vehicle.site ? `Site ${vehicle.site}` : "—")}</span>
+          {filteredVehicles.map((vehicle) => {
+            const occupied = vehicle.occupiedBy ?? null;
+            const blocked = Boolean(occupied) || Boolean(vehicle.unavailableReason);
+            return (
+              <article key={vehicle._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
+                <AssetImage src={vehicle.photoUrl} icon={<CarFront className="h-10 w-10" />} occupied={occupied} unavailableReason={vehicle.unavailableReason} />
+                <div className="p-4">
+                  <h2 className="text-lg font-bold text-[var(--foreground)]">{vehicle.name}</h2>
+                  <p className="mt-1 text-sm text-[var(--muted-foreground)]">{[vehicle.brand, vehicle.model, vehicle.plate].filter(Boolean).join(" · ") || vehicle.kind}</p>
+                  <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--muted-foreground)]">
+                    <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" />{vehicle.seats ?? "—"} places</span>
+                    <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4" />{vehicle.siteLabel ?? (vehicle.site ? `Site ${vehicle.site}` : "—")}</span>
+                  </div>
+                  {canCreate && !blocked ? <Button className="mt-4 w-full" onClick={() => openBooking(null, vehicle)}>Réserver</Button> : null}
                 </div>
-                {canCreate ? <Button className="mt-4 w-full" onClick={() => openBooking(null, vehicle)}>Réserver</Button> : null}
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </section>
       )}
 
       <Modal open={Boolean(bookingRoom || bookingVehicle)} onClose={closeBooking} title={bookingRoom ? `Réserver · ${bookingRoom.name}` : bookingVehicle ? `Réserver · ${bookingVehicle.name}` : "Réserver"}>
         <div className="grid gap-4">
           <div className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--foreground)]">
-            {range.start && range.end ? `${formatDateTime(range.start)} → ${formatDateTime(range.end)}` : "Créneau non défini"}
+            {rangeValid ? `${formatDateTime(range.start)} → ${formatDateTime(range.end)}` : "Créneau non défini"}
           </div>
           <Field label={bookingRoom ? "Objet de la réservation" : "Motif de la réservation"} required>
             {bookingRoom ? <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Réunion équipe..." /> : <Textarea value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Collecte, déménagement..." />}
@@ -318,6 +405,22 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   );
 }
 
+function TimeSelect({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  return (
+    <div className={`flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 ${disabled ? "opacity-50" : ""}`}>
+      <Clock className="h-4 w-4 text-brand-600" />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="bg-transparent text-sm font-semibold text-[var(--foreground)] outline-none"
+      >
+        {TIME_OPTIONS.map((time) => <option key={time} value={time}>{time}</option>)}
+      </select>
+    </div>
+  );
+}
+
 type ReservationDetail = {
   id: string;
   date: number;
@@ -329,16 +432,13 @@ type ReservationDetail = {
   pending?: boolean;
 };
 
-function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange }) {
+function Agenda({ tab, days, onDayClick }: { tab: "rooms" | "vehicles"; days: DaySelection; onDayClick: (day: Date) => void }) {
   const navigate = useNavigate();
   const { user } = useUser();
   const meId = user?.id ?? null;
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const selected = new Date(range.start ?? Date.now());
-  const start = new Date(selected);
-  start.setHours(0, 0, 0, 0);
-  const dayStart = start.getTime();
+  const dayStart = days.start;
 
   // Fenêtre large autour de la date sélectionnée : l'agenda affiche **toutes**
   // les réservations (de tous les utilisateurs) sur les jours du calendrier, et
@@ -390,24 +490,24 @@ function Agenda({ tab, range }: { tab: "rooms" | "vehicles"; range: DateRange })
 
   return (
     <div className="space-y-3 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-      <div className="flex items-center gap-2 px-1">
+      <div className="flex flex-wrap items-center gap-2 px-1">
         <CalendarCheck className="h-4 w-4 text-brand-600" />
         <p className="text-sm font-semibold text-[var(--foreground)]">
           {tab === "rooms" ? "Réservations des salles" : "Réservations des véhicules"}
         </p>
+        <p className="ml-auto text-xs text-[var(--muted-foreground)]">
+          Cliquez sur les jours pour choisir votre créneau.
+        </p>
       </div>
       <CalendarBoard
-        selected={dayStart}
+        rangeStart={days.start}
+        rangeEnd={days.end}
         events={calendarEvents}
-        onSelect={() => undefined}
+        onSelect={onDayClick}
         onEventClick={(id) => setDetailId(id)}
+        disabledBefore={Date.now()}
         compact
       />
-      {details.length === 0 ? (
-        <p className="px-1 pb-1 text-sm text-[var(--muted-foreground)]">Aucune réservation enregistrée.</p>
-      ) : (
-        <p className="px-1 pb-1 text-xs text-[var(--muted-foreground)]">Toutes les réservations s'affichent sur le calendrier. Cliquez sur l'une d'elles pour voir les détails.</p>
-      )}
 
       <Modal open={Boolean(active)} onClose={() => setDetailId(null)} title="Détail de la réservation">
         {active ? (
@@ -544,10 +644,38 @@ function FilterField({ label, children }: { label: string; children: React.React
   );
 }
 
-function AssetImage({ src, icon }: { src?: string | null; icon: React.ReactNode }) {
+/**
+ * Photo d'une salle / d'un véhicule. Si l'actif est réservé sur le créneau,
+ * l'image est estompée et « Réservé par X le JJ/MM/AA » s'affiche au centre.
+ */
+function AssetImage({
+  src,
+  icon,
+  occupied,
+  unavailableReason,
+}: {
+  src?: string | null;
+  icon: React.ReactNode;
+  occupied?: Occupied;
+  unavailableReason?: string | null;
+}) {
+  const blockedText = occupied
+    ? `Réservé par ${occupied.userName} le ${format(new Date(occupied.start), "dd/MM/yy", { locale: fr })}`
+    : unavailableReason ?? null;
   return (
     <div className="relative aspect-video bg-[var(--muted)]">
-      {src ? <img src={src} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-[var(--muted-foreground)]">{icon}</div>}
+      {src ? (
+        <img src={src} alt="" loading="lazy" decoding="async" className={`h-full w-full object-cover ${blockedText ? "opacity-35" : ""}`} />
+      ) : (
+        <div className={`flex h-full items-center justify-center text-[var(--muted-foreground)] ${blockedText ? "opacity-35" : ""}`}>{icon}</div>
+      )}
+      {blockedText ? (
+        <div className="absolute inset-0 flex items-center justify-center p-3">
+          <span className="rounded-full bg-black/70 px-3.5 py-1.5 text-center text-sm font-semibold text-white shadow-lg">
+            {blockedText}
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }

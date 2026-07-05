@@ -340,6 +340,70 @@ export const availableRooms = query({
   },
 });
 
+/**
+ * Toutes les salles actives avec leur état sur le créneau : libres, ou
+ * occupées avec « réservé par X » (affichage grisé côté UI, sans bouton).
+ */
+export const listRoomsForSlot = query({
+  args: { start: v.number(), end: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    ensureRange(args.start, args.end);
+    const rooms = (await ctx.db.query("rooms").collect()).filter((room) => room.active);
+    const reservations = await ctx.db.query("roomReservations").collect();
+    return await Promise.all(
+      rooms.map(async (room) => {
+        const conflict = reservations
+          .filter(
+            (reservation) =>
+              reservation.roomId === room._id &&
+              overlaps(reservation.start, reservation.end, args.start, args.end),
+          )
+          .sort((a, b) => a.start - b.start)[0];
+        return {
+          ...room,
+          photoUrl: room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl,
+          occupiedBy: conflict
+            ? { userName: conflict.userName, start: conflict.start, end: conflict.end }
+            : null,
+        };
+      }),
+    );
+  },
+});
+
+/** Tous les véhicules actifs avec leur état sur le créneau (voir listRoomsForSlot). */
+export const listVehiclesForSlot = query({
+  args: { start: v.number(), end: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    ensureRange(args.start, args.end);
+    const vehicles = (await ctx.db.query("vehicles").collect()).filter(
+      (vehicle) => vehicle.active,
+    );
+    const withPhotos = await resolveVehiclePhotoUrls(ctx, vehicles);
+    return await Promise.all(
+      withPhotos.map(async (vehicle) => {
+        const approved = await approvedReservationsForVehicle(ctx, vehicle._id);
+        const conflict = approved
+          .filter((reservation) => overlaps(reservation.start, reservation.end, args.start, args.end))
+          .sort((a, b) => a.start - b.start)[0];
+        let unavailableReason: string | null = null;
+        if (!conflict && !(await isVehicleFree(ctx, vehicle._id, args.start, args.end))) {
+          unavailableReason = "Indisponible sur ce créneau";
+        }
+        return {
+          ...vehicle,
+          occupiedBy: conflict
+            ? { userName: conflict.userName, start: conflict.start, end: conflict.end }
+            : null,
+          unavailableReason,
+        };
+      }),
+    );
+  },
+});
+
 export const availableVehicles = query({
   args: { start: v.number(), end: v.number() },
   handler: async (ctx, args) => {
