@@ -1273,7 +1273,7 @@ export default defineSchema(
     truckInteriorPhoto: v.optional(v.id("_storage")),
     attachments: v.array(v.id("_storage")),
     comment: v.optional(v.string()),
-    signature: v.id("_storage"),
+    signature: v.optional(v.id("_storage")),
     /** Facturation Stripe du DIB (seul flux facturé, au poids). */
     billing: v.optional(bpBilling),
     createdBy: v.optional(v.string()),

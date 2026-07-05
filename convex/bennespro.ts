@@ -804,6 +804,322 @@ export const adminSetDibPrice = internalMutation({
   },
 });
 
+const legacyCompany = v.object({
+  key: v.string(),
+  name: v.string(),
+  siret: v.optional(v.string()),
+  address: v.optional(v.string()),
+  contactName: v.optional(v.string()),
+  contactPhone: v.optional(v.string()),
+  contactEmail: v.optional(v.string()),
+  stripeCustomerId: v.optional(v.string()),
+  createdAt: v.number(),
+});
+
+const legacyVehicle = v.object({
+  key: v.string(),
+  companyKey: v.string(),
+  label: v.string(),
+  plate: v.optional(v.string()),
+  createdAt: v.number(),
+});
+
+const legacyDepot = v.object({
+  depotNumber: v.number(),
+  companyKey: v.string(),
+  vehicleKey: v.optional(v.string()),
+  vehicleLabel: v.optional(v.string()),
+  depositorName: v.string(),
+  siteRef: v.string(),
+  materials: v.array(bpMaterial),
+  createdAt: v.number(),
+  comment: v.optional(v.string()),
+  invoiceId: v.optional(v.string()),
+  invoiceUrl: v.optional(v.string()),
+});
+
+const legacyInvoice = v.object({
+  invoiceId: v.string(),
+  invoiceUrl: v.optional(v.string()),
+  amountCents: v.number(),
+  vatRate: v.number(),
+  paymentStatus: v.optional(
+    v.union(
+      v.literal("draft"),
+      v.literal("open"),
+      v.literal("paid"),
+      v.literal("void"),
+      v.literal("uncollectible"),
+    ),
+  ),
+  paidAt: v.optional(v.number()),
+  invoicedAt: v.optional(v.number()),
+});
+
+function normalizedKey(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase("fr-FR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function sameOptional(a: string | undefined, b: string | undefined) {
+  return (a ?? "") === (b ?? "");
+}
+
+async function findCompanyByLegacy(
+  ctx: MutationCtx,
+  company: Infer<typeof legacyCompany>,
+  byKey: Map<string, Id<"bpCompanies">>,
+) {
+  if (byKey.has(company.key)) return byKey.get(company.key)!;
+  const normalizedName = normalizedKey(company.name);
+  const companies = await ctx.db.query("bpCompanies").collect();
+  const existing = companies.find((row) =>
+    (company.siret && row.siret === company.siret) || normalizedKey(row.name) === normalizedName,
+  );
+  if (existing) {
+    byKey.set(company.key, existing._id);
+    return existing._id;
+  }
+  const companyId = await ctx.db.insert("bpCompanies", {
+    name: company.name,
+    ...(company.siret ? { siret: company.siret } : {}),
+    ...(company.address ? { address: company.address } : {}),
+    ...(company.contactName ? { contactName: company.contactName } : {}),
+    ...(company.contactPhone ? { contactPhone: company.contactPhone } : {}),
+    ...(company.contactEmail ? { contactEmail: company.contactEmail } : {}),
+    ...(company.stripeCustomerId ? { stripeCustomerId: company.stripeCustomerId } : {}),
+    createdAt: company.createdAt,
+  });
+  byKey.set(company.key, companyId);
+  return companyId;
+}
+
+export const adminImportLegacyBennesProData = internalMutation({
+  args: {
+    companies: v.array(legacyCompany),
+    vehicles: v.array(legacyVehicle),
+    depots: v.array(legacyDepot),
+    invoices: v.array(legacyInvoice),
+  },
+  handler: async (ctx, { companies, vehicles, depots, invoices }) => {
+    const companyByKey = new Map<string, Id<"bpCompanies">>();
+    let companiesCreated = 0;
+    let companiesUpdated = 0;
+    for (const company of companies) {
+      const before = await ctx.db.query("bpCompanies").collect();
+      const companyId = await findCompanyByLegacy(ctx, company, companyByKey);
+      const after = await ctx.db.get(companyId);
+      if (before.some((row) => row._id === companyId)) {
+        const patch: Partial<Doc<"bpCompanies">> = {};
+        if (after && after.name !== company.name) patch.name = company.name;
+        if (after && company.siret && after.siret !== company.siret) patch.siret = company.siret;
+        if (after && company.address && after.address !== company.address) patch.address = company.address;
+        if (after && company.contactName && after.contactName !== company.contactName) patch.contactName = company.contactName;
+        if (after && company.contactPhone && after.contactPhone !== company.contactPhone) patch.contactPhone = company.contactPhone;
+        if (after && company.contactEmail && after.contactEmail !== company.contactEmail) patch.contactEmail = company.contactEmail;
+        if (after && company.stripeCustomerId && after.stripeCustomerId !== company.stripeCustomerId) {
+          patch.stripeCustomerId = company.stripeCustomerId;
+        }
+        if (Object.keys(patch).length > 0) {
+          await ctx.db.patch(companyId, patch);
+          companiesUpdated += 1;
+        }
+      } else {
+        companiesCreated += 1;
+      }
+    }
+
+    const vehicleByKey = new Map<string, Id<"bpVehicles">>();
+    let vehiclesCreated = 0;
+    let vehiclesUpdated = 0;
+    for (const vehicle of vehicles) {
+      const companyId = companyByKey.get(vehicle.companyKey);
+      if (!companyId) continue;
+      const existingVehicles = await ctx.db
+        .query("bpVehicles")
+        .withIndex("by_company", (q) => q.eq("companyId", companyId))
+        .collect();
+      const normalizedLabel = normalizedKey(vehicle.label);
+      const existing = existingVehicles.find(
+        (row) =>
+          (vehicle.plate && row.plate === vehicle.plate) ||
+          (normalizedKey(row.label) === normalizedLabel && sameOptional(row.plate, vehicle.plate)),
+      );
+      if (existing) {
+        vehicleByKey.set(vehicle.key, existing._id);
+        const patch: Partial<Doc<"bpVehicles">> = {};
+        if (existing.label !== vehicle.label) patch.label = vehicle.label;
+        if (vehicle.plate && existing.plate !== vehicle.plate) patch.plate = vehicle.plate;
+        if (Object.keys(patch).length > 0) {
+          await ctx.db.patch(existing._id, patch);
+          vehiclesUpdated += 1;
+        }
+      } else {
+        const vehicleId = await ctx.db.insert("bpVehicles", {
+          companyId,
+          label: vehicle.label,
+          ...(vehicle.plate ? { plate: vehicle.plate } : {}),
+          createdAt: vehicle.createdAt,
+        });
+        vehicleByKey.set(vehicle.key, vehicleId);
+        vehiclesCreated += 1;
+      }
+    }
+
+    const invoicesById = new Map(invoices.map((invoice) => [invoice.invoiceId, invoice]));
+    let depotsCreated = 0;
+    let depotsUpdated = 0;
+    let fallbackVehiclesCreated = 0;
+    for (const depot of depots) {
+      const companyId = companyByKey.get(depot.companyKey);
+      if (!companyId) continue;
+      let vehicleId = depot.vehicleKey ? vehicleByKey.get(depot.vehicleKey) : undefined;
+      const fallbackLabel = depot.vehicleLabel?.trim() || "Véhicule non renseigné";
+      if (!vehicleId) {
+        const existingVehicles = await ctx.db
+          .query("bpVehicles")
+          .withIndex("by_company", (q) => q.eq("companyId", companyId))
+          .collect();
+        const existing = existingVehicles.find((row) => normalizedKey(row.label) === normalizedKey(fallbackLabel));
+        vehicleId = existing?._id;
+        if (!vehicleId) {
+          vehicleId = await ctx.db.insert("bpVehicles", {
+            companyId,
+            label: fallbackLabel,
+            createdAt: depot.createdAt,
+          });
+          fallbackVehiclesCreated += 1;
+        }
+      }
+      const invoice = depot.invoiceId ? invoicesById.get(depot.invoiceId) : undefined;
+      const billing: Infer<typeof bpBilling> | undefined = invoice
+        ? {
+            weightKg: 0,
+            priceCentsPerKg: 0,
+            amountCents: invoice.amountCents,
+            vatRate: invoice.vatRate,
+            status: "invoiced",
+            stripeInvoiceId: invoice.invoiceId,
+            ...(invoice.invoiceUrl ? { stripeInvoiceUrl: invoice.invoiceUrl } : {}),
+            ...(invoice.paymentStatus ? { paymentStatus: invoice.paymentStatus } : {}),
+            ...(invoice.paidAt ? { paidAt: invoice.paidAt } : {}),
+            ...(invoice.invoicedAt ? { invoicedAt: invoice.invoicedAt } : {}),
+          }
+        : undefined;
+      const items = depot.materials.map((material) => ({
+        material,
+        unit: "unite" as const,
+        quantity: 1,
+        siteRef: depot.siteRef,
+      }));
+      const existing = await ctx.db
+        .query("bpDepots")
+        .withIndex("by_number", (q) => q.eq("depotNumber", depot.depotNumber))
+        .unique();
+      const payload = {
+        depotNumber: depot.depotNumber,
+        companyId,
+        vehicleId,
+        depositorName: depot.depositorName,
+        siteRef: depot.siteRef,
+        items,
+        attachments: [],
+        ...(depot.comment ? { comment: depot.comment } : {}),
+        ...(billing ? { billing } : {}),
+        createdBy: "import historique",
+        createdAt: depot.createdAt,
+      };
+      if (existing) {
+        await ctx.db.patch(existing._id, payload);
+        depotsUpdated += 1;
+      } else {
+        await ctx.db.insert("bpDepots", payload);
+        depotsCreated += 1;
+      }
+    }
+
+    return {
+      companiesCreated,
+      companiesUpdated,
+      vehiclesCreated,
+      vehiclesUpdated,
+      fallbackVehiclesCreated,
+      depotsCreated,
+      depotsUpdated,
+      invoicesLinked: invoices.length,
+    };
+  },
+});
+
+type LegacyImportResult = {
+  companiesCreated: number;
+  companiesUpdated: number;
+  vehiclesCreated: number;
+  vehiclesUpdated: number;
+  fallbackVehiclesCreated: number;
+  depotsCreated: number;
+  depotsUpdated: number;
+  invoicesLinked: number;
+};
+
+export const adminImportLegacyBennesPro = internalAction({
+  args: {
+    companies: v.array(legacyCompany),
+    vehicles: v.array(legacyVehicle),
+    depots: v.array(legacyDepot),
+  },
+  handler: async (ctx, args): Promise<LegacyImportResult> => {
+    const invoiceIds = args.depots
+      .map((depot) => depot.invoiceId)
+      .filter((invoiceId): invoiceId is string => Boolean(invoiceId));
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    if (invoiceIds.length > 0 && !secretKey) {
+      throw new Error("Clé Stripe non configurée (BENNESPRO_STRIPE_SECRET_KEY).");
+    }
+
+    const invoices: Array<Infer<typeof legacyInvoice>> = [];
+    if (secretKey) {
+      for (const invoiceId of invoiceIds) {
+        const invoice = await stripeGet(secretKey, `invoices/${invoiceId}`);
+        const subtotal =
+          typeof invoice.subtotal_excluding_tax === "number"
+            ? invoice.subtotal_excluding_tax
+            : typeof invoice.subtotal === "number"
+              ? invoice.subtotal
+              : 0;
+        const total = typeof invoice.total === "number" ? invoice.total : subtotal;
+        const rawVatRate = subtotal > 0 ? Math.round(((total - subtotal) / subtotal) * 10000) / 100 : 0;
+        const vatRate = Math.abs(rawVatRate - DIB_VAT_RATE) < 0.25 ? DIB_VAT_RATE : rawVatRate;
+        const importedInvoice: Infer<typeof legacyInvoice> = {
+          invoiceId,
+          amountCents: subtotal,
+          vatRate,
+        };
+        const invoiceUrl =
+          typeof invoice.hosted_invoice_url === "string"
+            ? invoice.hosted_invoice_url
+            : args.depots.find((depot) => depot.invoiceId === invoiceId)?.invoiceUrl;
+        if (invoiceUrl) importedInvoice.invoiceUrl = invoiceUrl;
+        const paymentStatus = stripeStatus(invoice.status);
+        if (paymentStatus) importedInvoice.paymentStatus = paymentStatus;
+        const paidAt = stripePaidAt(invoice);
+        if (paidAt) importedInvoice.paidAt = paidAt;
+        if (typeof invoice.created === "number") importedInvoice.invoicedAt = invoice.created * 1000;
+        invoices.push(importedInvoice);
+      }
+    }
+
+    return await ctx.runMutation(internal.bennespro.adminImportLegacyBennesProData, {
+      ...args,
+      invoices,
+    });
+  },
+});
+
 /** Supprime un dépôt (fichiers inclus) et, au besoin, son entreprise + véhicules. */
 export const adminWipeDepot = internalMutation({
   args: { depotId: v.id("bpDepots"), alsoCompany: v.optional(v.boolean()) },
