@@ -38,7 +38,20 @@ export const getCompany = query({
       .query("bpVehicles")
       .withIndex("by_company", (q) => q.eq("companyId", companyId))
       .collect();
-    return { ...company, vehicles };
+    const vehicleLabels = new Map(vehicles.map((vehicle) => [vehicle._id, vehicle.label]));
+    const depots = await ctx.db
+      .query("bpDepots")
+      .withIndex("by_company", (q) => q.eq("companyId", companyId))
+      .order("desc")
+      .collect();
+    return {
+      ...company,
+      vehicles,
+      depots: depots.map((depot) => ({
+        ...depot,
+        vehicleLabel: vehicleLabels.get(depot.vehicleId) ?? "—",
+      })),
+    };
   },
 });
 
