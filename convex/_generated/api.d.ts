@@ -16,6 +16,7 @@ import type * as bennespro from "../bennespro.js";
 import type * as bikes from "../bikes.js";
 import type * as clients from "../clients.js";
 import type * as community from "../community.js";
+import type * as crons from "../crons.js";
 import type * as dashboard from "../dashboard.js";
 import type * as documents from "../documents.js";
 import type * as emails from "../emails.js";
@@ -40,6 +41,7 @@ import type * as sorties from "../sorties.js";
 import type * as stripe from "../stripe.js";
 import type * as team from "../team.js";
 import type * as users from "../users.js";
+import type * as vehicleControlReminders from "../vehicleControlReminders.js";
 import type * as ventes from "../ventes.js";
 
 import type {
@@ -57,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   bikes: typeof bikes;
   clients: typeof clients;
   community: typeof community;
+  crons: typeof crons;
   dashboard: typeof dashboard;
   documents: typeof documents;
   emails: typeof emails;
@@ -81,6 +84,7 @@ declare const fullApi: ApiFromModules<{
   stripe: typeof stripe;
   team: typeof team;
   users: typeof users;
+  vehicleControlReminders: typeof vehicleControlReminders;
   ventes: typeof ventes;
 }>;
 

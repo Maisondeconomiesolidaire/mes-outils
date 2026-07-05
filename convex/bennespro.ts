@@ -13,7 +13,7 @@ import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { accessAllows, requireCrmPermission, requireUser } from "./lib";
-import { resendSend } from "./emails";
+import { resendSend, storageImageUrl, type EmailAttachment } from "./emails";
 import { bpBilling, bpMaterial, bpUnit } from "./schema";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
@@ -481,10 +481,43 @@ export const invoiceDepotDib = internalAction({
   },
 });
 
-/** Envoie le lien de la facture Stripe par email à l'entreprise du dépôt. */
+/* ─── Email de facture ────────────────────────────────────────────────────── */
+
+const BP_TEAL = "#2aa79b";
+const BP_DARK = "#14332f";
+
+async function stripeGet(secretKey: string, path: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`https://api.stripe.com/v1/${path}`, {
+    headers: { Authorization: `Bearer ${secretKey}` },
+  });
+  const json = (await res.json()) as { error?: { message?: string }; [key: string]: unknown };
+  if (!res.ok) {
+    throw new Error(json.error?.message ?? `Stripe ${path} a échoué (${res.status}).`);
+  }
+  return json;
+}
+
+/** Encode des octets en base64 (par blocs, pour rester léger en mémoire). */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Envoie la facture par email à l'entreprise du dépôt : lien de paiement dans
+ * le corps + facture PDF et bon de dépôt PDF en pièces jointes.
+ * `bonPdfBase64` est généré côté client (jsPDF) et transmis tel quel.
+ */
 export const sendInvoiceEmail = action({
-  args: { depotId: v.id("bpDepots") },
-  handler: async (ctx, { depotId }): Promise<{ sentTo: string }> => {
+  args: {
+    depotId: v.id("bpDepots"),
+    bonPdfBase64: v.optional(v.string()),
+  },
+  handler: async (ctx, { depotId, bonPdfBase64 }): Promise<{ sentTo: string }> => {
     // Annotations explicites : évite la circularité de types (fonction du même module).
     const access: {
       isAdmin?: boolean;
@@ -498,7 +531,7 @@ export const sendInvoiceEmail = action({
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     if (!data) throw new Error("Dépôt introuvable.");
     const { depot, company } = data;
-    if (!depot.billing?.stripeInvoiceUrl) {
+    if (!depot.billing?.stripeInvoiceUrl || !depot.billing.stripeInvoiceId) {
       throw new Error("Aucune facture Stripe pour ce dépôt.");
     }
     const email = company?.contactEmail?.trim();
@@ -506,31 +539,69 @@ export const sendInvoiceEmail = action({
       throw new Error("Cette entreprise n'a pas d'email de contact. Ajoutez-le dans sa fiche.");
     }
 
-    const ref = `Bon de dépôt n° ${String(depot.depotNumber).padStart(4, "0")}`;
+    const number = String(depot.depotNumber).padStart(4, "0");
+    const ref = `Bon de dépôt n° ${number}`;
     const amount = (depot.billing.amountCents / 100).toFixed(2).replace(".", ",");
     const date = new Date(depot.createdAt).toLocaleDateString("fr-FR");
+
+    // Pièces jointes : facture PDF (téléchargée chez Stripe) + bon de dépôt PDF.
+    const attachments: EmailAttachment[] = [];
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    if (secretKey) {
+      try {
+        const invoice = await stripeGet(secretKey, `invoices/${depot.billing.stripeInvoiceId}`);
+        const pdfUrl = invoice.invoice_pdf as string | undefined;
+        if (pdfUrl) {
+          const res = await fetch(pdfUrl);
+          if (res.ok) {
+            attachments.push({
+              filename: `facture-depot-${number}.pdf`,
+              content: bytesToBase64(new Uint8Array(await res.arrayBuffer())),
+            });
+          }
+        }
+      } catch (err) {
+        console.warn("Facture PDF Stripe indisponible :", err);
+      }
+    }
+    if (bonPdfBase64) {
+      attachments.push({ filename: `bon-depot-${number}.pdf`, content: bonPdfBase64 });
+    }
+
+    const logoId = env.BENNESPRO_EMAIL_LOGO_ID;
+    const logoHtml = logoId
+      ? `<img src="${storageImageUrl(logoId)}" alt="Déchet'Lab" height="72" style="display:block;height:72px;width:auto;margin:0 auto;" />`
+      : `<p style="margin:0;text-align:center;color:${BP_DARK};font-size:20px;font-weight:bold;">Déchet'Lab</p>`;
+
     const html = `<!doctype html>
-<html lang="fr"><body style="margin:0;background:#f4f7f6;font-family:Arial,Helvetica,sans-serif;">
+<html lang="fr"><body style="margin:0;background:#f0faf9;font-family:Arial,Helvetica,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px;">
-    <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8e4;">
-      <tr><td style="background:#14332f;padding:20px 28px;">
-        <p style="margin:0;color:#ffffff;font-size:18px;font-weight:bold;">Déchet'Lab — Bennes &amp; Pro</p>
+    <table role="presentation" width="540" cellpadding="0" cellspacing="0" style="max-width:540px;width:100%;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #d9f2f0;">
+      <tr><td style="padding:26px 28px 18px;background:#ffffff;">
+        ${logoHtml}
       </td></tr>
+      <tr><td style="height:4px;background:${BP_TEAL};font-size:0;line-height:0;">&nbsp;</td></tr>
       <tr><td style="padding:28px;">
-        <p style="margin:0 0 12px;font-size:15px;color:#1c2422;">Bonjour${company?.contactName ? ` ${company.contactName}` : ""},</p>
-        <p style="margin:0 0 16px;font-size:14px;line-height:22px;color:#3d4a46;">
-          Veuillez trouver ci-dessous votre facture pour le dépôt de déchets
-          <strong>${ref}</strong> du ${date} (DIB : ${depot.billing.weightKg}&nbsp;kg — <strong>${amount}&nbsp;€</strong>).
+        <p style="margin:0 0 6px;font-size:12px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:${BP_TEAL};">Facture — dépôt de déchets</p>
+        <p style="margin:0 0 14px;font-size:19px;font-weight:bold;color:${BP_DARK};">${ref}</p>
+        <p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#3d4a46;">Bonjour${company?.contactName ? ` ${company.contactName}` : ""},</p>
+        <p style="margin:0 0 18px;font-size:14px;line-height:22px;color:#3d4a46;">
+          Veuillez trouver votre facture pour le dépôt du ${date}
+          (DIB&nbsp;: ${depot.billing.weightKg}&nbsp;kg — <strong style="color:${BP_DARK};">${amount}&nbsp;€</strong>).
+          La facture et le bon de dépôt sont joints à cet email au format PDF.
         </p>
-        <p style="margin:0 0 24px;">
-          <a href="${depot.billing.stripeInvoiceUrl}" style="display:inline-block;background:#2aa79b;color:#ffffff;font-size:14px;font-weight:bold;text-decoration:none;padding:12px 22px;border-radius:8px;">
-            Voir et régler la facture
+        <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr><td style="border-radius:10px;background:${BP_TEAL};">
+          <a href="${depot.billing.stripeInvoiceUrl}" style="display:inline-block;padding:13px 26px;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;">
+            Voir et régler la facture en ligne
           </a>
-        </p>
+        </td></tr></table>
         <p style="margin:0;font-size:12px;line-height:18px;color:#8a9691;">
           Le paiement s'effectue en ligne de façon sécurisée via Stripe.
           Message automatique — merci de ne pas répondre à cet email.
         </p>
+      </td></tr>
+      <tr><td style="padding:16px 28px;background:${BP_DARK};">
+        <p style="margin:0;font-size:12px;color:#b4e5e1;">Déchet'Lab — Bennes &amp; Pro · Maison de l'Économie Solidaire</p>
       </td></tr>
     </table>
   </td></tr></table>
@@ -541,8 +612,21 @@ export const sendInvoiceEmail = action({
       `Votre facture — ${ref} (${amount} €)`,
       html,
       "Déchet'Lab <no-reply@mesoutils.eco-solidaire.fr>",
+      attachments,
     );
     return { sentTo: email };
+  },
+});
+
+/** Stocke le logo email Déchet'Lab (base64 PNG) — retourne l'id à mettre dans BENNESPRO_EMAIL_LOGO_ID. */
+export const adminStoreEmailLogo = internalAction({
+  args: { base64: v.string() },
+  handler: async (ctx, { base64 }): Promise<string> => {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const storageId = await ctx.storage.store(new Blob([bytes], { type: "image/png" }));
+    return storageId;
   },
 });
 

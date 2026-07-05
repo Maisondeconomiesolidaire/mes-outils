@@ -188,11 +188,15 @@ function shell(opts: {
 </html>`;
 }
 
+/** Pièce jointe Resend : contenu en base64. */
+export type EmailAttachment = { filename: string; content: string };
+
 export async function resendSend(
   to: string | string[],
   subject: string,
   html: string,
   from: string = FROM,
+  attachments?: EmailAttachment[],
 ) {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
@@ -213,7 +217,13 @@ export async function resendSend(
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify({ from, to: recipients, subject, html }),
+    body: JSON.stringify({
+      from,
+      to: recipients,
+      subject,
+      html,
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+    }),
   });
 
   if (!response.ok) {
