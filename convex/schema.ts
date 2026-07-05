@@ -38,10 +38,12 @@ export const bpUnit = v.union(
 export const bpBilling = v.object({
   /** Poids DIB facturable en kg (lignes kg + tonnes converties). */
   weightKg: v.number(),
-  /** Prix appliqué, en centimes d'euro par kg. */
+  /** Prix appliqué, en centimes d'euro par kg (HT). */
   priceCentsPerKg: v.number(),
-  /** Montant total en centimes d'euro. */
+  /** Montant HT en centimes d'euro (la TVA est ajoutée sur la facture Stripe). */
   amountCents: v.number(),
+  /** Taux de TVA appliqué (ex. 20). Les anciens dépôts sans valeur sont affichés au taux courant. */
+  vatRate: v.optional(v.number()),
   status: v.union(
     v.literal("pending"),
     v.literal("invoiced"),
@@ -49,6 +51,17 @@ export const bpBilling = v.object({
   ),
   stripeInvoiceId: v.optional(v.string()),
   stripeInvoiceUrl: v.optional(v.string()),
+  /** Statut de règlement Stripe (open = en attente, paid = payée…). */
+  paymentStatus: v.optional(
+    v.union(
+      v.literal("open"),
+      v.literal("paid"),
+      v.literal("draft"),
+      v.literal("void"),
+      v.literal("uncollectible"),
+    ),
+  ),
+  paidAt: v.optional(v.number()),
   error: v.optional(v.string()),
   invoicedAt: v.optional(v.number()),
 });

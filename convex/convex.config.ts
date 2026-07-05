@@ -5,6 +5,7 @@ export default defineApp({
   env: {
     STRIPE_SECRET_KEY: v.optional(v.string()),
     BENNESPRO_STRIPE_SECRET_KEY: v.optional(v.string()),
+    BENNESPRO_STRIPE_TVA_TAX_RATE_ID: v.optional(v.string()),
     BENNESPRO_EMAIL_LOGO_ID: v.optional(v.string()),
     MAPBOX_ACCESS_TOKEN: v.optional(v.string()),
     STAFF_EMAILS: v.optional(v.string()),

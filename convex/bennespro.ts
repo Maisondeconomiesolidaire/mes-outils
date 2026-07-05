@@ -6,6 +6,7 @@ import {
   internalQuery,
   mutation,
   query,
+  type ActionCtx,
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
@@ -222,7 +223,7 @@ export const createDepot = mutation({
     const amountCents = Math.round(weightKg * priceCentsPerKg);
     const billing =
       amountCents > 0
-        ? { weightKg, priceCentsPerKg, amountCents, status: "pending" as const }
+        ? { weightKg, priceCentsPerKg, amountCents, vatRate: DIB_VAT_RATE, status: "pending" as const }
         : undefined;
 
     const depotId = await ctx.db.insert("bpDepots", {
@@ -246,6 +247,7 @@ const DIB_MATERIAL = "Tout venant/DIB non triés";
 
 /** Prix par défaut : 32 centimes d'euro le kilo. */
 const DEFAULT_DIB_PRICE_CENTS_PER_KG = 32;
+const DIB_VAT_RATE = 20;
 
 const SETTINGS_KEY = "bennespro";
 
@@ -328,7 +330,7 @@ export const billDepot = mutation({
     const priceCentsPerKg = await readDibPrice(ctx);
     const amountCents = Math.round(weightKg * priceCentsPerKg);
     await ctx.db.patch(depotId, {
-      billing: { weightKg, priceCentsPerKg, amountCents, status: "pending" },
+      billing: { weightKg, priceCentsPerKg, amountCents, vatRate: DIB_VAT_RATE, status: "pending" },
     });
     await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
   },
@@ -358,6 +360,33 @@ export const saveDepotBilling = internalMutation({
   },
 });
 
+export const saveInvoicePaymentStatus = internalMutation({
+  args: {
+    depotId: v.id("bpDepots"),
+    paymentStatus: v.union(
+      v.literal("draft"),
+      v.literal("open"),
+      v.literal("paid"),
+      v.literal("void"),
+      v.literal("uncollectible"),
+    ),
+    stripeInvoiceUrl: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+  },
+  handler: async (ctx, { depotId, paymentStatus, stripeInvoiceUrl, paidAt }) => {
+    const depot = await ctx.db.get(depotId);
+    if (!depot?.billing) return;
+    await ctx.db.patch(depotId, {
+      billing: {
+        ...depot.billing,
+        paymentStatus,
+        ...(stripeInvoiceUrl ? { stripeInvoiceUrl } : {}),
+        ...(paidAt ? { paidAt } : {}),
+      },
+    });
+  },
+});
+
 async function stripeRequest(
   secretKey: string,
   path: string,
@@ -379,6 +408,77 @@ async function stripeRequest(
     throw new Error(json.error?.message ?? `Stripe ${path} a échoué (${res.status}).`);
   }
   return json;
+}
+
+type StripeInvoiceStatus = "draft" | "open" | "paid" | "void" | "uncollectible";
+
+function stripeStatus(value: unknown): StripeInvoiceStatus | undefined {
+  return value === "draft" ||
+    value === "open" ||
+    value === "paid" ||
+    value === "void" ||
+    value === "uncollectible"
+    ? value
+    : undefined;
+}
+
+function stripePaidAt(invoice: Record<string, unknown>): number | undefined {
+  const transitions = invoice.status_transitions;
+  if (!transitions || typeof transitions !== "object") return undefined;
+  const paidAt = (transitions as { paid_at?: unknown }).paid_at;
+  return typeof paidAt === "number" ? paidAt * 1000 : undefined;
+}
+
+async function stripeVatTaxRateId(secretKey: string): Promise<string> {
+  if (env.BENNESPRO_STRIPE_TVA_TAX_RATE_ID) return env.BENNESPRO_STRIPE_TVA_TAX_RATE_ID;
+
+  const existing = await stripeGet(secretKey, "tax_rates?active=true&limit=100");
+  const rates = Array.isArray(existing.data) ? existing.data : [];
+  for (const rate of rates) {
+    if (!rate || typeof rate !== "object") continue;
+    const taxRate = rate as Record<string, unknown>;
+    if (
+      taxRate.id &&
+      taxRate.percentage === DIB_VAT_RATE &&
+      taxRate.inclusive === false &&
+      taxRate.country === "FR"
+    ) {
+      return String(taxRate.id);
+    }
+  }
+
+  const created = await stripeRequest(secretKey, "tax_rates", {
+    display_name: "TVA",
+    inclusive: "false",
+    percentage: String(DIB_VAT_RATE),
+    country: "FR",
+    description: "TVA française 20%",
+  });
+  return String(created.id);
+}
+
+async function refreshStripeInvoiceBilling(
+  ctx: Pick<ActionCtx, "runMutation">,
+  secretKey: string,
+  depotId: Id<"bpDepots">,
+  invoiceId: string,
+): Promise<{ paymentStatus?: StripeInvoiceStatus; invoice: Record<string, unknown> }> {
+  const invoice = await stripeGet(secretKey, `invoices/${invoiceId}`);
+  const paymentStatus = stripeStatus(invoice.status);
+  if (paymentStatus) {
+    const args: {
+      depotId: Id<"bpDepots">;
+      paymentStatus: StripeInvoiceStatus;
+      stripeInvoiceUrl?: string;
+      paidAt?: number;
+    } = { depotId, paymentStatus };
+    const hostedUrl = invoice.hosted_invoice_url;
+    if (typeof hostedUrl === "string") args.stripeInvoiceUrl = hostedUrl;
+    const paidAt = stripePaidAt(invoice);
+    if (paidAt) args.paidAt = paidAt;
+    await ctx.runMutation(internal.bennespro.saveInvoicePaymentStatus, args);
+  }
+  return { paymentStatus, invoice };
 }
 
 /**
@@ -431,6 +531,7 @@ export const invoiceDepotDib = internalAction({
       }
 
       const depotRef = `Bon de dépôt n° ${String(depot.depotNumber).padStart(4, "0")}`;
+      const taxRateId = await stripeVatTaxRateId(secretKey);
 
       // 2. Facture vide (paiement à réception, 30 jours).
       const invoice = await stripeRequest(secretKey, "invoices", {
@@ -452,7 +553,8 @@ export const invoiceDepotDib = internalAction({
         invoice: invoiceId,
         amount: String(billing.amountCents),
         currency: "eur",
-        description: `DIB (tout-venant non trié) — ${billing.weightKg} kg × ${priceEuros} €/kg — ${depotRef}`,
+        "tax_rates[0]": taxRateId,
+        description: `DIB (tout-venant non trié) — ${billing.weightKg} kg × ${priceEuros} €/kg HT — ${depotRef}`,
       });
 
       // 4. Finalisation (+ envoi par email si possible).
@@ -463,17 +565,21 @@ export const invoiceDepotDib = internalAction({
         await stripeRequest(secretKey, `invoices/${invoiceId}/send`, {});
       }
 
+      const savedBilling: Infer<typeof bpBilling> = {
+        ...billing,
+        vatRate: DIB_VAT_RATE,
+        status: "invoiced",
+        stripeInvoiceId: invoiceId,
+        paymentStatus: stripeStatus(finalized.status) ?? "open",
+        invoicedAt: Date.now(),
+      };
+      const hostedUrl = finalized.hosted_invoice_url;
+      if (typeof hostedUrl === "string") savedBilling.stripeInvoiceUrl = hostedUrl;
+      const paidAt = stripePaidAt(finalized);
+      if (paidAt) savedBilling.paidAt = paidAt;
       await ctx.runMutation(internal.bennespro.saveDepotBilling, {
         depotId,
-        billing: {
-          ...billing,
-          status: "invoiced",
-          stripeInvoiceId: invoiceId,
-          stripeInvoiceUrl:
-            (finalized.hosted_invoice_url as string | undefined) ?? undefined,
-          error: undefined,
-          invoicedAt: Date.now(),
-        },
+        billing: savedBilling,
       });
     } catch (err) {
       await fail(err instanceof Error ? err.message : "Erreur Stripe inconnue.");
@@ -497,6 +603,34 @@ async function stripeGet(secretKey: string, path: string): Promise<Record<string
   return json;
 }
 
+export const refreshInvoiceStatus = action({
+  args: { depotId: v.id("bpDepots") },
+  handler: async (ctx, { depotId }) => {
+    const access: {
+      isAdmin?: boolean;
+      bootstrapMode?: boolean;
+      grants: Array<{ pageKey: string; actions: string[] }>;
+    } = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, "bennespro:depots", "read")) {
+      throw new Error("Accès insuffisant.");
+    }
+    const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
+      await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
+    if (!data?.depot.billing?.stripeInvoiceId) {
+      throw new Error("Aucune facture Stripe pour ce dépôt.");
+    }
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    if (!secretKey) throw new Error("Clé Stripe non configurée (BENNESPRO_STRIPE_SECRET_KEY).");
+    const { paymentStatus } = await refreshStripeInvoiceBilling(
+      ctx,
+      secretKey,
+      depotId,
+      data.depot.billing.stripeInvoiceId,
+    );
+    return { paymentStatus: paymentStatus ?? null };
+  },
+});
+
 /** Encode des octets en base64 (par blocs, pour rester léger en mémoire). */
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -516,8 +650,9 @@ export const sendInvoiceEmail = action({
   args: {
     depotId: v.id("bpDepots"),
     bonPdfBase64: v.optional(v.string()),
+    reminder: v.optional(v.boolean()),
   },
-  handler: async (ctx, { depotId, bonPdfBase64 }): Promise<{ sentTo: string }> => {
+  handler: async (ctx, { depotId, bonPdfBase64, reminder }): Promise<{ sentTo: string }> => {
     // Annotations explicites : évite la circularité de types (fonction du même module).
     const access: {
       isAdmin?: boolean;
@@ -541,15 +676,32 @@ export const sendInvoiceEmail = action({
 
     const number = String(depot.depotNumber).padStart(4, "0");
     const ref = `Bon de dépôt n° ${number}`;
-    const amount = (depot.billing.amountCents / 100).toFixed(2).replace(".", ",");
+    const amountHt = (depot.billing.amountCents / 100).toFixed(2).replace(".", ",");
+    const vatRate = depot.billing.vatRate ?? DIB_VAT_RATE;
+    const amountTtc = (Math.round(depot.billing.amountCents * (1 + vatRate / 100)) / 100)
+      .toFixed(2)
+      .replace(".", ",");
     const date = new Date(depot.createdAt).toLocaleDateString("fr-FR");
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    let stripeInvoice: Record<string, unknown> | null = null;
+    if (secretKey) {
+      const { paymentStatus, invoice } = await refreshStripeInvoiceBilling(
+        ctx,
+        secretKey,
+        depotId,
+        depot.billing.stripeInvoiceId,
+      );
+      stripeInvoice = invoice;
+      if (paymentStatus === "paid") {
+        throw new Error("Cette facture est déjà payée.");
+      }
+    }
 
     // Pièces jointes : facture PDF (téléchargée chez Stripe) + bon de dépôt PDF.
     const attachments: EmailAttachment[] = [];
-    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
     if (secretKey) {
       try {
-        const invoice = await stripeGet(secretKey, `invoices/${depot.billing.stripeInvoiceId}`);
+        const invoice = stripeInvoice ?? (await stripeGet(secretKey, `invoices/${depot.billing.stripeInvoiceId}`));
         const pdfUrl = invoice.invoice_pdf as string | undefined;
         if (pdfUrl) {
           const res = await fetch(pdfUrl);
@@ -582,12 +734,12 @@ export const sendInvoiceEmail = action({
       </td></tr>
       <tr><td style="height:4px;background:${BP_TEAL};font-size:0;line-height:0;">&nbsp;</td></tr>
       <tr><td style="padding:28px;">
-        <p style="margin:0 0 6px;font-size:12px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:${BP_TEAL};">Facture — dépôt de déchets</p>
+        <p style="margin:0 0 6px;font-size:12px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:${BP_TEAL};">${reminder ? "Relance facture" : "Facture"} — dépôt de déchets</p>
         <p style="margin:0 0 14px;font-size:19px;font-weight:bold;color:${BP_DARK};">${ref}</p>
         <p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#3d4a46;">Bonjour${company?.contactName ? ` ${company.contactName}` : ""},</p>
         <p style="margin:0 0 18px;font-size:14px;line-height:22px;color:#3d4a46;">
-          Veuillez trouver votre facture pour le dépôt du ${date}
-          (DIB&nbsp;: ${depot.billing.weightKg}&nbsp;kg — <strong style="color:${BP_DARK};">${amount}&nbsp;€</strong>).
+          ${reminder ? "Nous nous permettons de vous relancer concernant votre facture pour le dépôt du" : "Veuillez trouver votre facture pour le dépôt du"} ${date}
+          (DIB&nbsp;: ${depot.billing.weightKg}&nbsp;kg — <strong style="color:${BP_DARK};">${amountHt}&nbsp;€ HT / ${amountTtc}&nbsp;€ TTC</strong>, TVA ${vatRate}%).
           La facture et le bon de dépôt sont joints à cet email au format PDF.
         </p>
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr><td style="border-radius:10px;background:${BP_TEAL};">
@@ -609,7 +761,7 @@ export const sendInvoiceEmail = action({
 
     await resendSend(
       email,
-      `Votre facture — ${ref} (${amount} €)`,
+      `${reminder ? "Relance facture" : "Votre facture"} — ${ref} (${amountTtc} € TTC)`,
       html,
       "Déchet'Lab <no-reply@mesoutils.eco-solidaire.fr>",
       attachments,
