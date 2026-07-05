@@ -17,14 +17,17 @@ type ClientRow = {
 };
 
 /**
- * Liste agrégée des clients, déduite des demandes (regroupées par email).
- * Pas de table dédiée : un client existe dès qu'il a soumis une demande.
+ * Liste agrégée des clients, déduite des demandes et des prospects importés
+ * (regroupés par email).
  */
 export const list = query({
   args: {},
   handler: async (ctx): Promise<ClientRow[]> => {
     await requireCrmPermission(ctx, "clients", "read");
-    const requests = await ctx.db.query("requests").order("desc").collect();
+    const [requests, importedCustomers] = await Promise.all([
+      ctx.db.query("requests").order("desc").collect(),
+      ctx.db.query("crmCustomers").order("desc").collect(),
+    ]);
     const map = new Map<string, ClientRow>();
 
     for (const r of requests) {
@@ -57,6 +60,23 @@ export const list = query({
       }
     }
 
+    for (const c of importedCustomers) {
+      const email = c.email.trim().toLowerCase();
+      if (!email || map.has(email)) continue;
+      map.set(email, {
+        email: c.email,
+        firstName: titleCaseName(c.firstName),
+        lastName: titleCaseName(c.lastName),
+        phone: c.phone,
+        address: c.address,
+        postalCode: c.postalCode,
+        city: c.city,
+        requestCount: 0,
+        lastAt: c.legacyModifiedAt ?? c.updatedAt,
+        types: [],
+      });
+    }
+
     return [...map.values()].sort((a, b) => b.lastAt - a.lastAt);
   },
 });
@@ -67,13 +87,29 @@ export const get = query({
   handler: async (ctx, { email }) => {
     await requireCrmPermission(ctx, "clients", "read");
     const target = email.trim().toLowerCase();
-    const all = await ctx.db.query("requests").order("desc").collect();
-    const requests = all.filter(
-      (r) => r.customer.email.trim().toLowerCase() === target,
-    );
-    if (requests.length === 0) return null;
+    const [all, imported] = await Promise.all([
+      ctx.db.query("requests").order("desc").collect(),
+      ctx.db
+        .query("crmCustomers")
+        .withIndex("by_email", (q) => q.eq("email", target))
+        .first(),
+    ]);
+    const requests = all.filter((r) => r.customer.email.trim().toLowerCase() === target);
+    if (requests.length === 0 && !imported) return null;
+    const customer =
+      requests.length > 0
+        ? normalizeCustomer(requests[0].customer)
+        : normalizeCustomer({
+            firstName: imported!.firstName,
+            lastName: imported!.lastName,
+            email: imported!.email,
+            phone: imported!.phone,
+            address: imported!.address,
+            postalCode: imported!.postalCode,
+            city: imported!.city,
+          });
     return {
-      customer: normalizeCustomer(requests[0].customer),
+      customer,
       requests: requests.map((r) => ({ ...r, customer: normalizeCustomer(r.customer) })),
     };
   },

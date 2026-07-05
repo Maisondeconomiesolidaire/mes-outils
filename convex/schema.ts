@@ -357,12 +357,48 @@ export default defineSchema(
     updatedAt: v.number(),
     reference: v.optional(v.string()),
     visitNeeded: v.optional(v.boolean()),
+    legacyImport: v.optional(
+      v.object({
+        source: v.string(),
+        sourceIds: v.array(v.string()),
+        raw: v.array(
+          v.object({
+            sourceId: v.string(),
+            fields: v.array(v.object({ key: v.string(), value: v.string() })),
+          }),
+        ),
+      }),
+    ),
   })
     .index("by_type", ["type"])
     .index("by_outcome", ["outcome"])
     .index("by_userId", ["userId"])
     .index("by_scheduledDate", ["scheduledDate"])
-    .index("by_assignedVehicle", ["assignedVehicle"]),
+    .index("by_assignedVehicle", ["assignedVehicle"])
+    .index("by_reference", ["reference"]),
+
+  /** Prospects/clients importés hors demandes (Bubble, etc.). */
+  crmCustomers: defineTable({
+    source: v.string(),
+    sourceId: v.string(),
+    firstName: v.string(),
+    lastName: v.string(),
+    email: v.string(),
+    phone: v.string(),
+    address: v.optional(v.string()),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+    customerType: v.optional(v.string()),
+    streetNumber: v.optional(v.string()),
+    street: v.optional(v.string()),
+    legacyCreatedAt: v.optional(v.number()),
+    legacyModifiedAt: v.optional(v.number()),
+    raw: v.array(v.object({ key: v.string(), value: v.string() })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_sourceId", ["sourceId"])
+    .index("by_email", ["email"]),
 
   /** Flotte : véhicules utilitaires de la recyclerie. */
   vehicles: defineTable({

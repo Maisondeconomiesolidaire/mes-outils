@@ -24,6 +24,7 @@ import type * as files from "../files.js";
 import type * as fleet from "../fleet.js";
 import type * as gotravaux from "../gotravaux.js";
 import type * as http from "../http.js";
+import type * as importLegacy from "../importLegacy.js";
 import type * as klyde from "../klyde.js";
 import type * as lib from "../lib.js";
 import type * as livraison from "../livraison.js";
@@ -67,6 +68,7 @@ declare const fullApi: ApiFromModules<{
   fleet: typeof fleet;
   gotravaux: typeof gotravaux;
   http: typeof http;
+  importLegacy: typeof importLegacy;
   klyde: typeof klyde;
   lib: typeof lib;
   livraison: typeof livraison;
