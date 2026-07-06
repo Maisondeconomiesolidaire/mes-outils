@@ -1341,6 +1341,38 @@ export const updateCustomer = mutation({
   },
 });
 
+/** Met à jour les champs renseignés par le client pour une demande d'aérogommage. */
+export const updateAerogommageDetails = mutation({
+  args: {
+    id: v.id("requests"),
+    comment: v.optional(v.string()),
+    items: v.array(aerogommageItem),
+    aerogommageOptions: v.optional(aerogommageOptionsArg),
+    actorName: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, comment, items, aerogommageOptions, actorName }) => {
+    await requireCrmPermission(ctx, "demandes", "update");
+    const request = await ctx.db.get(id);
+    if (!request) throw new Error("Demande introuvable.");
+    if (request.type !== "aerogommage") {
+      throw new Error("Type de demande invalide.");
+    }
+
+    await ctx.db.patch(id, {
+      comment: comment?.trim() || undefined,
+      aerogommage: items,
+      aerogommageOptions,
+      complete: isAerogommageComplete(request.customer, items),
+      updatedAt: Date.now(),
+      fieldEdits: withFieldEdits(
+        request.fieldEdits,
+        ["comment", "aerogommage", "aerogommageOptions"],
+        actorName,
+      ),
+    });
+  },
+});
+
 /**
  * Crée une demande directement depuis le CRM (par un membre de l'équipe).
  * Même logique que les mutations publiques, avec requestOrigin: "internal".
