@@ -34,8 +34,8 @@ const ROOM_USAGES = [
   "Autre",
 ] as const;
 
-const FULL_DAY_START_TIME = "00:00";
-const FULL_DAY_END_TIME = "23:59";
+const FULL_DAY_START_TIME = "08:00";
+const FULL_DAY_END_TIME = "18:00";
 
 /** Heures proposées : journée entière + pas de 30 min, 06:00 → 22:00. */
 const TIME_OPTIONS = [
