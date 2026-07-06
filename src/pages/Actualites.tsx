@@ -89,6 +89,7 @@ type Post = {
   canManage: boolean;
 };
 type PostMedia = { kind: "image" | "video"; url: string };
+type PostLike = { _id: Id<"postLikes">; name: string; imageUrl?: string; createdAt: number };
 
 function Publications({ canCreate, canManage }: { canCreate: boolean; canManage: boolean }) {
   const { user } = useUser();
@@ -201,6 +202,10 @@ function PostCard({
   const [editDraft, setEditDraft] = useState(post.body ?? "");
   const [savingEdit, setSavingEdit] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [likesOpen, setLikesOpen] = useState(false);
+  const likes = useQuery(api.posts.listLikes, likesOpen ? { postId: post._id } : "skip") as
+    | PostLike[]
+    | undefined;
   const media: PostMedia[] = [
     ...post.imageUrls.map((url) => ({ kind: "image" as const, url })),
     ...post.videoUrls.map((url) => ({ kind: "video" as const, url })),
@@ -328,10 +333,15 @@ function PostCard({
         <div className="flex items-center justify-between px-4 py-2.5 text-sm text-[var(--muted-foreground)]">
           <span className="inline-flex min-w-0 items-center gap-1.5">
             {post.likesCount > 0 ? (
-              <>
+              <button
+                type="button"
+                onClick={() => setLikesOpen(true)}
+                className="inline-flex min-w-0 items-center gap-1.5 text-left transition hover:underline"
+                aria-label="Voir les personnes qui ont aimé ce post"
+              >
                 <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-brand-500 text-white"><ThumbsUp className="h-3 w-3 fill-current" /></span>
                 <span className="truncate">{likeSummary(post.latestLikeName, post.likesCount)}</span>
-              </>
+              </button>
             ) : null}
           </span>
           {post.commentsCount > 0 ? (
@@ -399,7 +409,45 @@ function PostCard({
     {viewerIndex != null ? (
       <PostMediaViewer media={media} index={viewerIndex} onIndexChange={setViewerIndex} onClose={() => setViewerIndex(null)} />
     ) : null}
+    <LikesModal open={likesOpen} likes={likes} onClose={() => setLikesOpen(false)} />
     </>
+  );
+}
+
+function LikesModal({
+  open,
+  likes,
+  onClose,
+}: {
+  open: boolean;
+  likes: PostLike[] | undefined;
+  onClose: () => void;
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title="Mentions J'aime" className="sm:h-auto sm:max-h-[80vh] sm:w-[520px] sm:max-w-[520px]">
+      {likes === undefined ? (
+        <FullSpinner label="Chargement des likes..." />
+      ) : likes.length === 0 ? (
+        <p className="py-8 text-center text-sm text-[var(--muted-foreground)]">
+          Personne n'a encore aimé ce post.
+        </p>
+      ) : (
+        <div className="-mx-2 space-y-1">
+          {likes.map((like) => (
+            <div key={like._id} className="flex items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-[var(--accent)]">
+              <Avatar name={like.name} src={like.imageUrl} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-semibold text-[var(--foreground)]">{like.name}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">{formatRelative(like.createdAt)}</p>
+              </div>
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-500 text-white">
+                <ThumbsUp className="h-3.5 w-3.5 fill-current" />
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 

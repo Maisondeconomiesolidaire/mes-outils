@@ -91,6 +91,29 @@ export const list = query({
   },
 });
 
+export const listLikes = query({
+  args: {
+    postId: v.id("posts"),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, POSTS_PAGE_KEY, "read");
+    const post = await ctx.db.get(args.postId);
+    if (!post) throw new Error("Post introuvable.");
+    const likes = await ctx.db
+      .query("postLikes")
+      .withIndex("by_postId", (q) => q.eq("postId", args.postId))
+      .order("desc")
+      .take(200);
+
+    return likes.map((like) => ({
+      _id: like._id,
+      name: like.actorName ?? "Utilisateur",
+      imageUrl: like.actorImageUrl,
+      createdAt: like.createdAt,
+    }));
+  },
+});
+
 export const create = mutation({
   args: {
     body: v.string(),
