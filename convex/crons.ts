@@ -11,4 +11,10 @@ crons.daily(
   internal.vehicleControlReminders.sendControlReminders,
 );
 
+crons.hourly(
+  "emails retour reservations vehicules",
+  { minuteUTC: 10 },
+  internal.reservations.requestVehicleFeedbackForPastReservations,
+);
+
 export default crons;

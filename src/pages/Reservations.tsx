@@ -590,13 +590,24 @@ type MyReservation = {
   start: number;
   end: number;
   status: "confirmed" | "pending" | "approved" | "rejected";
+  feedbackSubmittedAt?: number;
 };
 
 function MyReservations() {
   const reservations = useQuery(api.reservations.listMyReservations) as MyReservation[] | undefined;
   const cancelRoom = useMutation(api.reservations.cancelRoomReservation);
   const cancelVehicle = useMutation(api.reservations.cancelVehicleReservation);
+  const submitVehicleFeedback = useMutation(api.reservations.submitVehicleFeedback);
   const [filter, setFilter] = useState<"all" | "room" | "vehicle">("all");
+  const [feedbackTarget, setFeedbackTarget] = useState<MyReservation | null>(null);
+  const [feedbackForm, setFeedbackForm] = useState({
+    fuelRestored: false,
+    vehicleEmpty: false,
+    vehicleClean: false,
+    issues: "",
+    notes: "",
+  });
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   if (reservations === undefined) return <FullSpinner label="Chargement de vos réservations..." />;
 
@@ -620,6 +631,37 @@ function MyReservations() {
     }
   }
 
+  function openVehicleFeedback(reservation: MyReservation) {
+    setFeedbackTarget(reservation);
+    setFeedbackForm({
+      fuelRestored: false,
+      vehicleEmpty: false,
+      vehicleClean: false,
+      issues: "",
+      notes: "",
+    });
+  }
+
+  async function submitFeedback() {
+    if (!feedbackTarget) return;
+    setFeedbackSubmitting(true);
+    try {
+      await submitVehicleFeedback({
+        reservationId: feedbackTarget._id as Id<"vehicleReservations">,
+        fuelRestored: feedbackForm.fuelRestored,
+        vehicleEmpty: feedbackForm.vehicleEmpty,
+        vehicleClean: feedbackForm.vehicleClean,
+        issues: feedbackForm.issues.trim() || undefined,
+        notes: feedbackForm.notes.trim() || undefined,
+      });
+      setFeedbackTarget(null);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Impossible d'envoyer le retour.");
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
@@ -634,6 +676,11 @@ function MyReservations() {
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] divide-y divide-[var(--border)]">
           {filtered.map((reservation) => {
             const past = reservation.end < Date.now();
+            const canSendFeedback =
+              past &&
+              reservation.kind === "vehicle" &&
+              reservation.status === "approved" &&
+              !reservation.feedbackSubmittedAt;
             return (
               <div key={`${reservation.kind}-${reservation._id}`} className={`flex flex-wrap items-center gap-3 p-4 ${past ? "opacity-60" : ""}`}>
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-brand-600">
@@ -656,11 +703,78 @@ function MyReservations() {
                     Annuler
                   </Button>
                 ) : null}
+                {canSendFeedback ? (
+                  <Button size="sm" onClick={() => openVehicleFeedback(reservation)}>
+                    Faire le retour
+                  </Button>
+                ) : null}
+                {past && reservation.kind === "vehicle" && reservation.feedbackSubmittedAt ? (
+                  <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-800 dark:bg-brand-500/20 dark:text-brand-200">
+                    Retour envoyé
+                  </span>
+                ) : null}
               </div>
             );
           })}
         </div>
       )}
+      <Modal
+        open={Boolean(feedbackTarget)}
+        onClose={() => (feedbackSubmitting ? undefined : setFeedbackTarget(null))}
+        title="Retour véhicule"
+      >
+        {feedbackTarget ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[var(--border)] bg-[var(--accent)] p-4">
+              <p className="font-semibold text-[var(--foreground)]">{feedbackTarget.assetName}</p>
+              <p className="text-sm text-[var(--muted-foreground)]">{feedbackTarget.label}</p>
+              <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(feedbackTarget.start)} → {formatDateTime(feedbackTarget.end)}</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Checkbox
+                checked={feedbackForm.fuelRestored}
+                onChange={(fuelRestored) => setFeedbackForm((current) => ({ ...current, fuelRestored }))}
+                label="Essence remise"
+                description="Le niveau prévu a été rétabli."
+              />
+              <Checkbox
+                checked={feedbackForm.vehicleEmpty}
+                onChange={(vehicleEmpty) => setFeedbackForm((current) => ({ ...current, vehicleEmpty }))}
+                label="Rien laissé"
+                description="Aucun objet personnel ou matériel oublié."
+              />
+              <Checkbox
+                checked={feedbackForm.vehicleClean}
+                onChange={(vehicleClean) => setFeedbackForm((current) => ({ ...current, vehicleClean }))}
+                label="Véhicule propre"
+                description="L'état intérieur et extérieur est correct."
+              />
+            </div>
+            <Field label="Remarques / incidents constatés">
+              <Textarea
+                value={feedbackForm.issues}
+                onChange={(event) => setFeedbackForm((current) => ({ ...current, issues: event.target.value }))}
+                placeholder="Décrivez un incident, une dégradation, un voyant, un bruit, un problème rencontré..."
+              />
+            </Field>
+            <Field label="Autres commentaires">
+              <Textarea
+                value={feedbackForm.notes}
+                onChange={(event) => setFeedbackForm((current) => ({ ...current, notes: event.target.value }))}
+                placeholder="Informations utiles pour le prochain utilisateur ou les responsables..."
+              />
+            </Field>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button variant="ghost" onClick={() => setFeedbackTarget(null)} disabled={feedbackSubmitting}>
+                Annuler
+              </Button>
+              <Button onClick={() => void submitFeedback()} disabled={feedbackSubmitting}>
+                {feedbackSubmitting ? "Envoi..." : "Envoyer le retour"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -488,9 +488,83 @@ export const listMyReservations = query({
           start: reservation.start,
           end: reservation.end,
           status: reservation.status,
+          feedbackSubmittedAt: reservation.feedbackSubmittedAt,
         })),
     ];
     return mine.sort((a, b) => b.start - a.start);
+  },
+});
+
+export const submitVehicleFeedback = mutation({
+  args: {
+    reservationId: v.id("vehicleReservations"),
+    fuelRestored: v.boolean(),
+    vehicleEmpty: v.boolean(),
+    vehicleClean: v.boolean(),
+    issues: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const identity = await requireUser(ctx);
+    const reservation = await ctx.db.get(args.reservationId);
+    if (!reservation) throw new Error("Réservation introuvable.");
+    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    if (recipientClerkId !== identity.subject && reservation.clerkId !== identity.subject) {
+      throw new Error("Retour non autorisé.");
+    }
+    if (reservation.status !== "approved") {
+      throw new Error("Le retour est disponible uniquement pour une réservation validée.");
+    }
+    if (reservation.end > Date.now()) {
+      throw new Error("Le retour sera disponible après la fin de la réservation.");
+    }
+
+    await ctx.db.patch(args.reservationId, {
+      feedbackSubmittedAt: Date.now(),
+      feedbackFuelRestored: args.fuelRestored,
+      feedbackVehicleEmpty: args.vehicleEmpty,
+      feedbackVehicleClean: args.vehicleClean,
+      feedbackIssues: args.issues?.trim() || undefined,
+      feedbackNotes: args.notes?.trim() || undefined,
+    });
+  },
+});
+
+export const requestVehicleFeedbackForPastReservations = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const reservations = await ctx.db
+      .query("vehicleReservations")
+      .withIndex("by_status", (q) => q.eq("status", "approved"))
+      .order("desc")
+      .take(200);
+    let delay = 0;
+
+    for (const reservation of reservations) {
+      if (reservation.end > now) continue;
+      if (reservation.feedbackRequestedAt || reservation.feedbackSubmittedAt) continue;
+
+      const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+      const email = await emailForClerkId(ctx, recipientClerkId);
+      const vehicle = await ctx.db.get(reservation.vehicleId);
+      await ctx.db.patch(reservation._id, { feedbackRequestedAt: now });
+
+      if (!email) continue;
+      await ctx.scheduler.runAfter(delay, internal.mesoutilsEmails.sendVehicleFeedbackRequestEmail, {
+        email,
+        name: reservation.userName,
+        vehicleName: vehicle?.name ?? "Véhicule",
+        vehicleImageUrl:
+          (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+          undefined,
+        label: reservation.purpose,
+        start: reservation.start,
+        end: reservation.end,
+      });
+      delay += 700;
+    }
   },
 });
 

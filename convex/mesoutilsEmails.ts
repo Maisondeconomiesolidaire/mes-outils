@@ -271,6 +271,48 @@ export const sendReservationEmail = internalAction({
   },
 });
 
+export const sendVehicleFeedbackRequestEmail = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    vehicleName: v.string(),
+    label: v.string(),
+    start: v.number(),
+    end: v.number(),
+    vehicleImageUrl: v.optional(v.string()),
+    vehicleImageStorageId: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.vehicleImageUrl,
+      imageStorageId: args.vehicleImageStorageId,
+    });
+    const rows: Array<[string, string]> = [
+      ["Véhicule", args.vehicleName],
+      ["Motif", args.label],
+      ["Créneau terminé", formatRange(args.start, args.end)],
+    ];
+
+    const html = shell({
+      preheader: `Merci de compléter le retour de votre réservation du véhicule « ${args.vehicleName} ».`,
+      heading: "Retour de réservation véhicule",
+      heroUrl,
+      intro: `Bonjour ${esc(args.name)}, votre réservation de véhicule est terminée. Merci de compléter le court formulaire de retour : carburant, objets laissés, propreté du véhicule et éventuels incidents ou remarques.`,
+      contentHtml: `
+        ${detailCard(rows)}
+        ${button(appLink("/reservations?v=mine"), "Faire le retour")}
+      `,
+    });
+
+    await resendSend(
+      args.email,
+      `Retour de réservation · ${args.vehicleName}`,
+      html,
+      FROM,
+    );
+  },
+});
+
 /**
  * Notifie les responsables (f.henry / y.prata) d'une nouvelle demande de
  * réservation de véhicule, avec un lien direct vers la validation.

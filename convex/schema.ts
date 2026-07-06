@@ -947,6 +947,13 @@ export default defineSchema(
     decisionNote: v.optional(v.string()),
     decidedBy: v.optional(v.string()),
     decidedAt: v.optional(v.number()),
+    feedbackRequestedAt: v.optional(v.number()),
+    feedbackSubmittedAt: v.optional(v.number()),
+    feedbackFuelRestored: v.optional(v.boolean()),
+    feedbackVehicleEmpty: v.optional(v.boolean()),
+    feedbackVehicleClean: v.optional(v.boolean()),
+    feedbackIssues: v.optional(v.string()),
+    feedbackNotes: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_vehicleId", ["vehicleId"])
