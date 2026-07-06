@@ -62,6 +62,8 @@ export const bpBilling = v.object({
     ),
   ),
   paidAt: v.optional(v.number()),
+  /** Horodatage de la dernière relance de règlement envoyée par email. */
+  lastReminderAt: v.optional(v.number()),
   error: v.optional(v.string()),
   invoicedAt: v.optional(v.number()),
 });

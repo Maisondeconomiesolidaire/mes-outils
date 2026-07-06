@@ -400,6 +400,18 @@ export const saveInvoicePaymentStatus = internalMutation({
   },
 });
 
+/** Enregistre l'horodatage de la dernière relance envoyée. */
+export const recordReminderSent = internalMutation({
+  args: { depotId: v.id("bpDepots"), at: v.number() },
+  handler: async (ctx, { depotId, at }) => {
+    const depot = await ctx.db.get(depotId);
+    if (!depot?.billing) return;
+    await ctx.db.patch(depotId, {
+      billing: { ...depot.billing, lastReminderAt: at },
+    });
+  },
+});
+
 async function stripeRequest(
   secretKey: string,
   path: string,
@@ -665,7 +677,10 @@ export const sendInvoiceEmail = action({
     bonPdfBase64: v.optional(v.string()),
     reminder: v.optional(v.boolean()),
   },
-  handler: async (ctx, { depotId, bonPdfBase64, reminder }): Promise<{ sentTo: string }> => {
+  handler: async (
+    ctx,
+    { depotId, bonPdfBase64, reminder },
+  ): Promise<{ sentTo: string; reminder: boolean; sentAt: number }> => {
     // Annotations explicites : évite la circularité de types (fonction du même module).
     const access: {
       isAdmin?: boolean;
@@ -779,7 +794,11 @@ export const sendInvoiceEmail = action({
       "Déchet'Lab <no-reply@mesoutils.eco-solidaire.fr>",
       attachments,
     );
-    return { sentTo: email };
+    const sentAt = Date.now();
+    if (reminder) {
+      await ctx.runMutation(internal.bennespro.recordReminderSent, { depotId, at: sentAt });
+    }
+    return { sentTo: email, reminder: reminder ?? false, sentAt };
   },
 });
 
