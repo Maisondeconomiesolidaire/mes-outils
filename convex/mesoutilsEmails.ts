@@ -297,7 +297,7 @@ export const sendVehicleFeedbackRequestEmail = internalAction({
       preheader: `Merci de compléter le retour de votre réservation du véhicule « ${args.vehicleName} ».`,
       heading: "Retour de réservation véhicule",
       heroUrl,
-      intro: `Bonjour ${esc(args.name)}, votre réservation de véhicule est terminée. Merci de compléter le court formulaire de retour : carburant, objets laissés, propreté du véhicule et éventuels incidents ou remarques.`,
+      intro: `Bonjour ${esc(args.name)}, votre réservation de véhicule est terminée. Merci de compléter le court formulaire de retour : kilométrage relevé, carburant, objets laissés, propreté du véhicule et éventuels incidents ou remarques.`,
       contentHtml: `
         ${detailCard(rows)}
         ${button(appLink("/reservations?v=mine"), "Faire le retour")}

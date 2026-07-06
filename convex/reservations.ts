@@ -498,6 +498,7 @@ export const listMyReservations = query({
 export const submitVehicleFeedback = mutation({
   args: {
     reservationId: v.id("vehicleReservations"),
+    mileage: v.number(),
     fuelRestored: v.boolean(),
     vehicleEmpty: v.boolean(),
     vehicleClean: v.boolean(),
@@ -519,9 +520,13 @@ export const submitVehicleFeedback = mutation({
     if (reservation.end > Date.now()) {
       throw new Error("Le retour sera disponible après la fin de la réservation.");
     }
+    if (!Number.isFinite(args.mileage) || args.mileage < 0) {
+      throw new Error("Kilométrage invalide.");
+    }
 
     await ctx.db.patch(args.reservationId, {
       feedbackSubmittedAt: Date.now(),
+      feedbackMileage: Math.round(args.mileage),
       feedbackFuelRestored: args.fuelRestored,
       feedbackVehicleEmpty: args.vehicleEmpty,
       feedbackVehicleClean: args.vehicleClean,

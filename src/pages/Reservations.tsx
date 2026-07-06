@@ -601,6 +601,7 @@ function MyReservations() {
   const [filter, setFilter] = useState<"all" | "room" | "vehicle">("all");
   const [feedbackTarget, setFeedbackTarget] = useState<MyReservation | null>(null);
   const [feedbackForm, setFeedbackForm] = useState({
+    mileage: "",
     fuelRestored: false,
     vehicleEmpty: false,
     vehicleClean: false,
@@ -634,6 +635,7 @@ function MyReservations() {
   function openVehicleFeedback(reservation: MyReservation) {
     setFeedbackTarget(reservation);
     setFeedbackForm({
+      mileage: "",
       fuelRestored: false,
       vehicleEmpty: false,
       vehicleClean: false,
@@ -644,10 +646,16 @@ function MyReservations() {
 
   async function submitFeedback() {
     if (!feedbackTarget) return;
+    const mileage = Number(feedbackForm.mileage);
+    if (!feedbackForm.mileage.trim() || !Number.isFinite(mileage) || mileage < 0) {
+      alert("Merci de renseigner le kilométrage relevé.");
+      return;
+    }
     setFeedbackSubmitting(true);
     try {
       await submitVehicleFeedback({
         reservationId: feedbackTarget._id as Id<"vehicleReservations">,
+        mileage,
         fuelRestored: feedbackForm.fuelRestored,
         vehicleEmpty: feedbackForm.vehicleEmpty,
         vehicleClean: feedbackForm.vehicleClean,
@@ -731,6 +739,18 @@ function MyReservations() {
               <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(feedbackTarget.start)} → {formatDateTime(feedbackTarget.end)}</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
+              <div className="sm:col-span-3">
+                <Field label="Kilométrage relevé" required>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={feedbackForm.mileage}
+                    onChange={(event) => setFeedbackForm((current) => ({ ...current, mileage: event.target.value }))}
+                    placeholder="Ex. 125430"
+                  />
+                </Field>
+              </div>
               <Checkbox
                 checked={feedbackForm.fuelRestored}
                 onChange={(fuelRestored) => setFeedbackForm((current) => ({ ...current, fuelRestored }))}

@@ -949,6 +949,7 @@ export default defineSchema(
     decidedAt: v.optional(v.number()),
     feedbackRequestedAt: v.optional(v.number()),
     feedbackSubmittedAt: v.optional(v.number()),
+    feedbackMileage: v.optional(v.number()),
     feedbackFuelRestored: v.optional(v.boolean()),
     feedbackVehicleEmpty: v.optional(v.boolean()),
     feedbackVehicleClean: v.optional(v.boolean()),
