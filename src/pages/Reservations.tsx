@@ -68,6 +68,10 @@ function withTime(dayMs: number, time: string): number {
   return date.getTime();
 }
 
+function isVehicleReservable(vehicle: Vehicle) {
+  return vehicle.reservablePro !== false || vehicle.reservablePersonal === true;
+}
+
 export function Reservations() {
   const [searchParams] = useSearchParams();
   const tab = (["rooms", "vehicles", "mine"].includes(searchParams.get("v") ?? "") ? searchParams.get("v") : "rooms") as "rooms" | "vehicles" | "mine";
@@ -196,6 +200,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     return matchesQuery && (minCapacityValue === 0 || (room.capacity ?? 0) >= minCapacityValue);
   });
   const filteredVehicles = (vehicles ?? []).filter((vehicle) => {
+    if (!isVehicleReservable(vehicle)) return false;
     const matchesQuery = [vehicle.name, vehicle.brand, vehicle.model, vehicle.plate, vehicle.kind].filter(Boolean).join(" ").toLowerCase().includes(needle);
     const matchesSeats = minSeatsValue === 0 || (vehicle.seats ?? 0) >= minSeatsValue;
     const matchesUsage = usage === "all" || (usage === "pro" && vehicle.reservablePro !== false) || (usage === "personal" && vehicle.reservablePersonal === true);
@@ -671,7 +676,7 @@ function FilterField({ label, children }: { label: string; children: React.React
 
 /**
  * Photo d'une salle / d'un véhicule. Si l'actif est réservé sur le créneau,
- * l'image est estompée et « Réservé par X le JJ/MM/AA » s'affiche au centre.
+ * l'image est estompée et « Réservé jusqu'au JJ/MM/AA HH:mm par X » s'affiche.
  */
 function AssetImage({
   src,
@@ -685,7 +690,7 @@ function AssetImage({
   unavailableReason?: string | null;
 }) {
   const blockedText = occupied
-    ? `Réservé par ${occupied.userName} le ${format(new Date(occupied.start), "dd/MM/yy", { locale: fr })}`
+    ? `Réservé jusqu'au ${format(new Date(occupied.end), "dd/MM/yy HH:mm", { locale: fr })} par ${occupied.userName}`
     : unavailableReason ?? null;
   return (
     <div className="relative aspect-video bg-[var(--muted)]">

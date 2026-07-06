@@ -379,7 +379,9 @@ export const listVehiclesForSlot = query({
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     ensureRange(args.start, args.end);
     const vehicles = (await ctx.db.query("vehicles").collect()).filter(
-      (vehicle) => vehicle.active,
+      (vehicle) =>
+        vehicle.active &&
+        (vehicle.reservablePro !== false || vehicle.reservablePersonal === true),
     );
     const withPhotos = await resolveVehiclePhotoUrls(ctx, vehicles);
     return await Promise.all(
@@ -409,7 +411,11 @@ export const availableVehicles = query({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     ensureRange(args.start, args.end);
-    const vehicles = (await ctx.db.query("vehicles").collect()).filter((vehicle) => vehicle.active);
+    const vehicles = (await ctx.db.query("vehicles").collect()).filter(
+      (vehicle) =>
+        vehicle.active &&
+        (vehicle.reservablePro !== false || vehicle.reservablePersonal === true),
+    );
     const free: Doc<"vehicles">[] = [];
     for (const vehicle of vehicles) {
       if (await isVehicleFree(ctx, vehicle._id, args.start, args.end)) free.push(vehicle);
