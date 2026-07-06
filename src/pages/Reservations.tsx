@@ -598,16 +598,20 @@ function MyReservations() {
   const cancelRoom = useMutation(api.reservations.cancelRoomReservation);
   const cancelVehicle = useMutation(api.reservations.cancelVehicleReservation);
   const submitVehicleFeedback = useMutation(api.reservations.submitVehicleFeedback);
+  const submitRoomFeedback = useMutation(api.reservations.submitRoomFeedback);
   const [filter, setFilter] = useState<"all" | "room" | "vehicle">("all");
   const [feedbackTarget, setFeedbackTarget] = useState<MyReservation | null>(null);
-  const [feedbackForm, setFeedbackForm] = useState({
+  const emptyFeedback = {
     mileage: "",
     fuelRestored: false,
     vehicleEmpty: false,
     vehicleClean: false,
+    clean: false,
+    tidy: false,
     issues: "",
     notes: "",
-  });
+  };
+  const [feedbackForm, setFeedbackForm] = useState(emptyFeedback);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   if (reservations === undefined) return <FullSpinner label="Chargement de vos réservations..." />;
@@ -632,36 +636,40 @@ function MyReservations() {
     }
   }
 
-  function openVehicleFeedback(reservation: MyReservation) {
+  function openFeedback(reservation: MyReservation) {
     setFeedbackTarget(reservation);
-    setFeedbackForm({
-      mileage: "",
-      fuelRestored: false,
-      vehicleEmpty: false,
-      vehicleClean: false,
-      issues: "",
-      notes: "",
-    });
+    setFeedbackForm(emptyFeedback);
   }
 
   async function submitFeedback() {
     if (!feedbackTarget) return;
-    const mileage = Number(feedbackForm.mileage);
-    if (!feedbackForm.mileage.trim() || !Number.isFinite(mileage) || mileage < 0) {
-      void alertDialog("Merci de renseigner le kilométrage relevé.");
-      return;
-    }
     setFeedbackSubmitting(true);
     try {
-      await submitVehicleFeedback({
-        reservationId: feedbackTarget._id as Id<"vehicleReservations">,
-        mileage,
-        fuelRestored: feedbackForm.fuelRestored,
-        vehicleEmpty: feedbackForm.vehicleEmpty,
-        vehicleClean: feedbackForm.vehicleClean,
-        issues: feedbackForm.issues.trim() || undefined,
-        notes: feedbackForm.notes.trim() || undefined,
-      });
+      if (feedbackTarget.kind === "vehicle") {
+        const mileage = Number(feedbackForm.mileage);
+        if (!feedbackForm.mileage.trim() || !Number.isFinite(mileage) || mileage < 0) {
+          void alertDialog("Merci de renseigner le kilométrage relevé.");
+          setFeedbackSubmitting(false);
+          return;
+        }
+        await submitVehicleFeedback({
+          reservationId: feedbackTarget._id as Id<"vehicleReservations">,
+          mileage,
+          fuelRestored: feedbackForm.fuelRestored,
+          vehicleEmpty: feedbackForm.vehicleEmpty,
+          vehicleClean: feedbackForm.vehicleClean,
+          issues: feedbackForm.issues.trim() || undefined,
+          notes: feedbackForm.notes.trim() || undefined,
+        });
+      } else {
+        await submitRoomFeedback({
+          reservationId: feedbackTarget._id as Id<"roomReservations">,
+          clean: feedbackForm.clean,
+          tidy: feedbackForm.tidy,
+          issues: feedbackForm.issues.trim() || undefined,
+          notes: feedbackForm.notes.trim() || undefined,
+        });
+      }
       setFeedbackTarget(null);
     } catch (error) {
       void alertDialog(error instanceof Error ? error.message : "Impossible d'envoyer le retour.");
@@ -686,9 +694,9 @@ function MyReservations() {
             const past = reservation.end < Date.now();
             const canSendFeedback =
               past &&
-              reservation.kind === "vehicle" &&
-              reservation.status === "approved" &&
-              !reservation.feedbackSubmittedAt;
+              !reservation.feedbackSubmittedAt &&
+              ((reservation.kind === "vehicle" && reservation.status === "approved") ||
+                (reservation.kind === "room" && reservation.status === "confirmed"));
             return (
               <div key={`${reservation.kind}-${reservation._id}`} className={`flex flex-wrap items-center gap-3 p-4 ${past ? "opacity-60" : ""}`}>
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-brand-600">
@@ -712,11 +720,11 @@ function MyReservations() {
                   </Button>
                 ) : null}
                 {canSendFeedback ? (
-                  <Button size="sm" onClick={() => openVehicleFeedback(reservation)}>
+                  <Button size="sm" onClick={() => openFeedback(reservation)}>
                     Faire le retour
                   </Button>
                 ) : null}
-                {past && reservation.kind === "vehicle" && reservation.feedbackSubmittedAt ? (
+                {past && reservation.feedbackSubmittedAt ? (
                   <span className="rounded-full bg-brand-100 px-2.5 py-1 text-xs font-semibold text-brand-800 dark:bg-brand-500/20 dark:text-brand-200">
                     Retour envoyé
                   </span>
@@ -729,7 +737,7 @@ function MyReservations() {
       <Modal
         open={Boolean(feedbackTarget)}
         onClose={() => (feedbackSubmitting ? undefined : setFeedbackTarget(null))}
-        title="Retour véhicule"
+        title={feedbackTarget?.kind === "room" ? "Retour salle" : "Retour véhicule"}
       >
         {feedbackTarget ? (
           <div className="space-y-4">
@@ -738,38 +746,55 @@ function MyReservations() {
               <p className="text-sm text-[var(--muted-foreground)]">{feedbackTarget.label}</p>
               <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(feedbackTarget.start)} → {formatDateTime(feedbackTarget.end)}</p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="sm:col-span-3">
-                <Field label="Kilométrage relevé" required>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={1}
-                    value={feedbackForm.mileage}
-                    onChange={(event) => setFeedbackForm((current) => ({ ...current, mileage: event.target.value }))}
-                    placeholder="Ex. 125430"
-                  />
-                </Field>
+            {feedbackTarget.kind === "vehicle" ? (
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="sm:col-span-3">
+                  <Field label="Kilométrage relevé" required>
+                    <Input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={feedbackForm.mileage}
+                      onChange={(event) => setFeedbackForm((current) => ({ ...current, mileage: event.target.value }))}
+                      placeholder="Ex. 125430"
+                    />
+                  </Field>
+                </div>
+                <Checkbox
+                  checked={feedbackForm.fuelRestored}
+                  onChange={(fuelRestored) => setFeedbackForm((current) => ({ ...current, fuelRestored }))}
+                  label="Essence remise"
+                  description="Le niveau prévu a été rétabli."
+                />
+                <Checkbox
+                  checked={feedbackForm.vehicleEmpty}
+                  onChange={(vehicleEmpty) => setFeedbackForm((current) => ({ ...current, vehicleEmpty }))}
+                  label="Rien laissé"
+                  description="Aucun objet personnel ou matériel oublié."
+                />
+                <Checkbox
+                  checked={feedbackForm.vehicleClean}
+                  onChange={(vehicleClean) => setFeedbackForm((current) => ({ ...current, vehicleClean }))}
+                  label="Véhicule propre"
+                  description="L'état intérieur et extérieur est correct."
+                />
               </div>
-              <Checkbox
-                checked={feedbackForm.fuelRestored}
-                onChange={(fuelRestored) => setFeedbackForm((current) => ({ ...current, fuelRestored }))}
-                label="Essence remise"
-                description="Le niveau prévu a été rétabli."
-              />
-              <Checkbox
-                checked={feedbackForm.vehicleEmpty}
-                onChange={(vehicleEmpty) => setFeedbackForm((current) => ({ ...current, vehicleEmpty }))}
-                label="Rien laissé"
-                description="Aucun objet personnel ou matériel oublié."
-              />
-              <Checkbox
-                checked={feedbackForm.vehicleClean}
-                onChange={(vehicleClean) => setFeedbackForm((current) => ({ ...current, vehicleClean }))}
-                label="Véhicule propre"
-                description="L'état intérieur et extérieur est correct."
-              />
-            </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Checkbox
+                  checked={feedbackForm.clean}
+                  onChange={(clean) => setFeedbackForm((current) => ({ ...current, clean }))}
+                  label="Salle propre"
+                  description="La salle a été laissée propre."
+                />
+                <Checkbox
+                  checked={feedbackForm.tidy}
+                  onChange={(tidy) => setFeedbackForm((current) => ({ ...current, tidy }))}
+                  label="Salle rangée"
+                  description="Le mobilier a été remis en place."
+                />
+              </div>
+            )}
             <Field label="Remarques / incidents constatés">
               <Textarea
                 value={feedbackForm.issues}

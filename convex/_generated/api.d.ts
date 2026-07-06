@@ -33,6 +33,7 @@ import type * as mesoutilsNotifications from "../mesoutilsNotifications.js";
 import type * as messages from "../messages.js";
 import type * as notifications from "../notifications.js";
 import type * as permissions from "../permissions.js";
+import type * as pointeuse from "../pointeuse.js";
 import type * as posts from "../posts.js";
 import type * as processes from "../processes.js";
 import type * as requestAnalysis from "../requestAnalysis.js";
@@ -77,6 +78,7 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   notifications: typeof notifications;
   permissions: typeof permissions;
+  pointeuse: typeof pointeuse;
   posts: typeof posts;
   processes: typeof processes;
   requestAnalysis: typeof requestAnalysis;

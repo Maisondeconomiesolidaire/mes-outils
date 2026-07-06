@@ -8,6 +8,7 @@ import {
   DoorOpen,
   Home,
   MessageCircle,
+  MessageSquareText,
   Newspaper,
   PartyPopper,
   ShieldCheck,
@@ -397,11 +398,13 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
     { key: "vehicles", label: "Véhicules", icon: CarFront },
     { key: "tasks", label: "Maintenance", icon: Wrench },
     { key: "reservations", label: "Réservations", icon: CalendarClock },
+    { key: "remarques", label: "Remarques", icon: MessageSquareText },
     { key: "calendar", label: "Calendrier", icon: CalendarDays },
   ],
   "/salles": [
     { key: "rooms", label: "Salles", icon: DoorOpen },
     { key: "reservations", label: "Réservations", icon: CalendarClock },
+    { key: "remarques", label: "Remarques", icon: MessageSquareText },
     { key: "calendar", label: "Calendrier", icon: CalendarDays },
   ],
 };

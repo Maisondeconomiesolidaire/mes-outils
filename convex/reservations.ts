@@ -477,6 +477,7 @@ export const listMyReservations = query({
           start: reservation.start,
           end: reservation.end,
           status: "confirmed" as const,
+          feedbackSubmittedAt: reservation.feedbackSubmittedAt,
         })),
       ...vehicleRes
         .filter((reservation) => reservation.clerkId === me || reservation.bookedForClerkId === me)
@@ -570,6 +571,149 @@ export const requestVehicleFeedbackForPastReservations = internalMutation({
       });
       delay += 700;
     }
+  },
+});
+
+// ─── Retour (remarques) sur les réservations de salle ────────────────────────
+
+export const submitRoomFeedback = mutation({
+  args: {
+    reservationId: v.id("roomReservations"),
+    clean: v.boolean(),
+    tidy: v.boolean(),
+    issues: v.optional(v.string()),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const identity = await requireUser(ctx);
+    const reservation = await ctx.db.get(args.reservationId);
+    if (!reservation) throw new Error("Réservation introuvable.");
+    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    if (recipientClerkId !== identity.subject && reservation.clerkId !== identity.subject) {
+      throw new Error("Retour non autorisé.");
+    }
+    if (reservation.end > Date.now()) {
+      throw new Error("Le retour sera disponible après la fin de la réservation.");
+    }
+    await ctx.db.patch(args.reservationId, {
+      feedbackSubmittedAt: Date.now(),
+      feedbackClean: args.clean,
+      feedbackTidy: args.tidy,
+      feedbackIssues: args.issues?.trim() || undefined,
+      feedbackNotes: args.notes?.trim() || undefined,
+    });
+  },
+});
+
+/** Cron : demande un retour sur les réservations de salle terminées. */
+export const requestRoomFeedbackForPastReservations = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const reservations = await ctx.db
+      .query("roomReservations")
+      .withIndex("by_start")
+      .order("desc")
+      .take(200);
+    let delay = 0;
+
+    for (const reservation of reservations) {
+      if (reservation.end > now) continue;
+      if (reservation.feedbackRequestedAt || reservation.feedbackSubmittedAt) continue;
+
+      const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+      const email = await emailForClerkId(ctx, recipientClerkId);
+      const room = await ctx.db.get(reservation.roomId);
+      await ctx.db.patch(reservation._id, { feedbackRequestedAt: now });
+
+      if (!email) continue;
+      await ctx.scheduler.runAfter(delay, internal.mesoutilsEmails.sendRoomFeedbackRequestEmail, {
+        email,
+        name: reservation.userName,
+        roomName: room?.name ?? "Salle",
+        roomImageUrl:
+          (room?.photo ? await ctx.storage.getUrl(room.photo) : room?.photoUrl) ?? undefined,
+        label: reservation.title,
+        start: reservation.start,
+        end: reservation.end,
+      });
+      delay += 700;
+    }
+  },
+});
+
+// ─── Remarques (retours) pour les encadrants ─────────────────────────────────
+
+export const listVehicleRemarks = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "mesoutils:gotravaux", "read");
+    const reservations = (
+      await ctx.db.query("vehicleReservations").order("desc").take(300)
+    ).filter((r) => r.feedbackSubmittedAt);
+    const vehicles = await ctx.db.query("vehicles").collect();
+    const byId = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
+
+    return await Promise.all(
+      reservations
+        .sort((a, b) => (b.feedbackSubmittedAt ?? 0) - (a.feedbackSubmittedAt ?? 0))
+        .map(async (r) => {
+          const vehicle = byId.get(String(r.vehicleId)) ?? null;
+          return {
+            _id: r._id,
+            assetName: vehicle?.name ?? "Véhicule",
+            photoUrl:
+              (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ?? null,
+            userName: r.userName,
+            label: r.purpose,
+            start: r.start,
+            end: r.end,
+            submittedAt: r.feedbackSubmittedAt ?? 0,
+            mileage: r.feedbackMileage,
+            fuelRestored: r.feedbackFuelRestored,
+            vehicleEmpty: r.feedbackVehicleEmpty,
+            vehicleClean: r.feedbackVehicleClean,
+            issues: r.feedbackIssues,
+            notes: r.feedbackNotes,
+          };
+        }),
+    );
+  },
+});
+
+export const listRoomRemarks = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "mesoutils:salles", "read");
+    const reservations = (
+      await ctx.db.query("roomReservations").order("desc").take(300)
+    ).filter((r) => r.feedbackSubmittedAt);
+    const rooms = await ctx.db.query("rooms").collect();
+    const byId = new Map(rooms.map((room) => [String(room._id), room]));
+
+    return await Promise.all(
+      reservations
+        .sort((a, b) => (b.feedbackSubmittedAt ?? 0) - (a.feedbackSubmittedAt ?? 0))
+        .map(async (r) => {
+          const room = byId.get(String(r.roomId)) ?? null;
+          return {
+            _id: r._id,
+            assetName: room?.name ?? "Salle",
+            photoUrl:
+              (room?.photo ? await ctx.storage.getUrl(room.photo) : room?.photoUrl) ?? null,
+            userName: r.userName,
+            label: r.title,
+            start: r.start,
+            end: r.end,
+            submittedAt: r.feedbackSubmittedAt ?? 0,
+            clean: r.feedbackClean,
+            tidy: r.feedbackTidy,
+            issues: r.feedbackIssues,
+            notes: r.feedbackNotes,
+          };
+        }),
+    );
   },
 });
 

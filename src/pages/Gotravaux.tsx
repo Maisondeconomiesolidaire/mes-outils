@@ -34,6 +34,7 @@ import { useUpload } from "../lib/useUpload";
 import { formatDate, formatDateTime, formatDateTimeWithDay, relativeUnits } from "../lib/format";
 import { canAccess } from "../lib/permissions";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
+import { ReservationRemarks } from "../components/ReservationRemarks";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { confirmPermanentDelete } from "../lib/confirm";
 
@@ -236,6 +237,7 @@ export function Gotravaux() {
 
         {sub === "tasks" ? <TaskList tasks={tasks} onUpdate={updateTask} canEdit={canEdit} /> : null}
         {sub === "reservations" && canSeeReservations ? <VehicleReservationsPanel /> : null}
+        {sub === "remarques" ? <ReservationRemarks kind="vehicle" /> : null}
         {sub === "calendar" ? (
           <FleetCalendar
             vehicles={vehicles}

@@ -16,6 +16,7 @@ import { formatDate, formatDateTime } from "../lib/format";
 import { canAccess } from "../lib/permissions";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
+import { ReservationRemarks } from "../components/ReservationRemarks";
 import { confirmPermanentDelete } from "../lib/confirm";
 
 type Room = {
@@ -193,6 +194,7 @@ export function Salles() {
         ) : null}
 
         {sub === "reservations" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} mode="agenda" /> : null}
+        {sub === "remarques" ? <ReservationRemarks kind="room" /> : null}
         {sub === "calendar" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} mode="calendar" /> : null}
       </div>
 

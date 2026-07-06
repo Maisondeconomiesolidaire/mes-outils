@@ -17,4 +17,10 @@ crons.hourly(
   internal.reservations.requestVehicleFeedbackForPastReservations,
 );
 
+crons.hourly(
+  "emails retour reservations salles",
+  { minuteUTC: 25 },
+  internal.reservations.requestRoomFeedbackForPastReservations,
+);
+
 export default crons;
