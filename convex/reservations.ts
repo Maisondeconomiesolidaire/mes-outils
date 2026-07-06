@@ -463,8 +463,35 @@ export const listMyReservations = query({
       ctx.db.query("rooms").collect(),
       ctx.db.query("vehicles").collect(),
     ]);
-    const roomName = new Map(rooms.map((room) => [String(room._id), room.name]));
-    const vehicleName = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle.name]));
+    const roomInfo = new Map(
+      await Promise.all(
+        rooms.map(
+          async (room) =>
+            [
+              String(room._id),
+              {
+                name: room.name,
+                photoUrl: (room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl) ?? null,
+              },
+            ] as const,
+        ),
+      ),
+    );
+    const vehicleInfo = new Map(
+      await Promise.all(
+        vehicles.map(
+          async (vehicle) =>
+            [
+              String(vehicle._id),
+              {
+                name: vehicle.name,
+                photoUrl:
+                  (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle.photoUrl) ?? null,
+              },
+            ] as const,
+        ),
+      ),
+    );
 
     const mine = [
       ...roomRes
@@ -472,7 +499,9 @@ export const listMyReservations = query({
         .map((reservation) => ({
           _id: String(reservation._id),
           kind: "room" as const,
-          assetName: roomName.get(String(reservation.roomId)) ?? "Salle",
+          assetName: roomInfo.get(String(reservation.roomId))?.name ?? "Salle",
+          photoUrl: roomInfo.get(String(reservation.roomId))?.photoUrl ?? null,
+          usageType: undefined as "pro" | "personal" | undefined,
           label: reservation.title,
           start: reservation.start,
           end: reservation.end,
@@ -484,7 +513,9 @@ export const listMyReservations = query({
         .map((reservation) => ({
           _id: String(reservation._id),
           kind: "vehicle" as const,
-          assetName: vehicleName.get(String(reservation.vehicleId)) ?? "Véhicule",
+          assetName: vehicleInfo.get(String(reservation.vehicleId))?.name ?? "Véhicule",
+          photoUrl: vehicleInfo.get(String(reservation.vehicleId))?.photoUrl ?? null,
+          usageType: reservation.usageType,
           label: reservation.purpose,
           start: reservation.start,
           end: reservation.end,
@@ -500,7 +531,7 @@ export const submitVehicleFeedback = mutation({
   args: {
     reservationId: v.id("vehicleReservations"),
     mileage: v.number(),
-    fuelRestored: v.boolean(),
+    fuelRestored: v.optional(v.boolean()),
     vehicleEmpty: v.boolean(),
     vehicleClean: v.boolean(),
     issues: v.optional(v.string()),
@@ -528,7 +559,8 @@ export const submitVehicleFeedback = mutation({
     await ctx.db.patch(args.reservationId, {
       feedbackSubmittedAt: Date.now(),
       feedbackMileage: Math.round(args.mileage),
-      feedbackFuelRestored: args.fuelRestored,
+      feedbackFuelRestored:
+        reservation.usageType === "personal" ? Boolean(args.fuelRestored) : undefined,
       feedbackVehicleEmpty: args.vehicleEmpty,
       feedbackVehicleClean: args.vehicleClean,
       feedbackIssues: args.issues?.trim() || undefined,
@@ -667,6 +699,7 @@ export const listVehicleRemarks = query({
               (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ?? null,
             userName: r.userName,
             label: r.purpose,
+            usageType: r.usageType,
             start: r.start,
             end: r.end,
             submittedAt: r.feedbackSubmittedAt ?? 0,

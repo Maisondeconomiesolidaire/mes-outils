@@ -14,6 +14,7 @@ type Remark = {
   start: number;
   end: number;
   submittedAt: number;
+  usageType?: "pro" | "personal";
   mileage?: number;
   fuelRestored?: boolean;
   vehicleEmpty?: boolean;
@@ -105,7 +106,9 @@ export function ReservationRemarks({ kind }: { kind: "vehicle" | "room" }) {
                     {remark.mileage.toLocaleString("fr-FR")} km
                   </span>
                 ) : null}
-                <Check3 label="Essence remise" value={remark.fuelRestored} />
+                {remark.usageType === "personal" ? (
+                  <Check3 label="Essence remise" value={remark.fuelRestored} />
+                ) : null}
                 <Check3 label="Rien laissé" value={remark.vehicleEmpty} />
                 <Check3 label="Véhicule propre" value={remark.vehicleClean} />
               </>

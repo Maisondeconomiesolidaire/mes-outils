@@ -586,6 +586,8 @@ type MyReservation = {
   _id: string;
   kind: "room" | "vehicle";
   assetName: string;
+  photoUrl?: string | null;
+  usageType?: "pro" | "personal";
   label: string;
   start: number;
   end: number;
@@ -655,7 +657,7 @@ function MyReservations() {
         await submitVehicleFeedback({
           reservationId: feedbackTarget._id as Id<"vehicleReservations">,
           mileage,
-          fuelRestored: feedbackForm.fuelRestored,
+          fuelRestored: feedbackTarget.usageType === "personal" ? feedbackForm.fuelRestored : undefined,
           vehicleEmpty: feedbackForm.vehicleEmpty,
           vehicleClean: feedbackForm.vehicleClean,
           issues: feedbackForm.issues.trim() || undefined,
@@ -699,8 +701,14 @@ function MyReservations() {
                 (reservation.kind === "room" && reservation.status === "confirmed"));
             return (
               <div key={`${reservation.kind}-${reservation._id}`} className={`flex flex-wrap items-center gap-3 p-4 ${past ? "opacity-60" : ""}`}>
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-brand-600">
-                  {reservation.kind === "room" ? <DoorOpen className="h-4 w-4" /> : <CarFront className="h-4 w-4" />}
+                <span className="h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-[var(--accent)]">
+                  {reservation.photoUrl ? (
+                    <img src={reservation.photoUrl} alt="" className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center text-brand-600">
+                      {reservation.kind === "room" ? <DoorOpen className="h-4 w-4" /> : <CarFront className="h-4 w-4" />}
+                    </span>
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -760,12 +768,14 @@ function MyReservations() {
                     />
                   </Field>
                 </div>
-                <Checkbox
-                  checked={feedbackForm.fuelRestored}
-                  onChange={(fuelRestored) => setFeedbackForm((current) => ({ ...current, fuelRestored }))}
-                  label="Essence remise"
-                  description="Le niveau prévu a été rétabli."
-                />
+                {feedbackTarget.usageType === "personal" ? (
+                  <Checkbox
+                    checked={feedbackForm.fuelRestored}
+                    onChange={(fuelRestored) => setFeedbackForm((current) => ({ ...current, fuelRestored }))}
+                    label="Essence remise"
+                    description="Le niveau prévu a été rétabli."
+                  />
+                ) : null}
                 <Checkbox
                   checked={feedbackForm.vehicleEmpty}
                   onChange={(vehicleEmpty) => setFeedbackForm((current) => ({ ...current, vehicleEmpty }))}
