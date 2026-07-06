@@ -122,13 +122,13 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 
   if (posts === undefined) return <FullSpinner label="Chargement..." />;
 
-  function removePostWithConfirmation(postId: Id<"posts">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce post ?")) return;
+  async function removePostWithConfirmation(postId: Id<"posts">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce post ?"))) return;
     void removePost({ postId });
   }
 
-  function removeCommentWithConfirmation(commentId: Id<"postComments">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce commentaire ?")) return;
+  async function removeCommentWithConfirmation(commentId: Id<"postComments">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce commentaire ?"))) return;
     void removeComment({ commentId });
   }
 
@@ -574,8 +574,8 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
 
   if (events === undefined) return <FullSpinner label="Chargement..." />;
 
-  function removeEventWithConfirmation(eventId: Id<"events">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cet événement ?")) return;
+  async function removeEventWithConfirmation(eventId: Id<"events">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cet événement ?"))) return;
     void removeEvent({ eventId });
   }
 
@@ -832,8 +832,8 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
 
   if (deals === undefined) return <FullSpinner label="Chargement..." />;
 
-  function removeDealWithConfirmation(dealId: Id<"dealPosts">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce bon plan ?")) return;
+  async function removeDealWithConfirmation(dealId: Id<"dealPosts">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce bon plan ?"))) return;
     void removeDeal({ dealId });
   }
 

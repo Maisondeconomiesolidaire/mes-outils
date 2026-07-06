@@ -306,8 +306,8 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
     byDay.set(key, [...(byDay.get(key) ?? []), reservation]);
   }
 
-  function cancelReservationWithConfirmation(reservationId: Id<"roomReservations">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de salle ?")) return;
+  async function cancelReservationWithConfirmation(reservationId: Id<"roomReservations">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de salle ?"))) return;
     void cancel({ reservationId });
   }
 

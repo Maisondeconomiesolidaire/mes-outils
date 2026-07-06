@@ -567,8 +567,8 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
     }
   }
 
-  function removeDocumentWithConfirmation(documentId: Id<"vehicleDocuments">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce document ?")) return;
+  async function removeDocumentWithConfirmation(documentId: Id<"vehicleDocuments">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement ce document ?"))) return;
     void removeDocument({ documentId });
   }
 
@@ -866,8 +866,8 @@ function FleetCalendar({
     setSelectedReservationId(null);
   }
 
-  function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?")) return;
+  async function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?"))) return;
     void cancel({ reservationId });
     setSelectedReservationId(null);
   }
@@ -1093,8 +1093,8 @@ function VehicleReservationsPanel() {
     setSelectedId(null);
   }
 
-  function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?")) return;
+  async function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?"))) return;
     void cancel({ reservationId });
     setSelectedId(null);
   }

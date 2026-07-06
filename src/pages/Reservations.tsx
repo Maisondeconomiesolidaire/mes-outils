@@ -20,7 +20,7 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { formatDateTime } from "../lib/format";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
-import { confirmPermanentDelete } from "../lib/confirm";
+import { confirmPermanentDelete, alertDialog } from "../lib/confirm";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -622,9 +622,9 @@ function MyReservations() {
     rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
   };
 
-  function cancelReservationWithConfirmation(reservation: MyReservation) {
+  async function cancelReservationWithConfirmation(reservation: MyReservation) {
     const label = reservation.kind === "room" ? "cette réservation de salle" : "cette réservation de véhicule";
-    if (!confirmPermanentDelete(`Êtes-vous sûr(e) de vouloir supprimer définitivement ${label} ?`)) return;
+    if (!(await confirmPermanentDelete(`Êtes-vous sûr(e) de vouloir supprimer définitivement ${label} ?`))) return;
     if (reservation.kind === "room") {
       void cancelRoom({ reservationId: reservation._id as Id<"roomReservations"> });
     } else {
@@ -648,7 +648,7 @@ function MyReservations() {
     if (!feedbackTarget) return;
     const mileage = Number(feedbackForm.mileage);
     if (!feedbackForm.mileage.trim() || !Number.isFinite(mileage) || mileage < 0) {
-      alert("Merci de renseigner le kilométrage relevé.");
+      void alertDialog("Merci de renseigner le kilométrage relevé.");
       return;
     }
     setFeedbackSubmitting(true);
@@ -664,7 +664,7 @@ function MyReservations() {
       });
       setFeedbackTarget(null);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Impossible d'envoyer le retour.");
+      void alertDialog(error instanceof Error ? error.message : "Impossible d'envoyer le retour.");
     } finally {
       setFeedbackSubmitting(false);
     }

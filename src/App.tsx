@@ -10,9 +10,11 @@ import { Notifications } from "./pages/Notifications";
 import { Portail } from "./pages/Portail";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
+import { ConfirmRoot } from "./lib/confirm";
 
 export default function App() {
   return (
+    <>
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/sign-in/*" element={<Portail />} />
@@ -78,5 +80,7 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    <ConfirmRoot />
+    </>
   );
 }

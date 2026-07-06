@@ -47,7 +47,7 @@ export function Compte() {
 
   async function removePhoto() {
     if (!user) return;
-    if (!confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement votre photo de profil ?")) return;
+    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement votre photo de profil ?"))) return;
     setError(null);
     setUploadingPhoto(true);
     try {
