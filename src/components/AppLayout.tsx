@@ -1,4 +1,4 @@
-import { Link, Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useQuery } from "convex/react";
 import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
@@ -60,11 +60,29 @@ export function AppLayout() {
  */
 function AuthPanel() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isSignIn = location.pathname.startsWith("/sign-in");
   const isSignUp = location.pathname.startsWith("/sign-up");
 
   if (!isSignIn && !isSignUp) {
-    return <Navigate to="/sign-in" replace />;
+    return (
+      <div className="grid gap-3">
+        <button
+          type="button"
+          onClick={() => navigate("/sign-in")}
+          className="rounded-2xl bg-brand-500 px-5 py-4 text-base font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-brand-600"
+        >
+          J'ai déjà un compte, me connecter
+        </button>
+        <button
+          type="button"
+          onClick={() => navigate("/sign-up")}
+          className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 text-base font-bold text-[var(--foreground)] shadow-sm transition hover:-translate-y-0.5 hover:border-brand-500/60 hover:bg-[var(--accent)]"
+        >
+          Je m'inscris
+        </button>
+      </div>
+    );
   }
 
   // On passe aussi l'apparence directement aux composants Clerk :
