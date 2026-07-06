@@ -155,6 +155,21 @@ function formatRange(start: number, end: number) {
   return `${startDay} ${timeFmt.format(new Date(start))} → ${endDay} ${timeFmt.format(new Date(end))}`;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendToEachRecipient(
+  recipients: readonly string[],
+  subject: string,
+  html: string,
+) {
+  for (const [index, email] of recipients.entries()) {
+    if (index > 0) await sleep(700);
+    await resendSend(email, subject, html, FROM);
+  }
+}
+
 // ─── Réservations (salles & véhicules) ───────────────────────────────────────
 
 type ReservationState =
@@ -413,11 +428,10 @@ export const sendRoomReservationToManagers = internalAction({
       `,
     });
 
-    await resendSend(
+    await sendToEachRecipient(
       ROOM_RESERVATION_MANAGER_EMAILS,
       `Réservation de salle · ${args.roomName} (${args.requesterName})`,
       html,
-      FROM,
     );
   },
 });

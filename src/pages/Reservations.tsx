@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -34,13 +34,20 @@ const ROOM_USAGES = [
   "Autre",
 ] as const;
 
-/** Heures proposées (pas de 30 min, 06:00 → 22:00). */
-const TIME_OPTIONS = Array.from({ length: 33 }, (_, index) => {
+const FULL_DAY_START_TIME = "00:00";
+const FULL_DAY_END_TIME = "23:59";
+
+/** Heures proposées : journée entière + pas de 30 min, 06:00 → 22:00. */
+const TIME_OPTIONS = [
+  FULL_DAY_START_TIME,
+  ...Array.from({ length: 33 }, (_, index) => {
   const minutes = 6 * 60 + index * 30;
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-});
+  }),
+  FULL_DAY_END_TIME,
+];
 
 type Occupied = { userName: string; start: number; end: number } | null;
 type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: string; buildingLabel?: string; capacity?: number; photoUrl?: string | null; occupiedBy?: Occupied };
@@ -87,6 +94,12 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const [endTime, setEndTime] = useState("10:00");
   const [fullDay, setFullDay] = useState(false);
 
+  useEffect(() => {
+    if (!fullDay) return;
+    setStartTime(FULL_DAY_START_TIME);
+    setEndTime(FULL_DAY_END_TIME);
+  }, [fullDay]);
+
   function handleDayClick(day: Date) {
     const clicked = startOfDayMs(day);
     setDays((current) => {
@@ -99,10 +112,10 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   }
 
   const range = useMemo(() => {
-    const start = fullDay ? days.start : withTime(days.start, startTime);
-    const end = fullDay ? withTime(days.end, "23:59") : withTime(days.end, endTime);
+    const start = withTime(days.start, startTime);
+    const end = withTime(days.end, endTime);
     return { start, end };
-  }, [days, startTime, endTime, fullDay]);
+  }, [days, startTime, endTime]);
   const rangeValid = range.start < range.end;
 
   const durationDays = Math.round((days.end - days.start) / 86_400_000) + 1;
@@ -198,70 +211,71 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     <div className="space-y-5">
       {/* Calendrier : les réservations existantes s'affichent, et on clique
           directement sur le jour de début puis le jour de fin. */}
-      <Agenda tab={tab} days={days} onDayClick={handleDayClick} />
-
-      {/* Créneau sélectionné : résumé + heures. */}
-      <div className="premium-panel space-y-4 rounded-2xl p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3.5 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
-            <CalendarCheck className="h-4 w-4" />
-            {summary}
-          </span>
-          <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
-            {durationDays} jour{durationDays > 1 ? "s" : ""}
-          </span>
-          <p className="w-full text-xs text-[var(--muted-foreground)] sm:w-auto">
-            Cliquez sur un jour du calendrier (début), puis un second (fin). Un seul clic = ce jour uniquement.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-end gap-3">
-          <FilterField label="Heure de début">
-            <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
-          </FilterField>
-          <FilterField label="Heure de fin">
-            <TimeSelect value={endTime} onChange={setEndTime} disabled={fullDay} />
-          </FilterField>
-          <div className="pb-2">
-            <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
-          </div>
-          {!rangeValid ? (
-            <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
-              L'heure de fin doit être après l'heure de début.
+      <Agenda tab={tab} days={days} onDayClick={handleDayClick}>
+        {/* Créneau sélectionné : résumé + heures, volontairement dans le même
+            panneau que le calendrier pour montrer que les deux sont liés. */}
+        <div className="space-y-4 border-t border-[var(--border)] pt-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3.5 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
+              <CalendarCheck className="h-4 w-4" />
+              {summary}
+            </span>
+            <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
+              {durationDays} jour{durationDays > 1 ? "s" : ""}
+            </span>
+            <p className="w-full text-xs text-[var(--muted-foreground)] sm:w-auto">
+              Cliquez sur un jour du calendrier (début), puis un second (fin). Un seul clic = ce jour uniquement.
             </p>
-          ) : null}
-        </div>
+          </div>
 
-        <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
-          <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
-            <Search className="h-4 w-4 text-brand-600" />
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "rooms" ? "Rechercher une salle" : "Rechercher un véhicule"} className="w-full bg-transparent text-sm font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]" />
-          </label>
-          {tab === "vehicles" ? (
-            <>
-              <FilterField label="Places min.">
-                <select value={minSeats} onChange={(e) => setMinSeats(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
-                  <option value="">Toutes</option>{[2, 3, 5, 7, 9].map((n) => <option key={n} value={n}>{n}+</option>)}
+          <div className="flex flex-wrap items-end gap-3">
+            <FilterField label="Heure de début">
+              <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
+            </FilterField>
+            <FilterField label="Heure de fin">
+              <TimeSelect value={endTime} onChange={setEndTime} disabled={fullDay} />
+            </FilterField>
+            <div className="pb-2">
+              <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
+            </div>
+            {!rangeValid ? (
+              <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                L'heure de fin doit être après l'heure de début.
+              </p>
+            ) : null}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
+            <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
+              <Search className="h-4 w-4 text-brand-600" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={tab === "rooms" ? "Rechercher une salle" : "Rechercher un véhicule"} className="w-full bg-transparent text-sm font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]" />
+            </label>
+            {tab === "vehicles" ? (
+              <>
+                <FilterField label="Places min.">
+                  <select value={minSeats} onChange={(e) => setMinSeats(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
+                    <option value="">Toutes</option>{[2, 3, 5, 7, 9].map((n) => <option key={n} value={n}>{n}+</option>)}
+                  </select>
+                </FilterField>
+                <FilterField label="Usage">
+                  <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
+                    {([{ key: "all", label: "Tous" }, { key: "pro", label: "Pro" }, { key: "personal", label: "Perso" }] as const).map((o) => (
+                      <button key={o.key} type="button" onClick={() => setUsage(o.key)} className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${usage === o.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}>{o.label}</button>
+                    ))}
+                  </div>
+                </FilterField>
+              </>
+            ) : (
+              <FilterField label="Capacité min.">
+                <select value={minCapacity} onChange={(e) => setMinCapacity(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
+                  <option value="">Toutes</option>{[2, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n}+ pers.</option>)}
                 </select>
               </FilterField>
-              <FilterField label="Usage">
-                <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
-                  {([{ key: "all", label: "Tous" }, { key: "pro", label: "Pro" }, { key: "personal", label: "Perso" }] as const).map((o) => (
-                    <button key={o.key} type="button" onClick={() => setUsage(o.key)} className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${usage === o.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}>{o.label}</button>
-                  ))}
-                </div>
-              </FilterField>
-            </>
-          ) : (
-            <FilterField label="Capacité min.">
-              <select value={minCapacity} onChange={(e) => setMinCapacity(e.target.value)} className="h-10 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-medium text-[var(--foreground)] outline-none focus:border-brand-500">
-                <option value="">Toutes</option>{[2, 5, 10, 20, 50].map((n) => <option key={n} value={n}>{n}+ pers.</option>)}
-              </select>
-            </FilterField>
-          )}
-          <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{freeCount} disponible{freeCount > 1 ? "s" : ""}</span>
+            )}
+            <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{freeCount} disponible{freeCount > 1 ? "s" : ""}</span>
+          </div>
         </div>
-      </div>
+      </Agenda>
 
       {!rangeValid ? (
         <EmptyState icon={<Clock className="h-8 w-8" />} title="Créneau invalide" description="Corrigez les heures de début et de fin pour voir les disponibilités." />
@@ -432,7 +446,17 @@ type ReservationDetail = {
   pending?: boolean;
 };
 
-function Agenda({ tab, days, onDayClick }: { tab: "rooms" | "vehicles"; days: DaySelection; onDayClick: (day: Date) => void }) {
+function Agenda({
+  tab,
+  days,
+  onDayClick,
+  children,
+}: {
+  tab: "rooms" | "vehicles";
+  days: DaySelection;
+  onDayClick: (day: Date) => void;
+  children?: ReactNode;
+}) {
   const navigate = useNavigate();
   const { user } = useUser();
   const meId = user?.id ?? null;
@@ -508,6 +532,7 @@ function Agenda({ tab, days, onDayClick }: { tab: "rooms" | "vehicles"; days: Da
         disabledBefore={Date.now()}
         compact
       />
+      {children}
 
       <Modal open={Boolean(active)} onClose={() => setDetailId(null)} title="Détail de la réservation">
         {active ? (
