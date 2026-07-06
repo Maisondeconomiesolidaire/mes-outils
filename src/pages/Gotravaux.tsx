@@ -735,6 +735,16 @@ type AgendaEntry =
       label: string;
       sublabel: string;
       tone: "service";
+    }
+  | {
+      id: string;
+      kind: "control";
+      vehicle: Vehicle;
+      date: number;
+      endDate?: number;
+      label: string;
+      sublabel: string;
+      tone: "control";
     };
 
 function FleetCalendar({
@@ -801,12 +811,32 @@ function FleetCalendar({
       tone: "service",
     });
   }
+  for (const vehicle of vehicles) {
+    const controls = [
+      { key: "technical", label: "Contrôle technique", date: vehicle.technicalControlDate },
+      { key: "pollution", label: "Contrôle pollution", date: vehicle.pollutionControlDate },
+    ] as const;
+    for (const control of controls) {
+      const date = dateStringToLocalTimestamp(control.date);
+      if (!date) continue;
+      entries.push({
+        id: `control-${control.key}-${vehicle._id}`,
+        kind: "control",
+        vehicle,
+        date,
+        label: `${control.label} · ${vehicle.name}`,
+        sublabel: [vehicle.plate, vehicle.brand, vehicle.model].filter(Boolean).join(" · "),
+        tone: "control",
+      });
+    }
+  }
 
   const toneStyles = {
     reservation: "border-l-brand-500",
     maintenance: "border-l-amber-500",
     pending: "border-l-sky-500",
     service: "border-l-violet-500",
+    control: "border-l-rose-500",
   };
   const calendarEvents: CalendarEvent[] = entries.map((entry) => ({
     id: entry.id,
@@ -821,6 +851,8 @@ function FleetCalendar({
           ? "sky"
           : entry.tone === "service"
             ? "violet"
+            : entry.tone === "control"
+              ? "rose"
             : "brand",
   }));
   const selectedDayEntries = entries
@@ -846,6 +878,7 @@ function FleetCalendar({
     setSelectedDay(startOfDayTimestamp((day ?? new Date(entry.date)).getTime()));
     if (entry.kind === "reservation") setSelectedReservationId(entry.reservation._id);
     else if (entry.kind === "service") setSelectedServiceId(entry.service._id);
+    else if (entry.kind === "control") onOpenVehicle(entry.vehicle._id);
     else onOpenVehicle(entry.task.vehicleId);
   }
 
@@ -862,7 +895,7 @@ function FleetCalendar({
           <p className="text-sm font-bold capitalize text-[var(--foreground)]">{formatDate(selectedDay)}</p>
         </div>
         {selectedDayEntries.length === 0 ? (
-          <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Aucune réservation ou maintenance sur cette journée." />
+          <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Aucune réservation, maintenance, prestation ou contrôle sur cette journée." />
         ) : (
           <div className="divide-y divide-[var(--border)]">
             {selectedDayEntries.map((entry) => (
@@ -881,6 +914,10 @@ function FleetCalendar({
                 ) : entry.kind === "service" ? (
                   <Button size="sm" variant="secondary" onClick={() => setSelectedServiceId(entry.service._id)}>
                     <Info className="h-4 w-4" />Détails
+                  </Button>
+                ) : entry.kind === "control" ? (
+                  <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.vehicle._id)}>
+                    <Info className="h-4 w-4" />Véhicule
                   </Button>
                 ) : (
                   <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -1022,6 +1059,13 @@ function endOfDayTimestamp(input: number) {
   const date = new Date(input);
   date.setHours(23, 59, 59, 999);
   return date.getTime();
+}
+
+function dateStringToLocalTimestamp(value?: string) {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day, 9, 0, 0, 0).getTime();
 }
 
 function overlapsDay(start: number, end: number | undefined, dayStart: number) {

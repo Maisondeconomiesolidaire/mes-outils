@@ -1,17 +1,22 @@
 import { ArrowUpRight, Lock } from "lucide-react";
+import { Navigate, useLocation } from "react-router-dom";
 import { EmptyState } from "../components/ui/EmptyState";
-import { APPS, appCanAccess } from "../lib/permissions";
+import { APPS, appCanAccess, canAccess } from "../lib/permissions";
 import { usePermissionsAccess } from "../components/RequirePermission";
 import { cn } from "../lib/cn";
 
 export function Portail() {
   const access = usePermissionsAccess();
+  const location = useLocation();
 
   const visibleApps = APPS.filter((app) =>
     app.comingSoon ? access?.isAdmin : appCanAccess(access, app.key),
   );
 
   if (!access) return null;
+  if (location.pathname === "/" && canAccess(access, "mesoutils:actualites", "read")) {
+    return <Navigate to="/actualites" replace />;
+  }
 
   return (
     <div>
