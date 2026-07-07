@@ -14,7 +14,7 @@ import {
 } from "date-fns";
 import { fr } from "date-fns/locale";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "../../lib/cn";
 
 const WEEKDAYS = ["lun", "mar", "mer", "jeu", "ven", "sam", "dim"];
@@ -34,6 +34,7 @@ export function CalendarBoard({
   rangeEnd,
   events = [],
   onSelect,
+  onDoubleSelect,
   onEventClick,
   compact = false,
   disabledBefore,
@@ -43,11 +44,18 @@ export function CalendarBoard({
   rangeEnd?: number | null;
   events?: CalendarEvent[];
   onSelect?: (day: Date) => void;
+  onDoubleSelect?: (day: Date) => void;
   onEventClick?: (id: string, day?: Date) => void;
   compact?: boolean;
   disabledBefore?: number | null;
 }) {
   const [viewMonth, setViewMonth] = useState(() => new Date(selected ?? rangeStart ?? Date.now()));
+  const selectTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (selectTimer.current) window.clearTimeout(selectTimer.current);
+    };
+  }, []);
   const days = useMemo(
     () =>
       eachDayOfInterval({
@@ -129,7 +137,24 @@ export function CalendarBoard({
               key={day.toISOString()}
               type="button"
               onClick={() => {
-                if (!disabled) onSelect?.(day);
+                if (disabled) return;
+                if (onDoubleSelect) {
+                  if (selectTimer.current) window.clearTimeout(selectTimer.current);
+                  selectTimer.current = window.setTimeout(() => {
+                    selectTimer.current = null;
+                    onSelect?.(day);
+                  }, 220);
+                  return;
+                }
+                onSelect?.(day);
+              }}
+              onDoubleClick={() => {
+                if (disabled || !onDoubleSelect) return;
+                if (selectTimer.current) {
+                  window.clearTimeout(selectTimer.current);
+                  selectTimer.current = null;
+                }
+                onDoubleSelect(day);
               }}
               disabled={disabled}
               className={cn(

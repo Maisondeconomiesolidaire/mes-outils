@@ -89,7 +89,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const access = usePermissionsAccess();
   const canCreate = canAccess(access, "mesoutils:reservations", "create");
 
-  // Sélection sur le calendrier : 1 clic = jour unique, 2ᵉ clic = fin de plage.
+  // Sélection sur le calendrier : double-clic = début/jour unique, clic suivant = fin.
   const [days, setDays] = useState<DaySelection>(() => {
     const today = startOfDayMs(Date.now());
     return { start: today, end: today };
@@ -107,12 +107,16 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   function handleDayClick(day: Date) {
     const clicked = startOfDayMs(day);
     setDays((current) => {
-      // Nouvelle sélection si : rien, plage déjà complète, ou clic avant le début.
-      if (current.start !== current.end || clicked < current.start) {
+      if (current.start !== current.end || clicked <= current.start) {
         return { start: clicked, end: clicked };
       }
       return { start: current.start, end: clicked };
     });
+  }
+
+  function handleDayDoubleClick(day: Date) {
+    const clicked = startOfDayMs(day);
+    setDays({ start: clicked, end: clicked });
   }
 
   const range = useMemo(() => {
@@ -214,9 +218,12 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
 
   return (
     <div className="space-y-5">
-      {/* Calendrier : les réservations existantes s'affichent, et on clique
-          directement sur le jour de début puis le jour de fin. */}
-      <Agenda tab={tab} days={days} onDayClick={handleDayClick}>
+      <Agenda
+        tab={tab}
+        days={days}
+        onDayClick={handleDayClick}
+        onDayDoubleClick={handleDayDoubleClick}
+      >
         {/* Créneau sélectionné : résumé + heures, volontairement dans le même
             panneau que le calendrier pour montrer que les deux sont liés. */}
         <div className="space-y-4 border-t border-[var(--border)] pt-4">
@@ -228,9 +235,6 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
             <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
               {durationDays} jour{durationDays > 1 ? "s" : ""}
             </span>
-            <p className="w-full text-xs text-[var(--muted-foreground)] sm:w-auto">
-              Cliquez sur un jour du calendrier (début), puis un second (fin). Un seul clic = ce jour uniquement.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
@@ -455,11 +459,13 @@ function Agenda({
   tab,
   days,
   onDayClick,
+  onDayDoubleClick,
   children,
 }: {
   tab: "rooms" | "vehicles";
   days: DaySelection;
   onDayClick: (day: Date) => void;
+  onDayDoubleClick: (day: Date) => void;
   children?: ReactNode;
 }) {
   const navigate = useNavigate();
@@ -519,13 +525,15 @@ function Agenda({
 
   return (
     <div className="space-y-3 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-      <div className="flex flex-wrap items-center gap-2 px-1">
-        <CalendarCheck className="h-4 w-4 text-brand-600" />
-        <p className="text-sm font-semibold text-[var(--foreground)]">
-          {tab === "rooms" ? "Réservations des salles" : "Réservations des véhicules"}
-        </p>
-        <p className="ml-auto text-xs text-[var(--muted-foreground)]">
-          Cliquez sur les jours pour choisir votre créneau.
+      <div className="space-y-1 px-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <CalendarCheck className="h-4 w-4 text-brand-600" />
+          <p className="text-sm font-semibold text-[var(--foreground)]">
+            {tab === "rooms" ? "Réservations des salles" : "Réservations des véhicules"}
+          </p>
+        </div>
+        <p className="text-sm font-medium leading-6 text-[var(--foreground)] sm:text-base">
+          Double cliquez sur un jour du calendrier (début), puis un seul clic sur le second (fin). Double clic sur un jour = ce jour uniquement.
         </p>
       </div>
       <CalendarBoard
@@ -533,6 +541,7 @@ function Agenda({
         rangeEnd={days.end}
         events={calendarEvents}
         onSelect={onDayClick}
+        onDoubleSelect={onDayDoubleClick}
         onEventClick={(id) => setDetailId(id)}
         disabledBefore={Date.now()}
         compact
