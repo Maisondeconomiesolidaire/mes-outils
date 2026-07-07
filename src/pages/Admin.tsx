@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { Check, CircleDashed, LayoutDashboard, Mail, Save, Search, ShieldCheck, ShieldOff, Trash2 } from "lucide-react";
+import { CalendarDays, Check, CircleDashed, Clock, Info, Layers, LayoutDashboard, LogIn, Mail, MapPin, Save, Search, ShieldCheck, ShieldOff, Trash2, UserRound } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -37,6 +37,8 @@ type ManagedPerson = PermissionPerson & {
   imageUrl?: string | null;
   role: CrmRole;
   source: "clerk" | "manual";
+  createdAt?: number | null;
+  lastSignInAt?: number | null;
 };
 
 type ClerkUsersState = {
@@ -101,6 +103,8 @@ function mergeUsers(clerkUsers: ClerkUser[], permissionPeople: PermissionPerson[
       permissionActive: undefined,
       grants: [],
       source: "clerk",
+      createdAt: user.createdAt,
+      lastSignInAt: user.lastSignInAt,
     });
   }
 
@@ -115,6 +119,8 @@ function mergeUsers(clerkUsers: ClerkUser[], permissionPeople: PermissionPerson[
       grants: permission.grants,
       updatedAt: permission.updatedAt,
       source: existing ? "clerk" : "manual",
+      createdAt: existing?.createdAt,
+      lastSignInAt: existing?.lastSignInAt,
     });
   }
 
@@ -165,6 +171,36 @@ function signupSourceLabel(source?: { app?: string; path?: string }): string | n
   return `${appLabel} · ${form}`;
 }
 
+const dateFmt = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+const dateTimeFmt = new Intl.DateTimeFormat("fr-FR", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+/** Date absolue lisible ; `null` si l'horodatage est absent. */
+function formatDate(ts?: number | null, withTime = false): string | null {
+  if (!ts) return null;
+  return (withTime ? dateTimeFmt : dateFmt).format(new Date(ts));
+}
+
+/** « il y a 3 jours », « aujourd'hui »… à partir d'un horodatage. */
+function relativeTime(ts?: number | null): string | null {
+  if (!ts) return null;
+  const diff = Date.now() - ts;
+  const day = 24 * 60 * 60 * 1000;
+  const days = Math.floor(diff / day);
+  if (days <= 0) return "aujourd'hui";
+  if (days === 1) return "hier";
+  if (days < 30) return `il y a ${days} jours`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `il y a ${months} mois`;
+  const years = Math.floor(days / 365);
+  return `il y a ${years} an${years > 1 ? "s" : ""}`;
+}
+
 export function Admin() {
   const [tab, setTab] = useState<"dashboard" | "access">("dashboard");
   return (
@@ -209,6 +245,7 @@ function AccessManager() {
   const [unknownGrants, setUnknownGrants] = useState<Grant[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"access" | "info">("access");
 
   useEffect(() => {
     let cancelled = false;
@@ -260,6 +297,7 @@ function AccessManager() {
 
   useEffect(() => {
     setSavedMessage(null);
+    setDetailTab("access");
     if (!selectedPerson) {
       setDraftName("");
       setDraftEmail("");
@@ -478,6 +516,21 @@ function AccessManager() {
             </div>
           </div>
 
+          <div className="border-b border-[var(--border)] px-5 pt-3">
+            <UnderlineTabs
+              items={[
+                { key: "access", label: "Accès", icon: ShieldCheck },
+                { key: "info", label: "Informations", icon: Info },
+              ]}
+              value={detailTab}
+              onChange={setDetailTab}
+            />
+          </div>
+
+          {detailTab === "info" ? (
+            <PersonInfo person={selectedPerson} signupSource={signupSources[(selectedPerson?.email ?? "").toLowerCase()]} groups={groups} />
+          ) : (
+          <>
           {draftRole === "admin" ? (
             <div className="p-5">
               <div className="flex items-start gap-3 rounded-lg border border-brand-200 bg-brand-50 p-4">
@@ -617,8 +670,167 @@ function AccessManager() {
               </Button>
             </div>
           </div>
+          </>
+          )}
         </section>
       </div>
+    </div>
+  );
+}
+
+/* ─── Onglet « Informations » d'un utilisateur ───────────────────────────── */
+
+function InfoRow({
+  icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: ReactNode;
+  hint?: string | null;
+}) {
+  return (
+    <div className="flex items-start gap-3 py-3">
+      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)] text-[var(--muted-foreground)]">
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">{label}</p>
+        <p className="mt-0.5 break-words text-sm font-medium text-[var(--foreground)]">{value}</p>
+        {hint ? <p className="text-xs text-[var(--muted-foreground)]">{hint}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+function InfoSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="section-kicker">{title}</p>
+      <div className="mt-1 divide-y divide-[var(--border)]">{children}</div>
+    </div>
+  );
+}
+
+function PersonInfo({
+  person,
+  signupSource,
+  groups,
+}: {
+  person: ManagedPerson | null;
+  signupSource?: { app?: string; path?: string; at?: number };
+  groups: ReturnType<typeof groupPagesByApp>;
+}) {
+  if (!person) {
+    return (
+      <div className="p-5">
+        <EmptyState
+          icon={<UserRound className="h-8 w-8" />}
+          title="Aucun utilisateur sélectionné"
+          description="Sélectionnez un utilisateur pour consulter ses informations."
+        />
+      </div>
+    );
+  }
+
+  const granted = new Set(
+    person.grants.filter((grant) => grant.actions.length > 0).map((grant) => grant.pageKey),
+  );
+  const appsWithAccess = groups.filter((group) => group.pages.some((page) => granted.has(page.key)));
+  const pageCount = groups.reduce(
+    (total, group) => total + group.pages.filter((page) => granted.has(page.key)).length,
+    0,
+  );
+
+  const roleLabel =
+    person.role === "admin" ? "Administrateur" : person.role === "staff" ? "Staff" : "Client";
+  const originLabel = signupSourceLabel(signupSource);
+  const signupDate = formatDate(signupSource?.at);
+  const createdDate = formatDate(person.createdAt);
+  const lastSignIn = formatDate(person.lastSignInAt, true);
+
+  const accessValue =
+    person.role === "admin"
+      ? "Accès total (toutes les applications)"
+      : appsWithAccess.length === 0
+        ? "Aucune application"
+        : appsWithAccess.map((group) => group.label).join(", ");
+
+  return (
+    <div className="grid gap-8 p-5 lg:grid-cols-2">
+      <InfoSection title="Provenance">
+        <InfoRow
+          icon={<MapPin className="h-4 w-4" />}
+          label="Origine d'inscription"
+          value={originLabel ?? "Origine inconnue"}
+        />
+        <InfoRow
+          icon={<CalendarDays className="h-4 w-4" />}
+          label="Première inscription"
+          value={signupDate ?? "—"}
+          hint={relativeTime(signupSource?.at)}
+        />
+        <InfoRow
+          icon={<Mail className="h-4 w-4" />}
+          label="Type de compte"
+          value={person.source === "clerk" ? "Compte Clerk (connexion)" : "Entrée manuelle (droits)"}
+        />
+      </InfoSection>
+
+      <InfoSection title="Activité">
+        <InfoRow
+          icon={<CalendarDays className="h-4 w-4" />}
+          label="Compte créé"
+          value={createdDate ?? "—"}
+          hint={relativeTime(person.createdAt)}
+        />
+        <InfoRow
+          icon={<LogIn className="h-4 w-4" />}
+          label="Dernière connexion"
+          value={lastSignIn ?? "Jamais connecté"}
+          hint={relativeTime(person.lastSignInAt)}
+        />
+        <InfoRow
+          icon={<Clock className="h-4 w-4" />}
+          label="Dernière modification des droits"
+          value={formatDate(person.updatedAt, true) ?? "—"}
+          hint={relativeTime(person.updatedAt)}
+        />
+      </InfoSection>
+
+      <InfoSection title="Accès">
+        <InfoRow
+          icon={<ShieldCheck className="h-4 w-4" />}
+          label="Rôle"
+          value={roleLabel}
+          hint={
+            person.role === "staff"
+              ? person.permissionActive === false
+                ? "Accès coupé"
+                : "Accès actif"
+              : null
+          }
+        />
+        <InfoRow
+          icon={<Layers className="h-4 w-4" />}
+          label="Applications accessibles"
+          value={accessValue}
+        />
+        {person.role === "staff" ? (
+          <InfoRow
+            icon={<Check className="h-4 w-4" />}
+            label="Pages activées"
+            value={`${pageCount} page${pageCount > 1 ? "s" : ""}`}
+          />
+        ) : null}
+      </InfoSection>
+
+      <InfoSection title="Identité">
+        <InfoRow icon={<UserRound className="h-4 w-4" />} label="Nom affiché" value={person.name || "—"} />
+        <InfoRow icon={<Mail className="h-4 w-4" />} label="Email" value={person.email} />
+      </InfoSection>
     </div>
   );
 }
