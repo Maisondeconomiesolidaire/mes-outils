@@ -656,6 +656,126 @@ export const refreshInvoiceStatus = action({
   },
 });
 
+/* ─── Suppression définitive (permission « delete ») ──────────────────────── */
+
+async function requireAccess(
+  ctx: Pick<ActionCtx, "runQuery">,
+  pageKey: string,
+  action: "delete",
+) {
+  const access: {
+    isAdmin?: boolean;
+    bootstrapMode?: boolean;
+    grants: Array<{ pageKey: string; actions: string[] }>;
+  } = await ctx.runQuery(api.permissions.myAccess, {});
+  if (!accessAllows(access, pageKey, action)) {
+    throw new Error("Vous n'avez pas le droit de supprimer cet élément.");
+  }
+}
+
+/** Annule (void) une facture Stripe si elle existe et n'est pas déjà payée. */
+async function voidInvoiceIfPossible(
+  secretKey: string | undefined,
+  stripeInvoiceId: string | undefined,
+  paymentStatus: string | undefined,
+) {
+  if (!secretKey || !stripeInvoiceId) return;
+  if (paymentStatus === "paid" || paymentStatus === "void") return;
+  try {
+    await stripeRequest(secretKey, `invoices/${stripeInvoiceId}/void`, {});
+  } catch (err) {
+    console.warn("Annulation de la facture Stripe impossible :", err);
+  }
+}
+
+/** Supprime définitivement un dépôt (fichiers + annulation de sa facture Stripe). */
+export const deleteDepot = action({
+  args: { depotId: v.id("bpDepots") },
+  handler: async (ctx, { depotId }): Promise<null> => {
+    await requireAccess(ctx, "bennespro:depots", "delete");
+    const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
+      await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
+    if (!data) return null;
+    await voidInvoiceIfPossible(
+      env.BENNESPRO_STRIPE_SECRET_KEY,
+      data.depot.billing?.stripeInvoiceId,
+      data.depot.billing?.paymentStatus,
+    );
+    await ctx.runMutation(internal.bennespro.adminWipeDepot, { depotId, alsoCompany: false });
+    return null;
+  },
+});
+
+export const companyDepotsForDeletion = internalQuery({
+  args: { companyId: v.id("bpCompanies") },
+  handler: async (ctx, { companyId }) => {
+    const depots = await ctx.db
+      .query("bpDepots")
+      .withIndex("by_company", (q) => q.eq("companyId", companyId))
+      .collect();
+    return depots.map((d) => ({
+      stripeInvoiceId: d.billing?.stripeInvoiceId,
+      paymentStatus: d.billing?.paymentStatus,
+    }));
+  },
+});
+
+/** Supprime une entreprise et tout ce qui lui est rattaché (dépôts + fichiers + véhicules). */
+export const wipeCompanyCascade = internalMutation({
+  args: { companyId: v.id("bpCompanies") },
+  handler: async (ctx, { companyId }) => {
+    const depots = await ctx.db
+      .query("bpDepots")
+      .withIndex("by_company", (q) => q.eq("companyId", companyId))
+      .collect();
+    for (const depot of depots) {
+      const files = [
+        depot.ticketPhoto,
+        depot.truckExteriorPhoto,
+        depot.truckInteriorPhoto,
+        depot.signature,
+        ...depot.attachments,
+      ].filter((id): id is Id<"_storage"> => Boolean(id));
+      for (const fileId of files) {
+        try {
+          await ctx.storage.delete(fileId);
+        } catch {
+          // Fichier déjà absent.
+        }
+      }
+      await ctx.db.delete(depot._id);
+    }
+    const vehicles = await ctx.db
+      .query("bpVehicles")
+      .withIndex("by_company", (q) => q.eq("companyId", companyId))
+      .collect();
+    for (const vehicle of vehicles) await ctx.db.delete(vehicle._id);
+    const company = await ctx.db.get(companyId);
+    if (company) await ctx.db.delete(companyId);
+  },
+});
+
+/**
+ * Supprime définitivement une entreprise : annule les factures Stripe non
+ * payées de ses dépôts, puis efface l'entreprise, ses véhicules et ses dépôts.
+ */
+export const deleteCompany = action({
+  args: { companyId: v.id("bpCompanies") },
+  handler: async (ctx, { companyId }): Promise<null> => {
+    await requireAccess(ctx, "bennespro:entreprises", "delete");
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    if (secretKey) {
+      const depots: Array<{ stripeInvoiceId?: string; paymentStatus?: string }> =
+        await ctx.runQuery(internal.bennespro.companyDepotsForDeletion, { companyId });
+      for (const depot of depots) {
+        await voidInvoiceIfPossible(secretKey, depot.stripeInvoiceId, depot.paymentStatus);
+      }
+    }
+    await ctx.runMutation(internal.bennespro.wipeCompanyCascade, { companyId });
+    return null;
+  },
+});
+
 /** Encode des octets en base64 (par blocs, pour rester léger en mémoire). */
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
