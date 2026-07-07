@@ -89,6 +89,28 @@ export const listManaged = query({
   },
 });
 
+/**
+ * Origine d'inscription par email (app + formulaire/chemin), pour le panneau
+ * admin. On garde la trace la plus ancienne (première inscription).
+ */
+export const listSignupSources = query({
+  args: {},
+  handler: async (ctx) => {
+    await requirePermissionManager(ctx);
+    const users = await ctx.db.query("users").collect();
+    const byEmail: Record<string, { app?: string; path?: string; at: number }> = {};
+    for (const user of users) {
+      const email = user.email.trim().toLowerCase();
+      if (!email) continue;
+      const existing = byEmail[email];
+      if (!existing || user.createdAt < existing.at) {
+        byEmail[email] = { app: user.signupApp, path: user.signupPath, at: user.createdAt };
+      }
+    }
+    return byEmail;
+  },
+});
+
 type ClerkEmailAddress = {
   id?: unknown;
   email_address?: unknown;

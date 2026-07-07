@@ -123,6 +123,48 @@ function mergeUsers(clerkUsers: ClerkUser[], permissionPeople: PermissionPerson[
   );
 }
 
+/** Un email @eco-solidaire.fr = membre interne (admin), sinon client. */
+function isAdminEmail(email: string) {
+  return email.trim().toLowerCase().endsWith("@eco-solidaire.fr");
+}
+
+const SIGNUP_APP_LABELS: Record<string, string> = {
+  recycapp: "Recyclerie",
+  mesoutils: "Mes Outils",
+  klyde: "Klyd",
+  cycleenbray: "Cycle en Bray",
+  bennespro: "Bennes & Pro",
+};
+
+/** Libellé lisible de l'origine d'inscription (app · formulaire). */
+function signupSourceLabel(source?: { app?: string; path?: string }): string | null {
+  if (!source?.app) return null;
+  const appLabel = SIGNUP_APP_LABELS[source.app] ?? source.app;
+  const path = (source.path ?? "").split("?")[0];
+  const form = path.startsWith("/collecte")
+    ? "Formulaire collecte"
+    : path.startsWith("/aerogommage")
+      ? "Formulaire aérogommage"
+      : path.startsWith("/velo")
+        ? "Formulaire vélo"
+        : path.startsWith("/livraison")
+          ? "Formulaire livraison"
+          : path.startsWith("/boutique/panier")
+            ? "Panier boutique"
+            : path.startsWith("/boutique")
+              ? "Boutique"
+              : path.startsWith("/reebike")
+                ? "Reebike"
+                : path.startsWith("/reparation")
+                  ? "Réparation"
+                  : path.startsWith("/compte")
+                    ? "Espace compte"
+                    : path === "/" || path === ""
+                      ? "Accueil"
+                      : path || "—";
+  return `${appLabel} · ${form}`;
+}
+
 export function Admin() {
   const [tab, setTab] = useState<"dashboard" | "access">("dashboard");
   return (
@@ -146,9 +188,11 @@ export function Admin() {
 
 function AccessManager() {
   const permissionsData = useQuery(api.permissions.listManaged);
+  const signupSources = useQuery(api.permissions.listSignupSources) ?? {};
   const listClerkUsers = useAction(api.permissions.listClerkUsers);
   const upsert = useMutation(api.permissions.upsert);
   const remove = useMutation(api.permissions.remove);
+  const [kindFilter, setKindFilter] = useState<"all" | "admins" | "clients">("all");
 
   const groups = groupPagesByApp();
   const [selectedApp, setSelectedApp] = useState<string>(groups[0].key);
@@ -190,13 +234,21 @@ function AccessManager() {
 
   const filteredPeople = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return people;
-    return people.filter((person) =>
-      [person.name, person.email]
+    return people.filter((person) => {
+      if (kindFilter === "admins" && !isAdminEmail(person.email)) return false;
+      if (kindFilter === "clients" && isAdminEmail(person.email)) return false;
+      if (!needle) return true;
+      return [person.name, person.email]
         .filter(Boolean)
-        .some((value) => value!.toLowerCase().includes(needle)),
-    );
-  }, [people, search]);
+        .some((value) => value!.toLowerCase().includes(needle));
+    });
+  }, [people, search, kindFilter]);
+
+  const counts = useMemo(() => {
+    let admins = 0;
+    for (const person of people) if (isAdminEmail(person.email)) admins++;
+    return { all: people.length, admins, clients: people.length - admins };
+  }, [people]);
 
   const selectedPerson = people.find((person) => person.email === selectedEmail) ?? null;
 
@@ -304,6 +356,27 @@ function AccessManager() {
                 className="pl-9"
               />
             </div>
+            <div className="mt-3 inline-flex w-full rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
+              {([
+                { key: "all", label: `Tous (${counts.all})` },
+                { key: "admins", label: `Admins (${counts.admins})` },
+                { key: "clients", label: `Clients (${counts.clients})` },
+              ] as const).map((option) => (
+                <button
+                  key={option.key}
+                  type="button"
+                  onClick={() => setKindFilter(option.key)}
+                  className={cn(
+                    "flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition",
+                    kindFilter === option.key
+                      ? "bg-brand-500 text-white"
+                      : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             {clerkData.setupError ? (
               <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 {clerkData.setupError === "missing_clerk_secret_key"
@@ -348,6 +421,11 @@ function AccessManager() {
                     <span className={cn("block truncate text-xs", selectedEmail === person.email ? "text-white/75" : "text-[var(--muted-foreground)]")}>
                       {person.email}
                     </span>
+                    {signupSourceLabel(signupSources[person.email.toLowerCase()]) ? (
+                      <span className={cn("mt-0.5 block truncate text-[11px]", selectedEmail === person.email ? "text-white/70" : "text-[var(--muted-foreground)]")}>
+                        Inscrit via {signupSourceLabel(signupSources[person.email.toLowerCase()])}
+                      </span>
+                    ) : null}
                   </span>
                   {person.permissionActive === false ? (
                     <ShieldOff className="h-4 w-4" />

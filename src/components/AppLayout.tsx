@@ -1,6 +1,6 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../convex/_generated/api";
@@ -225,7 +225,23 @@ function ConvexAuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"
     );
   }
 
-  return <AuthenticatedShell theme={theme} setTheme={setTheme} />;
+  return (
+    <>
+      <ProfileSync />
+      <AuthenticatedShell theme={theme} setTheme={setTheme} />
+    </>
+  );
+}
+
+/** Enregistre le profil Convex (et sa source d'inscription) à la connexion. */
+function ProfileSync() {
+  const syncProfile = useMutation(api.users.syncProfile);
+  useEffect(() => {
+    void syncProfile({
+      source: { app: "mesoutils", path: window.location.pathname + window.location.search },
+    });
+  }, [syncProfile]);
+  return null;
 }
 
 function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {

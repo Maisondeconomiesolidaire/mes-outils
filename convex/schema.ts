@@ -459,6 +459,10 @@ export default defineSchema(
     address: v.optional(v.string()),
     postalCode: v.optional(v.string()),
     city: v.optional(v.string()),
+    // Traçabilité de l'inscription : app (recycapp, mesoutils…) et chemin/
+    // formulaire d'origine (/collecte, /boutique/panier…). Fixé à la création.
+    signupApp: v.optional(v.string()),
+    signupPath: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

@@ -47,8 +47,12 @@ async function getProfileByClerkId(ctx: QueryCtx | MutationCtx, clerkId: string)
  * automatiquement les demandes passées dont l'email correspond.
  */
 export const syncProfile = mutation({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    // Origine de l'inscription (app + chemin/formulaire), enregistrée une seule
+    // fois, à la création du profil.
+    source: v.optional(v.object({ app: v.string(), path: v.string() })),
+  },
+  handler: async (ctx, { source }) => {
     const identity = await requireUser(ctx);
     const clerkId = identity.subject;
     const email = (identity.email ?? "").toLowerCase();
@@ -64,11 +68,23 @@ export const syncProfile = mutation({
         firstName: identity.givenName ? titleCaseName(identity.givenName) : undefined,
         lastName: identity.familyName ? titleCaseName(identity.familyName) : undefined,
         imageUrl,
+        signupApp: source?.app,
+        signupPath: source?.path,
         createdAt: now,
         updatedAt: now,
       });
       profile = await ctx.db.get(profileId);
-    } else {
+    } else if (source && (!profile.signupApp || !profile.signupPath)) {
+      // Complète la source si elle manquait (profils créés avant le suivi).
+      await ctx.db.patch(profile._id, {
+        signupApp: profile.signupApp ?? source.app,
+        signupPath: profile.signupPath ?? source.path,
+        updatedAt: now,
+      });
+      profile = await ctx.db.get(profile._id);
+    }
+
+    if (profile) {
       const patch: { email?: string; imageUrl?: string; updatedAt?: number } = {};
       if (email && profile.email !== email) patch.email = email;
       if (imageUrl && profile.imageUrl !== imageUrl) patch.imageUrl = imageUrl;
