@@ -55,7 +55,12 @@ export const listForRequest = query({
       .collect();
     return Promise.all(
       docs
-        .filter((doc) => staff || doc.uploadedByRole === "staff")
+        .filter(
+          (doc) =>
+            staff ||
+            doc.uploadedByRole === "client" ||
+            doc.sharedWithClientAt !== undefined,
+        )
         .sort((a, b) => b.createdAt - a.createdAt)
         .map(async (d) => ({
           _id: d._id,
@@ -63,6 +68,7 @@ export const listForRequest = query({
           docType: d.docType,
           mimeType: d.mimeType ?? null,
           uploadedByRole: d.uploadedByRole,
+          sharedWithClientAt: d.sharedWithClientAt ?? null,
           createdAt: d.createdAt,
           url: await ctx.storage.getUrl(d.storageId),
         })),
@@ -79,7 +85,7 @@ export const addToRequest = mutation({
     mimeType: v.optional(v.string()),
   },
   handler: async (ctx, { requestId, storageId, name, docType: type, mimeType }) => {
-    const { request, staff } = await requireRequestParticipant(
+    const { staff } = await requireRequestParticipant(
       ctx,
       requestId,
       "demandes",
@@ -93,13 +99,31 @@ export const addToRequest = mutation({
       docType: type,
       mimeType,
       uploadedByRole: staff ? "staff" : "client",
+      ...(!staff ? { sharedWithClientAt: Date.now() } : {}),
       createdAt: Date.now(),
     });
-    // Quand le staff dépose un document, on prévient le client par email.
-    if (staff) {
-      await notifyClientNewDocument(ctx, request, finalName);
-    }
     return id;
+  },
+});
+
+export const shareWithClient = mutation({
+  args: { documentId: v.id("requestDocuments") },
+  handler: async (ctx, { documentId }) => {
+    const doc = await ctx.db.get(documentId);
+    if (!doc) throw new Error("Document introuvable.");
+    const { request, staff } = await requireRequestParticipant(
+      ctx,
+      doc.requestId,
+      "demandes",
+      "update",
+    );
+    if (!staff) throw new Error("Seule l'équipe peut partager ce document.");
+    if (doc.sharedWithClientAt !== undefined) return { ok: true };
+
+    const sharedWithClientAt = Date.now();
+    await ctx.db.patch(documentId, { sharedWithClientAt });
+    await notifyClientNewDocument(ctx, request, doc.name);
+    return { ok: true };
   },
 });
 
@@ -132,6 +156,7 @@ export const assignFileToRequest = mutation({
       mimeType: file.mimeType,
       uploadedByRole: "staff",
       sourceDocumentId: fileId,
+      sharedWithClientAt: Date.now(),
       createdAt: Date.now(),
     });
     await notifyClientNewDocument(ctx, request, file.name);

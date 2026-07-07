@@ -562,6 +562,7 @@ export default defineSchema(
     // Si le document provient du gestionnaire (partage) : on référence le
     // fichier source sans dupliquer le blob, et on ne le supprime pas au retrait.
     sourceDocumentId: v.optional(v.id("documents")),
+    sharedWithClientAt: v.optional(v.number()),
     createdAt: v.number(),
   }).index("by_requestId", ["requestId"]),
 
