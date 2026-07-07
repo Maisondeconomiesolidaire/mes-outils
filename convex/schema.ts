@@ -832,13 +832,17 @@ export default defineSchema(
     authorClerkId: v.string(),
     authorName: v.string(),
     authorImageUrl: v.optional(v.string()),
+    title: v.optional(v.string()),
     body: v.string(),
     images: v.array(v.id("_storage")),
     videos: v.optional(v.array(v.id("_storage"))),
     pinned: v.optional(v.boolean()),
     createdAt: v.number(),
     editedAt: v.optional(v.number()),
-  }).index("by_createdAt", ["createdAt"]),
+    migrationSourceRef: v.optional(v.string()),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_migrationSourceRef", ["migrationSourceRef"]),
 
   postComments: defineTable({
     postId: v.id("posts"),

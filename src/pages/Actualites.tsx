@@ -75,7 +75,9 @@ type Post = {
   _id: Id<"posts">;
   authorName: string;
   authorImageUrl?: string;
+  title?: string;
   body?: string;
+  images: Id<"_storage">[];
   createdAt: number;
   editedAt?: number;
   pinned?: boolean;
@@ -104,15 +106,17 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
   const updatePost = useMutation(api.posts.update);
 
   const [body, setBody] = useState("");
+  const [title, setTitle] = useState("");
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [showMedia, setShowMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
-    if (!body.trim() && images.length === 0) return;
+    if (!title.trim() && !body.trim() && images.length === 0) return;
     setSubmitting(true);
     try {
-      await createPost({ body, images });
+      await createPost({ title, body, images });
+      setTitle("");
       setBody("");
       setImages([]);
       setShowMedia(false);
@@ -139,13 +143,21 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
         <section className="premium-panel rounded-2xl p-4">
           <div className="flex gap-3">
             <Avatar name={user?.fullName ?? "Moi"} src={user?.imageUrl} />
-            <textarea
-              value={body}
-              onChange={(event) => setBody(event.target.value)}
-              placeholder="Quoi de neuf ?"
-              className="min-h-[52px] w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] focus:ring-2 focus:ring-brand-500/30"
-              rows={body ? 3 : 1}
-            />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Input
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Titre"
+                className="rounded-2xl bg-[var(--accent)]"
+              />
+              <textarea
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                placeholder="Quoi de neuf ?"
+                className="min-h-[52px] w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] focus:ring-2 focus:ring-brand-500/30"
+                rows={body ? 3 : 1}
+              />
+            </div>
           </div>
           {showMedia ? (
             <MediaUpload images={images} onChange={setImages} className="mt-3 pl-[60px]" />
@@ -158,7 +170,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             >
               <ImageIcon className="h-4 w-4" /> Photo
             </button>
-            <Button onClick={submit} disabled={submitting || (!body.trim() && images.length === 0)}>
+            <Button onClick={submit} disabled={submitting || (!title.trim() && !body.trim() && images.length === 0)}>
               <Send className="h-4 w-4" /> {submitting ? "Publication..." : "Publier"}
             </Button>
           </div>
@@ -179,7 +191,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             onToggleLike={() => toggleLike({ postId: post._id })}
             onPin={() => pinPost({ postId: post._id, pinned: !post.pinned })}
             onRemove={() => removePostWithConfirmation(post._id)}
-            onUpdate={(text) => updatePost({ postId: post._id, body: text })}
+            onUpdate={(next) => updatePost({ postId: post._id, ...next })}
             onAddComment={(text) => addComment({ postId: post._id, body: text })}
             onRemoveComment={removeCommentWithConfirmation}
           />
@@ -193,13 +205,15 @@ function PostCard({
   post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onUpdate, onAddComment, onRemoveComment,
 }: {
   post: Post; currentName: string; currentImage?: string; canManage: boolean; canCreate: boolean;
-  onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (text: string) => Promise<unknown>;
+  onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (next: { title?: string; body: string; images: Id<"_storage">[] }) => Promise<unknown>;
   onAddComment: (text: string) => Promise<unknown>; onRemoveComment: (commentId: Id<"postComments">) => void;
 }) {
   const [showComments, setShowComments] = useState(false);
   const [draft, setDraft] = useState("");
   const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(post.title ?? "");
   const [editDraft, setEditDraft] = useState(post.body ?? "");
+  const [editImages, setEditImages] = useState<Id<"_storage">[]>(post.images ?? []);
   const [savingEdit, setSavingEdit] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [likesOpen, setLikesOpen] = useState(false);
@@ -212,16 +226,19 @@ function PostCard({
   ];
 
   function startEdit() {
+    setEditTitle(post.title ?? "");
     setEditDraft(post.body ?? "");
+    setEditImages(post.images ?? []);
     setEditing(true);
   }
 
   async function saveEdit() {
+    const nextTitle = editTitle.trim();
     const text = editDraft.trim();
-    if (!text && post.imageUrls.length === 0 && post.videoUrls.length === 0) return;
+    if (!nextTitle && !text && editImages.length === 0 && post.videoUrls.length === 0) return;
     setSavingEdit(true);
     try {
-      await onUpdate(text);
+      await onUpdate({ title: nextTitle || undefined, body: text, images: editImages });
       setEditing(false);
     } finally {
       setSavingEdit(false);
@@ -279,23 +296,40 @@ function PostCard({
 
       {editing ? (
         <div className="space-y-2 px-4 pb-3">
+          <Input
+            value={editTitle}
+            onChange={(event) => setEditTitle(event.target.value)}
+            placeholder="Titre"
+            className="rounded-2xl bg-[var(--accent)]"
+          />
           <textarea
             value={editDraft}
             onChange={(event) => setEditDraft(event.target.value)}
             rows={4}
             className="w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none focus:ring-2 focus:ring-brand-500/30"
           />
+          <MediaUpload
+            images={editImages}
+            initialMedia={(post.images ?? []).map((id, index) => ({
+              storageId: id,
+              previewUrl: post.imageUrls[index] ?? "",
+            }))}
+            onChange={setEditImages}
+          />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={savingEdit}>
               <X className="h-4 w-4" /> Annuler
             </Button>
-            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editDraft.trim() && post.imageUrls.length === 0 && post.videoUrls.length === 0)}>
+            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editTitle.trim() && !editDraft.trim() && editImages.length === 0 && post.videoUrls.length === 0)}>
               {savingEdit ? "Enregistrement..." : "Enregistrer"}
             </Button>
           </div>
         </div>
-      ) : post.body ? (
-        <p className="whitespace-pre-wrap px-4 pb-3 text-[15px] leading-7 text-[var(--foreground)]">{post.body}</p>
+      ) : post.title || post.body ? (
+        <div className="space-y-2 px-4 pb-3">
+          {post.title ? <h3 className="text-lg font-semibold text-[var(--foreground)]">{post.title}</h3> : null}
+          {post.body ? <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">{post.body}</p> : null}
+        </div>
       ) : null}
 
       {post.imageUrls.length > 0 ? (

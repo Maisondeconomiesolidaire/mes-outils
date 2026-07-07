@@ -6,6 +6,24 @@ import { requireCrmPermission, requireUser } from "./lib";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const POSTS_PAGE_KEY = "mesoutils:actualites";
+const POST_EDITOR_EMAILS = new Set(["lahmerselim@gmail.com"]);
+const AIRTABLE_AUTHOR_EMAILS: Record<string, string> = {
+  "henry gwendal": "g.henry@eco-solidaire.fr",
+  "maccioni sara": "s.maccioni@eco-solidaire.fr",
+  "tiennot stephane": "s.tiennot@eco-solidaire.fr",
+  "prata yohann": "y.prata@eco-solidaire.fr",
+};
+const AIRTABLE_AUTHOR_FALLBACKS: Record<
+  string,
+  { clerkId: string; authorName: string; authorImageUrl?: string }
+> = {
+  "maccioni sara": {
+    clerkId: "user_3FdYWQVvN6gMzDsVBaWR0rIzhIY",
+    authorName: "Sara Maccioni",
+    authorImageUrl:
+      "https://img.clerk.com/eyJ0eXBlIjoiZGVmYXVsdCIsImlpZCI6Imluc18zRmN3Wjg5UnhIWnM3YjRBYzhmSzFXbTgwV2oiLCJyaWQiOiJ1c2VyXzNGZFlXUVZ2TjZnTXpEc1ZCYVdSMHJJemhJWSIsImluaXRpYWxzIjoiU00ifQ",
+  },
+};
 
 function displayName(identity: {
   name?: string | null;
@@ -20,10 +38,41 @@ function displayName(identity: {
   return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
 }
 
+function normalizePersonKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .trim()
+    .toLocaleLowerCase("fr-FR")
+    .replace(/\s+/g, " ");
+}
+
+function canEditAnyPost(email: string | null | undefined) {
+  return POST_EDITOR_EMAILS.has(email?.trim().toLowerCase() ?? "");
+}
+
+async function getUserByEmail(ctx: QueryCtx | MutationCtx, email: string) {
+  return await ctx.db
+    .query("users")
+    .withIndex("by_email", (q) => q.eq("email", email))
+    .first();
+}
+
+function dateFromAirtable(value: string) {
+  const [datePart, timePart] = value.trim().split(/\s+/, 2);
+  const [day, month, year] = datePart.split("/").map((part) => Number(part));
+  if (!day || !month || !year) return Date.now();
+  const [hour = 12, minute = 0] = (timePart ?? "")
+    .split(":")
+    .map((part) => Number(part));
+  return new Date(year, month - 1, day, hour || 12, minute || 0).getTime();
+}
+
 async function enrichPost(
   ctx: QueryCtx | MutationCtx,
   post: Doc<"posts">,
   currentClerkId: string,
+  currentEmail?: string | null,
 ) {
   const imageUrls = (
     await Promise.all(post.images.map((image) => ctx.storage.getUrl(image)))
@@ -65,7 +114,7 @@ async function enrichPost(
     latestLikeName: likes.length > 0 ? latestLikeName : undefined,
     likedByMe: likes.some((like) => like.clerkId === currentClerkId),
     commentsCount: commentsWithMeta.length,
-    canManage: post.authorClerkId === currentClerkId,
+    canManage: post.authorClerkId === currentClerkId || canEditAnyPost(currentEmail),
   };
 }
 
@@ -86,7 +135,7 @@ export const list = query({
     });
 
     return await Promise.all(
-      sorted.map((post) => enrichPost(ctx, post, identity.subject)),
+      sorted.map((post) => enrichPost(ctx, post, identity.subject, identity.email)),
     );
   },
 });
@@ -116,6 +165,7 @@ export const listLikes = query({
 
 export const create = mutation({
   args: {
+    title: v.optional(v.string()),
     body: v.string(),
     images: v.optional(v.array(v.id("_storage"))),
     videos: v.optional(v.array(v.id("_storage"))),
@@ -127,7 +177,8 @@ export const create = mutation({
       throw new Error("Les vidéos ne sont plus acceptées dans les publications.");
     }
     const body = args.body.trim();
-    if (!body && !(args.images?.length ?? 0)) {
+    const title = args.title?.trim();
+    if (!title && !body && !(args.images?.length ?? 0)) {
       throw new Error("Le post est vide.");
     }
 
@@ -136,6 +187,7 @@ export const create = mutation({
       authorName: displayName(identity),
       authorImageUrl:
         (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
+      title,
       body,
       images: args.images ?? [],
       videos: args.videos ?? [],
@@ -148,6 +200,7 @@ export const create = mutation({
 export const update = mutation({
   args: {
     postId: v.id("posts"),
+    title: v.optional(v.string()),
     body: v.string(),
     images: v.optional(v.array(v.id("_storage"))),
     videos: v.optional(v.array(v.id("_storage"))),
@@ -157,16 +210,17 @@ export const update = mutation({
     const identity = await requireUser(ctx);
     const post = await ctx.db.get(args.postId);
     if (!post) throw new Error("Post introuvable.");
-    if (post.authorClerkId !== identity.subject) {
+    if (post.authorClerkId !== identity.subject && !canEditAnyPost(identity.email)) {
       throw new Error("Modification non autorisée.");
     }
     if (args.videos?.length) {
       throw new Error("Les vidéos ne sont plus acceptées dans les publications.");
     }
     const body = args.body.trim();
+    const title = args.title?.trim() || undefined;
     const images = args.images ?? post.images;
     const videos: Id<"_storage">[] = [];
-    if (!body && images.length === 0) {
+    if (!title && !body && images.length === 0) {
       throw new Error("Le post est vide.");
     }
     // Libère les fichiers retirés du post (sinon ils restent orphelins).
@@ -175,7 +229,79 @@ export const update = mutation({
       ctx,
       [...post.images, ...(post.videos ?? [])].filter((id) => !kept.has(id)),
     );
-    await ctx.db.patch(args.postId, { body, images, videos, editedAt: Date.now() });
+    await ctx.db.patch(args.postId, { title, body, images, videos, editedAt: Date.now() });
+  },
+});
+
+export const importAirtablePosts = internalMutation({
+  args: {
+    rows: v.array(
+      v.object({
+        ref: v.string(),
+        authorName: v.string(),
+        title: v.optional(v.string()),
+        body: v.string(),
+        createdAt: v.string(),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const result = {
+      imported: 0,
+      skippedExisting: 0,
+      skippedMissingAuthor: [] as string[],
+      skippedEmpty: 0,
+    };
+
+    for (const row of args.rows) {
+      const ref = row.ref.trim();
+      const body = row.body.trim();
+      const title = row.title?.trim() || undefined;
+      if (!ref || (!title && !body)) {
+        result.skippedEmpty += 1;
+        continue;
+      }
+
+      const existing = await ctx.db
+        .query("posts")
+        .withIndex("by_migrationSourceRef", (q) => q.eq("migrationSourceRef", ref))
+        .unique();
+      if (existing) {
+        result.skippedExisting += 1;
+        continue;
+      }
+
+      const authorKey = normalizePersonKey(row.authorName);
+      const email = AIRTABLE_AUTHOR_EMAILS[authorKey];
+      const author = email ? await getUserByEmail(ctx, email) : null;
+      const fallback = AIRTABLE_AUTHOR_FALLBACKS[authorKey];
+      if (!author && !fallback) {
+        result.skippedMissingAuthor.push(row.authorName);
+        continue;
+      }
+
+      await ctx.db.insert("posts", {
+        authorClerkId: author?.clerkId ?? fallback.clerkId,
+        authorName:
+          [author?.firstName, author?.lastName].filter(Boolean).join(" ").trim() ||
+          fallback?.authorName ||
+          row.authorName,
+        authorImageUrl: author?.imageUrl ?? fallback?.authorImageUrl,
+        title,
+        body,
+        images: [],
+        videos: [],
+        pinned: false,
+        createdAt: dateFromAirtable(row.createdAt),
+        migrationSourceRef: ref,
+      });
+      result.imported += 1;
+    }
+
+    return {
+      ...result,
+      skippedMissingAuthor: [...new Set(result.skippedMissingAuthor)],
+    };
   },
 });
 

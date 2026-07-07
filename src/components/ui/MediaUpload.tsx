@@ -15,10 +15,12 @@ type LocalMedia = {
  */
 export function MediaUpload({
   images,
+  initialMedia = [],
   onChange,
   className,
 }: {
   images: Id<"_storage">[];
+  initialMedia?: LocalMedia[];
   onChange: (images: Id<"_storage">[]) => void;
   className?: string;
 }) {
@@ -26,12 +28,20 @@ export function MediaUpload({
   const inputRef = useRef<HTMLInputElement>(null);
   const [media, setMedia] = useState<LocalMedia[]>([]);
   const [uploading, setUploading] = useState(false);
+  const imagesKey = images.join("|");
+  const initialMediaKey = initialMedia
+    .map((item) => `${item.storageId}:${item.previewUrl}`)
+    .join("|");
 
   useEffect(() => {
-    if (images.length === 0 && media.length > 0) {
-      setMedia([]);
-    }
-  }, [images.length, media.length]);
+    setMedia((current) => {
+      const currentById = new Map(current.map((item) => [item.storageId, item]));
+      const initialById = new Map(initialMedia.map((item) => [item.storageId, item]));
+      return images.map(
+        (id) => currentById.get(id) ?? initialById.get(id) ?? { storageId: id, previewUrl: "" },
+      );
+    });
+  }, [imagesKey, initialMediaKey]);
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
@@ -70,7 +80,13 @@ export function MediaUpload({
             key={item.storageId}
             className="group relative aspect-square overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--card)]"
           >
-            <img src={item.previewUrl} alt="" className="h-full w-full object-cover" />
+            {item.previewUrl ? (
+              <img src={item.previewUrl} alt="" className="h-full w-full object-cover" />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]">
+                <ImagePlus className="h-5 w-5" />
+              </div>
+            )}
             <button
               type="button"
               onClick={() => remove(item.storageId)}
