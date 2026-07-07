@@ -77,6 +77,7 @@ type Post = {
   authorImageUrl?: string;
   title?: string;
   body?: string;
+  externalLink?: string;
   images: Id<"_storage">[];
   createdAt: number;
   editedAt?: number;
@@ -107,17 +108,19 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
+  const [externalLink, setExternalLink] = useState("");
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [showMedia, setShowMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
-    if (!title.trim() && !body.trim() && images.length === 0) return;
+    if (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0) return;
     setSubmitting(true);
     try {
-      await createPost({ title, body, images });
+      await createPost({ title, body, externalLink, images });
       setTitle("");
       setBody("");
+      setExternalLink("");
       setImages([]);
       setShowMedia(false);
     } finally {
@@ -157,6 +160,12 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
                 className="min-h-[52px] w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] focus:ring-2 focus:ring-brand-500/30"
                 rows={body ? 3 : 1}
               />
+              <Input
+                value={externalLink}
+                onChange={(event) => setExternalLink(event.target.value)}
+                placeholder="Lien externe (optionnel)"
+                className="rounded-2xl bg-[var(--accent)]"
+              />
             </div>
           </div>
           {showMedia ? (
@@ -170,7 +179,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             >
               <ImageIcon className="h-4 w-4" /> Photo
             </button>
-            <Button onClick={submit} disabled={submitting || (!title.trim() && !body.trim() && images.length === 0)}>
+            <Button onClick={submit} disabled={submitting || (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0)}>
               <Send className="h-4 w-4" /> {submitting ? "Publication..." : "Publier"}
             </Button>
           </div>
@@ -205,7 +214,7 @@ function PostCard({
   post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onUpdate, onAddComment, onRemoveComment,
 }: {
   post: Post; currentName: string; currentImage?: string; canManage: boolean; canCreate: boolean;
-  onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (next: { title?: string; body: string; images: Id<"_storage">[] }) => Promise<unknown>;
+  onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (next: { title?: string; body: string; externalLink?: string; images: Id<"_storage">[] }) => Promise<unknown>;
   onAddComment: (text: string) => Promise<unknown>; onRemoveComment: (commentId: Id<"postComments">) => void;
 }) {
   const [showComments, setShowComments] = useState(false);
@@ -213,6 +222,7 @@ function PostCard({
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(post.title ?? "");
   const [editDraft, setEditDraft] = useState(post.body ?? "");
+  const [editExternalLink, setEditExternalLink] = useState(post.externalLink ?? "");
   const [editImages, setEditImages] = useState<Id<"_storage">[]>(post.images ?? []);
   const [savingEdit, setSavingEdit] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -228,6 +238,7 @@ function PostCard({
   function startEdit() {
     setEditTitle(post.title ?? "");
     setEditDraft(post.body ?? "");
+    setEditExternalLink(post.externalLink ?? "");
     setEditImages(post.images ?? []);
     setEditing(true);
   }
@@ -235,10 +246,16 @@ function PostCard({
   async function saveEdit() {
     const nextTitle = editTitle.trim();
     const text = editDraft.trim();
-    if (!nextTitle && !text && editImages.length === 0 && post.videoUrls.length === 0) return;
+    const nextExternalLink = editExternalLink.trim();
+    if (!nextTitle && !text && !nextExternalLink && editImages.length === 0 && post.videoUrls.length === 0) return;
     setSavingEdit(true);
     try {
-      await onUpdate({ title: nextTitle || undefined, body: text, images: editImages });
+      await onUpdate({
+        title: nextTitle || undefined,
+        body: text,
+        externalLink: nextExternalLink || undefined,
+        images: editImages,
+      });
       setEditing(false);
     } finally {
       setSavingEdit(false);
@@ -308,6 +325,12 @@ function PostCard({
             rows={4}
             className="w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none focus:ring-2 focus:ring-brand-500/30"
           />
+          <Input
+            value={editExternalLink}
+            onChange={(event) => setEditExternalLink(event.target.value)}
+            placeholder="Lien externe (optionnel)"
+            className="rounded-2xl bg-[var(--accent)]"
+          />
           <MediaUpload
             images={editImages}
             initialMedia={(post.images ?? []).map((id, index) => ({
@@ -320,15 +343,28 @@ function PostCard({
             <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={savingEdit}>
               <X className="h-4 w-4" /> Annuler
             </Button>
-            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editTitle.trim() && !editDraft.trim() && editImages.length === 0 && post.videoUrls.length === 0)}>
+            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editTitle.trim() && !editDraft.trim() && !editExternalLink.trim() && editImages.length === 0 && post.videoUrls.length === 0)}>
               {savingEdit ? "Enregistrement..." : "Enregistrer"}
             </Button>
           </div>
         </div>
-      ) : post.title || post.body ? (
+      ) : post.title || post.body || post.externalLink ? (
         <div className="space-y-2 px-4 pb-3">
           {post.title ? <h3 className="text-lg font-semibold text-[var(--foreground)]">{post.title}</h3> : null}
           {post.body ? <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">{post.body}</p> : null}
+          {post.externalLink ? (
+            <p className="break-words text-sm text-[var(--muted-foreground)]">
+              Lien externe :{" "}
+              <a
+                href={externalHref(post.externalLink)}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800"
+              >
+                {post.externalLink}
+              </a>
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -519,15 +555,15 @@ function PostMediaViewer({
       open
       onClose={onClose}
       title={`${index + 1} / ${media.length}`}
-      className="border-white/15 bg-black text-white [--accent:rgba(255,255,255,0.12)] [--border:rgba(255,255,255,0.16)] [--foreground:#ffffff] [--muted-foreground:rgba(255,255,255,0.72)] sm:h-[92vh] sm:w-[96vw] sm:max-w-[96vw]"
+      className="bg-[var(--card)] text-[var(--foreground)] sm:h-[92vh] sm:w-[96vw] sm:max-w-[96vw]"
     >
-      <div className="relative flex min-h-[55vh] items-center justify-center sm:min-h-[68vh]">
+      <div className="relative flex min-h-[55vh] items-center justify-center rounded-xl bg-[var(--accent)] sm:min-h-[68vh]">
         {hasMany ? (
           <>
             <button
               type="button"
               onClick={() => move(-1)}
-              className="absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/60 p-3 text-white transition hover:bg-black/80 sm:left-3"
+              className="absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-full bg-[var(--card)] p-3 text-[var(--foreground)] shadow-lg ring-1 ring-[var(--border)] transition hover:bg-[var(--accent)] sm:left-3"
               aria-label="Média précédent"
             >
               <ChevronLeft className="h-6 w-6" />
@@ -535,7 +571,7 @@ function PostMediaViewer({
             <button
               type="button"
               onClick={() => move(1)}
-              className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/60 p-3 text-white transition hover:bg-black/80 sm:right-3"
+              className="absolute right-0 top-1/2 z-10 -translate-y-1/2 rounded-full bg-[var(--card)] p-3 text-[var(--foreground)] shadow-lg ring-1 ring-[var(--border)] transition hover:bg-[var(--accent)] sm:right-3"
               aria-label="Média suivant"
             >
               <ChevronRight className="h-6 w-6" />
@@ -546,7 +582,7 @@ function PostMediaViewer({
         {current.kind === "image" ? (
           <img src={current.url} alt="" className="max-h-[70vh] max-w-full object-contain sm:max-h-[74vh]" />
         ) : (
-          <video key={current.url} src={current.url} controls autoPlay playsInline className="max-h-[70vh] max-w-full bg-black object-contain sm:max-h-[74vh]" />
+          <video key={current.url} src={current.url} controls autoPlay playsInline className="max-h-[70vh] max-w-full bg-[var(--accent)] object-contain sm:max-h-[74vh]" />
         )}
       </div>
       {hasMany ? (
@@ -557,7 +593,7 @@ function PostMediaViewer({
               type="button"
               onClick={() => onIndexChange(itemIndex)}
               className={cn(
-                "h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 bg-black transition",
+                "h-14 w-14 shrink-0 overflow-hidden rounded-lg border-2 bg-[var(--accent)] transition",
                 itemIndex === index ? "border-brand-400" : "border-transparent opacity-60 hover:opacity-100",
               )}
               aria-label={`Ouvrir le média ${itemIndex + 1}`}
@@ -565,7 +601,7 @@ function PostMediaViewer({
               {item.kind === "image" ? (
                 <img src={item.url} alt="" className="h-full w-full object-cover" />
               ) : (
-                <div className="flex h-full w-full items-center justify-center bg-neutral-900 text-xs font-bold text-white">
+                <div className="flex h-full w-full items-center justify-center bg-[var(--accent)] text-xs font-bold text-[var(--foreground)]">
                   Vidéo
                 </div>
               )}
@@ -575,6 +611,12 @@ function PostMediaViewer({
       ) : null}
     </Modal>
   );
+}
+
+function externalHref(value: string) {
+  const trimmed = value.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
 }
 
 function likeSummary(latestLikeName: string | undefined, likesCount: number) {

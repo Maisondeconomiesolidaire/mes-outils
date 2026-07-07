@@ -834,6 +834,7 @@ export default defineSchema(
     authorImageUrl: v.optional(v.string()),
     title: v.optional(v.string()),
     body: v.string(),
+    externalLink: v.optional(v.string()),
     images: v.array(v.id("_storage")),
     videos: v.optional(v.array(v.id("_storage"))),
     pinned: v.optional(v.boolean()),

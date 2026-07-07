@@ -167,6 +167,7 @@ export const create = mutation({
   args: {
     title: v.optional(v.string()),
     body: v.string(),
+    externalLink: v.optional(v.string()),
     images: v.optional(v.array(v.id("_storage"))),
     videos: v.optional(v.array(v.id("_storage"))),
   },
@@ -178,7 +179,8 @@ export const create = mutation({
     }
     const body = args.body.trim();
     const title = args.title?.trim();
-    if (!title && !body && !(args.images?.length ?? 0)) {
+    const externalLink = args.externalLink?.trim() || undefined;
+    if (!title && !body && !externalLink && !(args.images?.length ?? 0)) {
       throw new Error("Le post est vide.");
     }
 
@@ -189,6 +191,7 @@ export const create = mutation({
         (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
       title,
       body,
+      externalLink,
       images: args.images ?? [],
       videos: args.videos ?? [],
       pinned: false,
@@ -202,6 +205,7 @@ export const update = mutation({
     postId: v.id("posts"),
     title: v.optional(v.string()),
     body: v.string(),
+    externalLink: v.optional(v.string()),
     images: v.optional(v.array(v.id("_storage"))),
     videos: v.optional(v.array(v.id("_storage"))),
   },
@@ -218,9 +222,10 @@ export const update = mutation({
     }
     const body = args.body.trim();
     const title = args.title?.trim() || undefined;
+    const externalLink = args.externalLink?.trim() || undefined;
     const images = args.images ?? post.images;
     const videos: Id<"_storage">[] = [];
-    if (!title && !body && images.length === 0) {
+    if (!title && !body && !externalLink && images.length === 0) {
       throw new Error("Le post est vide.");
     }
     // Libère les fichiers retirés du post (sinon ils restent orphelins).
@@ -229,7 +234,14 @@ export const update = mutation({
       ctx,
       [...post.images, ...(post.videos ?? [])].filter((id) => !kept.has(id)),
     );
-    await ctx.db.patch(args.postId, { title, body, images, videos, editedAt: Date.now() });
+    await ctx.db.patch(args.postId, {
+      title,
+      body,
+      externalLink,
+      images,
+      videos,
+      editedAt: Date.now(),
+    });
   },
 });
 
@@ -241,6 +253,7 @@ export const importAirtablePosts = internalMutation({
         authorName: v.string(),
         title: v.optional(v.string()),
         body: v.string(),
+        externalLink: v.optional(v.string()),
         createdAt: v.string(),
       }),
     ),
@@ -257,7 +270,8 @@ export const importAirtablePosts = internalMutation({
       const ref = row.ref.trim();
       const body = row.body.trim();
       const title = row.title?.trim() || undefined;
-      if (!ref || (!title && !body)) {
+      const externalLink = row.externalLink?.trim() || undefined;
+      if (!ref || (!title && !body && !externalLink)) {
         result.skippedEmpty += 1;
         continue;
       }
@@ -267,6 +281,9 @@ export const importAirtablePosts = internalMutation({
         .withIndex("by_migrationSourceRef", (q) => q.eq("migrationSourceRef", ref))
         .unique();
       if (existing) {
+        if (externalLink && existing.externalLink !== externalLink) {
+          await ctx.db.patch(existing._id, { externalLink, editedAt: Date.now() });
+        }
         result.skippedExisting += 1;
         continue;
       }
@@ -289,6 +306,7 @@ export const importAirtablePosts = internalMutation({
         authorImageUrl: author?.imageUrl ?? fallback?.authorImageUrl,
         title,
         body,
+        externalLink,
         images: [],
         videos: [],
         pinned: false,
