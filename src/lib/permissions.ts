@@ -370,7 +370,7 @@ export const APPS: AppDefinition[] = [
 ];
 
 export const PORTAL_NAV = [
-  { to: "/", label: "Portail", icon: Home },
+  { to: "/portail", label: "Portail", icon: Home },
   { to: "/actualites", label: "Espace partage", pageKey: "mesoutils:actualites", icon: Newspaper },
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations", icon: CalendarCheck },
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
@@ -411,8 +411,9 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
 
 /** Retrouve la section principale correspondant à un pathname. */
 export function sectionForPath(pathname: string): (typeof PORTAL_NAV)[number] | undefined {
+  const normalizedPath = pathname === "/" ? "/actualites" : pathname;
   return PORTAL_NAV.find((item) =>
-    item.to === "/" ? pathname === "/" : pathname === item.to || pathname.startsWith(`${item.to}/`),
+    normalizedPath === item.to || normalizedPath.startsWith(`${item.to}/`),
   );
 }
 

@@ -20,6 +20,7 @@ export default function App() {
         <Route path="/sign-in/*" element={<Portail />} />
         <Route path="/sign-up/*" element={<Portail />} />
         <Route index element={<Portail />} />
+        <Route path="/portail" element={<Portail />} />
         <Route path="/compte" element={<Compte />} />
         <Route
           path="/actualites"

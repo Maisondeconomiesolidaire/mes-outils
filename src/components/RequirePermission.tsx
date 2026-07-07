@@ -67,7 +67,7 @@ function Denied({ title, description }: { title: string; description: string }) 
         <h1 className="mt-5 text-xl font-semibold text-[var(--foreground)]">{title}</h1>
         <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{description}</p>
         <Link
-          to="/"
+          to="/portail"
           className="mt-6 inline-flex items-center gap-2 rounded-lg border border-[var(--border)] px-4 py-2 text-sm font-medium text-[var(--foreground)] hover:bg-brand-50"
         >
           <LockKeyhole className="h-4 w-4" />
