@@ -11,10 +11,12 @@ import { Portail } from "./pages/Portail";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
 import { ConfirmRoot } from "./lib/confirm";
+import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 
 export default function App() {
   return (
     <>
+    <UpdateAvailableBanner />
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/sign-in/*" element={<Portail />} />
