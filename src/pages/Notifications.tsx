@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { Bell, CalendarCheck, CarFront, MessageCircle, Tag, ThumbsUp } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -26,10 +27,15 @@ export function Notifications() {
   const notifications = useQuery(api.mesoutilsNotifications.list) as NotificationItem[] | undefined;
   const markRead = useMutation(api.mesoutilsNotifications.markRead);
   const markAllRead = useMutation(api.mesoutilsNotifications.markAllRead);
+  const unread = notifications?.filter((notification) => !notification.read).length ?? 0;
+
+  useEffect(() => {
+    if (notifications !== undefined && unread > 0) {
+      void markAllRead();
+    }
+  }, [markAllRead, notifications, unread]);
 
   if (notifications === undefined) return <FullSpinner label="Chargement des notifications..." />;
-
-  const unread = notifications.filter((notification) => !notification.read).length;
 
   return (
     <div className="space-y-6">
