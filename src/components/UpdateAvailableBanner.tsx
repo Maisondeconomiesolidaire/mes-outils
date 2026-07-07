@@ -25,7 +25,7 @@ function signatureFromHtml(html: string) {
   return assets.filter((asset) => asset.includes("/assets/")).sort().join("|");
 }
 
-export function UpdateAvailableBanner() {
+export function UpdateAvailableBanner({ appName }: { appName: string }) {
   const initialSignature = useMemo(signatureFromDocument, []);
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
@@ -67,16 +67,31 @@ export function UpdateAvailableBanner() {
 
   if (!updateAvailable) return null;
 
+  const brandStyle = {
+    backgroundColor: "var(--color-brand-600, var(--primary, #1f8a80))",
+  };
+
   return (
-    <div className="fixed inset-x-0 top-0 z-[500] border-b border-amber-300/70 bg-amber-100 px-4 py-2 text-center text-sm font-medium text-amber-950 shadow-lg">
-      <span>Cette page vient d'être mise à jour. Actualisez la page pour profiter de la dernière version.</span>
+    <div className="fixed inset-x-0 top-3 z-[500] px-4">
+      <div className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-[var(--border)] bg-[var(--card)] px-4 py-3 text-[var(--foreground)] shadow-[var(--shadow-strong,0_18px_48px_rgba(0,0,0,0.18))] sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 gap-3 text-left">
+          <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={brandStyle} />
+          <div className="min-w-0">
+            <p className="font-semibold">Selim a encore bricolé deux-trois trucs...</p>
+            <p className="mt-1 text-sm leading-5 text-[var(--muted-foreground)]">
+              Pour profiter de la dernière version de {appName}, pensez à rafraîchir la page. Promis, c'est pour le mieux.
+            </p>
+          </div>
+        </div>
       <button
         type="button"
         onClick={() => window.location.reload()}
-        className="ml-3 rounded-md bg-amber-950 px-3 py-1 text-xs font-semibold text-white transition hover:bg-amber-900"
+          className="inline-flex shrink-0 items-center justify-center rounded-lg px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
+          style={brandStyle}
       >
-        Actualiser
+          Rafraîchir
       </button>
+      </div>
     </div>
   );
 }

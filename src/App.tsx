@@ -16,7 +16,7 @@ import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 export default function App() {
   return (
     <>
-    <UpdateAvailableBanner />
+    <UpdateAvailableBanner appName="Mes Outils" />
     <Routes>
       <Route element={<AppLayout />}>
         <Route path="/sign-in/*" element={<Portail />} />
