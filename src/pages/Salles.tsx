@@ -253,9 +253,10 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const dayStart = today.getTime();
+  const YEAR_MS = 365 * 86_400_000;
   const reservations = useQuery(api.reservations.listRoomReservations, {
-    start: dayStart - 86_400_000,
-    end: dayStart + 60 * 86_400_000,
+    start: dayStart - YEAR_MS,
+    end: dayStart + YEAR_MS,
   }) as RoomReservation[] | undefined;
   const cancel = useMutation(api.reservations.cancelRoomReservation);
   const roomName = new Map(rooms.map((room) => [String(room._id), room]));
