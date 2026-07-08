@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, env, internalQuery, mutation, query } from "./_generated/server";
+import { action, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -513,55 +513,41 @@ export const searchStaff = query({
 
 /* ─── Annuaire staff (pour réserver au nom d'un collègue) ────────────────── */
 
-type ClerkDirectoryUser = {
-  id?: unknown;
-  first_name?: unknown;
-  last_name?: unknown;
-  username?: unknown;
-  image_url?: unknown;
-  email_addresses?: unknown;
-};
-
-export const listStaffDirectory = action({
+/**
+ * Membres internes (admins / staff) sélectionnables dans « Réserver pour ». On
+ * exclut les clients et on ne renvoie que les personnes déjà connectées (donc
+ * dotées d'un clerkId + email) pour que les emails de réservation, confirmation
+ * et annulation puissent réellement leur parvenir.
+ */
+export const listStaffDirectory = query({
   args: {},
   handler: async (ctx): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> => {
     await requireStaff(ctx);
-    const secretKey = env.CLERK_SECRET_KEY;
-    if (!secretKey) return [];
 
-    const url = new URL("https://api.clerk.com/v1/users");
-    url.searchParams.set("limit", "200");
-    url.searchParams.set("order_by", "last_name");
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${secretKey}`, "Content-Type": "application/json" },
-    });
-    if (!response.ok) return [];
+    const perms = await ctx.db.query("crmPermissions").collect();
+    const results: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
+    const seen = new Set<string>();
 
-    const payload: unknown = await response.json();
-    const raw = Array.isArray(payload)
-      ? payload
-      : Array.isArray((payload as { data?: unknown }).data)
-        ? (payload as { data: unknown[] }).data
-        : [];
+    for (const perm of perms) {
+      if (!perm.active) continue;
+      if (perm.role === "client") continue; // membres internes uniquement
+      const email = perm.email.trim().toLowerCase();
+      if (!email) continue;
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_email", (q) => q.eq("email", email))
+        .first();
+      if (!user) continue; // jamais connecté → pas de clerkId, injoignable
+      if (seen.has(user.clerkId)) continue;
+      seen.add(user.clerkId);
+      const name =
+        perm.name?.trim() ||
+        [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+        email;
+      results.push({ clerkId: user.clerkId, name, imageUrl: user.imageUrl ?? null });
+    }
 
-    return raw
-      .map((entry) => {
-        const user = entry as ClerkDirectoryUser;
-        const clerkId = typeof user.id === "string" ? user.id : null;
-        if (!clerkId) return null;
-        const first = typeof user.first_name === "string" ? user.first_name : "";
-        const last = typeof user.last_name === "string" ? user.last_name : "";
-        const username = typeof user.username === "string" ? user.username : "";
-        const emails = Array.isArray(user.email_addresses) ? user.email_addresses : [];
-        const email =
-          emails.length > 0 && typeof (emails[0] as { email_address?: unknown }).email_address === "string"
-            ? ((emails[0] as { email_address: string }).email_address)
-            : "";
-        const name = [first, last].filter(Boolean).join(" ").trim() || username || email || "Utilisateur";
-        return { clerkId, name, imageUrl: typeof user.image_url === "string" ? user.image_url : null };
-      })
-      .filter((value): value is { clerkId: string; name: string; imageUrl: string | null } => Boolean(value))
-      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    return results.sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
 

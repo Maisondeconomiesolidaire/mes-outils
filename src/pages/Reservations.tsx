@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useAction, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
@@ -142,13 +142,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
 
   const bookRoom = useMutation(api.reservations.bookRoom);
   const requestVehicle = useMutation(api.reservations.requestVehicle);
-  const listDirectory = useAction(api.community.listStaffDirectory);
-  const [directory, setDirectory] = useState<Person[]>([]);
-  useEffect(() => {
-    let cancelled = false;
-    listDirectory().then((r) => { if (!cancelled) setDirectory(r as Person[]); }).catch(() => undefined);
-    return () => { cancelled = true; };
-  }, [listDirectory]);
+  const directory = (useQuery(api.community.listStaffDirectory, {}) ?? []) as Person[];
 
   const [bookingRoom, setBookingRoom] = useState<Room | null>(null);
   const [bookingVehicle, setBookingVehicle] = useState<Vehicle | null>(null);
