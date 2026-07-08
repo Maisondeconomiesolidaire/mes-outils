@@ -183,12 +183,10 @@ export function CalendarBoard({
                       role={onEventClick ? "button" : undefined}
                       tabIndex={onEventClick ? 0 : undefined}
                       onClick={
-                        onEventClick
-                          ? (e) => {
-                              e.stopPropagation();
-                              onEventClick(event.id, day);
-                            }
-                          : undefined
+                        (e) => {
+                          e.stopPropagation();
+                          onEventClick?.(event.id, day);
+                        }
                       }
                       onKeyDown={
                         onEventClick

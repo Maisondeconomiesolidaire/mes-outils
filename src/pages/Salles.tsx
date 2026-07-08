@@ -318,10 +318,6 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
           events={events}
           selected={selectedDay}
           onSelect={openDayPanel}
-          onEventClick={(id, day) => {
-            if (day) openDayPanel(day);
-            setSelectedReservationId(id as Id<"roomReservations">);
-          }}
         />
         {upcoming.length === 0 ? (
           <p className="text-sm text-[var(--muted-foreground)]">Aucune réservation de salle sur la période affichée.</p>
