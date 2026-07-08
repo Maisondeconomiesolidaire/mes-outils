@@ -895,6 +895,16 @@ function FleetCalendar({
     setDayPanelOpen(true);
   }
 
+  function openReservationDetailsFromPanel(reservationId: Id<"vehicleReservations">) {
+    setDayPanelOpen(false);
+    setSelectedReservationId(reservationId);
+  }
+
+  function openServiceDetailsFromPanel(serviceId: Id<"requests">) {
+    setDayPanelOpen(false);
+    setSelectedServiceId(serviceId);
+  }
+
   return (
     <div className="space-y-5">
       <CalendarBoard
@@ -939,11 +949,11 @@ function FleetCalendar({
                     </div>
                     {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente</span> : null}
                     {entry.kind === "reservation" ? (
-                      <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(entry.reservation._id)}>
+                      <Button size="sm" variant="secondary" onClick={() => openReservationDetailsFromPanel(entry.reservation._id)}>
                         <Info className="h-4 w-4" />Détails
                       </Button>
                     ) : entry.kind === "service" ? (
-                      <Button size="sm" variant="secondary" onClick={() => setSelectedServiceId(entry.service._id)}>
+                      <Button size="sm" variant="secondary" onClick={() => openServiceDetailsFromPanel(entry.service._id)}>
                         <Info className="h-4 w-4" />Détails
                       </Button>
                     ) : entry.kind === "control" ? (

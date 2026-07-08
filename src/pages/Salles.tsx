@@ -303,6 +303,11 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
       setDayPanelOpen(true);
     }
 
+    function openReservationDetailsFromPanel(reservationId: Id<"roomReservations">) {
+      setDayPanelOpen(false);
+      setSelectedReservationId(reservationId);
+    }
+
     return (
       <div className="space-y-3">
         <div className="relative max-w-xl">
@@ -360,7 +365,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
                             {reservation.userName} · {formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}
                           </p>
                         </div>
-                        <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(reservation._id)}>
+                        <Button size="sm" variant="secondary" onClick={() => openReservationDetailsFromPanel(reservation._id)}>
                           <Info className="h-4 w-4" />Détails
                         </Button>
                         <button
