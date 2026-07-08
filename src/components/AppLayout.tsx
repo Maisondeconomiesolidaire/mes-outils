@@ -17,6 +17,19 @@ const CLERK_APPEARANCE = { variables: { colorPrimary: "#47c667" } };
 
 type ClerkUser = NonNullable<ReturnType<typeof useUser>["user"]>;
 
+function authRedirectTarget() {
+  if (typeof window === "undefined") return null;
+  const value = new URLSearchParams(window.location.search).get("redirect_url");
+  if (!value) return null;
+  try {
+    const url = new URL(value, window.location.origin);
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
 export function AppLayout() {
   const [theme, setTheme] = useTheme();
   const logoSrc = theme === "dark" ? "/mesoutils-dark.png" : "/mesoutils-light.png";
@@ -63,6 +76,7 @@ function AuthPanel() {
   const navigate = useNavigate();
   const isSignIn = location.pathname.startsWith("/sign-in");
   const isSignUp = location.pathname.startsWith("/sign-up");
+  const redirectTarget = authRedirectTarget() ?? "/";
 
   if (!isSignIn && !isSignUp) {
     return (
@@ -91,14 +105,14 @@ function AuthPanel() {
   return isSignUp ? (
     <SignUp
       routing="hash"
-      fallbackRedirectUrl="/"
+      fallbackRedirectUrl={redirectTarget}
       signInUrl="/sign-in"
       appearance={CLERK_APPEARANCE}
     />
   ) : (
     <SignIn
       routing="hash"
-      fallbackRedirectUrl="/"
+      fallbackRedirectUrl={redirectTarget}
       signUpUrl="/sign-up"
       appearance={CLERK_APPEARANCE}
     />
@@ -107,6 +121,13 @@ function AuthPanel() {
 
 function RequiredNameGate({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {
   const { isLoaded, user } = useUser();
+  const redirectTarget = authRedirectTarget();
+
+  useEffect(() => {
+    if (!isLoaded || !user || !redirectTarget) return;
+    if (!user.firstName?.trim() || !user.lastName?.trim()) return;
+    window.location.replace(redirectTarget);
+  }, [isLoaded, redirectTarget, user]);
 
   if (!isLoaded || !user) return <FullSpinner label="Chargement de votre profil..." />;
 
