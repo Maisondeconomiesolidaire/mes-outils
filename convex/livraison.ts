@@ -88,6 +88,33 @@ export async function drivingDistanceKm(
   return (payload.routes[0].distance ?? 0) / 1000;
 }
 
+/** Distance ET durée routières (aller simple) entre deux points via Mapbox. */
+export async function drivingRoute(
+  from: { longitude: number; latitude: number },
+  to: { longitude: number; latitude: number },
+  accessToken: string,
+): Promise<{ km: number; minutes: number }> {
+  const coords = `${from.longitude},${from.latitude};${to.longitude},${to.latitude}`;
+  const url = new URL(
+    `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}`,
+  );
+  url.searchParams.set("access_token", accessToken);
+  url.searchParams.set("overview", "false");
+  url.searchParams.set("alternatives", "false");
+
+  const response = await fetch(url.toString());
+  const payload = (await response.json()) as {
+    code?: string;
+    message?: string;
+    routes?: Array<{ distance?: number; duration?: number }>;
+  };
+  if (!response.ok || payload.code !== "Ok" || !payload.routes?.length) {
+    throw new Error(payload.message || "Calcul d'itinéraire Mapbox impossible.");
+  }
+  const route = payload.routes[0];
+  return { km: (route.distance ?? 0) / 1000, minutes: (route.duration ?? 0) / 60 };
+}
+
 /** Distance à vol d'oiseau (km) — pour filtrer rapidement les créneaux. */
 function haversineKm(
   a: { longitude: number; latitude: number },
@@ -381,6 +408,46 @@ export const computeDeliveryFee = action({
     // Tarif : 0,50 € du kilomètre (aller-retour).
     const deliveryFee = Math.max(0, Math.round(distanceKm * 0.5 * 100) / 100);
     return { distanceKm, deliveryFee };
+  },
+});
+
+// Adresses de départ des collectes (devis C3).
+const C3_DEPARTURE_ADDRESSES = {
+  LCP: "4 rue de la prairie 60650 Lachapelle-aux-Pots",
+  GEB: "150 route de paris 76220 Gournay-en-Bray",
+} as const;
+
+/**
+ * Distance + durée routières (aller simple) entre un départ collecte (LCP/GEB)
+ * et l'adresse de collecte du client, pour le calcul devis à 1 €/km.
+ */
+export const estimateCollecteRoute = action({
+  args: {
+    departure: v.union(v.literal("LCP"), v.literal("GEB")),
+    address: v.string(),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ km: number; minutes: number } | null> => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, "demandes", "read")) {
+      throw new Error("Accès CRM insuffisant.");
+    }
+    const accessToken = process.env.MAPBOX_ACCESS_TOKEN;
+    if (!accessToken) {
+      throw new Error("MAPBOX_ACCESS_TOKEN n'est pas configurée côté Convex.");
+    }
+    const destination = buildAddressString(args);
+    if (!destination) return null;
+
+    const [from, to] = await Promise.all([
+      geocode(C3_DEPARTURE_ADDRESSES[args.departure], accessToken),
+      geocode(destination, accessToken),
+    ]);
+    return await drivingRoute(from, to, accessToken);
   },
 });
 
