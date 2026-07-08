@@ -175,6 +175,8 @@ function requestStorageIds(request: Doc<"requests">) {
   for (const id of request.afterPhotos ?? []) ids.add(id);
   for (const item of request.aerogommage ?? []) {
     for (const id of item.photos ?? []) ids.add(id);
+    for (const id of item.beforePhotos ?? []) ids.add(id);
+    for (const id of item.afterPhotos ?? []) ids.add(id);
   }
   for (const entry of request.collecte?.categoryPhotos ?? []) {
     for (const id of entry.photos ?? []) ids.add(id);
@@ -729,6 +731,20 @@ export const get = query({
         ).filter((u): u is string => u !== null),
       ),
     );
+    const aerogommageBeforePhotos = await Promise.all(
+      (request.aerogommage ?? []).map(async (item) =>
+        (
+          await Promise.all((item.beforePhotos ?? []).map((p) => ctx.storage.getUrl(p)))
+        ).filter((u): u is string => u !== null),
+      ),
+    );
+    const aerogommageAfterPhotos = await Promise.all(
+      (request.aerogommage ?? []).map(async (item) =>
+        (
+          await Promise.all((item.afterPhotos ?? []).map((p) => ctx.storage.getUrl(p)))
+        ).filter((u): u is string => u !== null),
+      ),
+    );
     // Résout les URLs des photos de collecte, groupées par catégorie.
     const collecteCategoryPhotos = await Promise.all(
       (request.collecte?.categoryPhotos ?? []).map(async (entry) => ({
@@ -752,6 +768,8 @@ export const get = query({
       beforePhotoUrls: beforePhotoUrls.filter((u): u is string => u !== null),
       afterPhotoUrls: afterPhotoUrls.filter((u): u is string => u !== null),
       aerogommagePhotos,
+      aerogommageBeforePhotos,
+      aerogommageAfterPhotos,
       collecteCategoryPhotos,
       livraisonArticleUrl,
       livraisonReferenceUrl,

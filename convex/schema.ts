@@ -128,6 +128,9 @@ export const aerogommageItem = v.object({
   comment: v.optional(v.string()),
   // Photos rattachées à cet objet précis.
   photos: v.optional(v.array(v.id("_storage"))),
+  // Photos de suivi rattachées à cet objet précis.
+  beforePhotos: v.optional(v.array(v.id("_storage"))),
+  afterPhotos: v.optional(v.array(v.id("_storage"))),
 });
 
 const address = v.object({
