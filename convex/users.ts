@@ -42,6 +42,177 @@ async function getProfileByClerkId(ctx: QueryCtx | MutationCtx, clerkId: string)
     .unique();
 }
 
+async function getProfileByEmail(ctx: QueryCtx | MutationCtx, email: string) {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  return await ctx.db
+    .query("users")
+    .withIndex("by_email", (q) => q.eq("email", normalized))
+    .first();
+}
+
+function directPairKey(a: string, b: string) {
+  return [a, b].sort().join("__");
+}
+
+function replaceClerkIdInHref(href: string | undefined, oldClerkId: string, newClerkId: string) {
+  if (!href) return href;
+  return href
+    .replaceAll(oldClerkId, newClerkId)
+    .replaceAll(encodeURIComponent(oldClerkId), encodeURIComponent(newClerkId));
+}
+
+async function remapClerkIdEverywhere(
+  ctx: MutationCtx,
+  oldClerkId: string,
+  newClerkId: string,
+  now: number,
+) {
+  if (!oldClerkId || oldClerkId === newClerkId) return;
+
+  const requests = await ctx.db
+    .query("requests")
+    .withIndex("by_userId", (q) => q.eq("userId", oldClerkId))
+    .collect();
+  for (const request of requests) {
+    await ctx.db.patch(request._id, { userId: newClerkId, updatedAt: now });
+  }
+
+  const wishlists = await ctx.db
+    .query("wishlists")
+    .withIndex("by_user", (q) => q.eq("userId", oldClerkId))
+    .collect();
+  for (const wishlist of wishlists) {
+    await ctx.db.patch(wishlist._id, { userId: newClerkId });
+  }
+
+  const customerMessages = await ctx.db
+    .query("messages")
+    .withIndex("by_senderClerkId", (q) => q.eq("senderClerkId", oldClerkId))
+    .collect();
+  for (const message of customerMessages) {
+    await ctx.db.patch(message._id, { senderClerkId: newClerkId });
+  }
+
+  const posts = await ctx.db
+    .query("posts")
+    .withIndex("by_authorClerkId", (q) => q.eq("authorClerkId", oldClerkId))
+    .collect();
+  for (const post of posts) {
+    await ctx.db.patch(post._id, { authorClerkId: newClerkId });
+  }
+
+  const postComments = await ctx.db
+    .query("postComments")
+    .withIndex("by_authorClerkId", (q) => q.eq("authorClerkId", oldClerkId))
+    .collect();
+  for (const comment of postComments) {
+    await ctx.db.patch(comment._id, { authorClerkId: newClerkId });
+  }
+
+  const postLikes = await ctx.db
+    .query("postLikes")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", oldClerkId))
+    .collect();
+  for (const like of postLikes) {
+    await ctx.db.patch(like._id, { clerkId: newClerkId });
+  }
+
+  const notifications = await ctx.db
+    .query("mesoutilsNotifications")
+    .withIndex("by_recipient_createdAt", (q) => q.eq("recipientClerkId", oldClerkId))
+    .collect();
+  for (const notification of notifications) {
+    await ctx.db.patch(notification._id, {
+      recipientClerkId: newClerkId,
+      href: replaceClerkIdInHref(notification.href, oldClerkId, newClerkId),
+    });
+  }
+
+  const roomReservations = await ctx.db
+    .query("roomReservations")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", oldClerkId))
+    .collect();
+  for (const reservation of roomReservations) {
+    await ctx.db.patch(reservation._id, { clerkId: newClerkId });
+  }
+  const roomReservationsFor = await ctx.db
+    .query("roomReservations")
+    .withIndex("by_bookedForClerkId", (q) => q.eq("bookedForClerkId", oldClerkId))
+    .collect();
+  for (const reservation of roomReservationsFor) {
+    await ctx.db.patch(reservation._id, { bookedForClerkId: newClerkId });
+  }
+
+  const vehicleReservations = await ctx.db
+    .query("vehicleReservations")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", oldClerkId))
+    .collect();
+  for (const reservation of vehicleReservations) {
+    await ctx.db.patch(reservation._id, { clerkId: newClerkId });
+  }
+  const vehicleReservationsFor = await ctx.db
+    .query("vehicleReservations")
+    .withIndex("by_bookedForClerkId", (q) => q.eq("bookedForClerkId", oldClerkId))
+    .collect();
+  for (const reservation of vehicleReservationsFor) {
+    await ctx.db.patch(reservation._id, { bookedForClerkId: newClerkId });
+  }
+
+  const events = await ctx.db
+    .query("events")
+    .withIndex("by_authorClerkId", (q) => q.eq("authorClerkId", oldClerkId))
+    .collect();
+  for (const event of events) {
+    await ctx.db.patch(event._id, { authorClerkId: newClerkId });
+  }
+
+  const deals = await ctx.db
+    .query("dealPosts")
+    .withIndex("by_authorClerkId", (q) => q.eq("authorClerkId", oldClerkId))
+    .collect();
+  for (const deal of deals) {
+    await ctx.db.patch(deal._id, { authorClerkId: newClerkId });
+  }
+
+  const sentDirectMessages = await ctx.db
+    .query("directMessages")
+    .withIndex("by_from", (q) => q.eq("fromClerkId", oldClerkId))
+    .collect();
+  for (const message of sentDirectMessages) {
+    await ctx.db.patch(message._id, {
+      fromClerkId: newClerkId,
+      pairKey: directPairKey(newClerkId, message.toClerkId),
+    });
+  }
+  const receivedDirectMessages = await ctx.db
+    .query("directMessages")
+    .withIndex("by_to", (q) => q.eq("toClerkId", oldClerkId))
+    .collect();
+  for (const message of receivedDirectMessages) {
+    await ctx.db.patch(message._id, {
+      toClerkId: newClerkId,
+      pairKey: directPairKey(message.fromClerkId, newClerkId),
+    });
+  }
+
+  const klydeOrders = await ctx.db
+    .query("klydeOrders")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", oldClerkId))
+    .collect();
+  for (const order of klydeOrders) {
+    await ctx.db.patch(order._id, { clerkId: newClerkId });
+  }
+
+  const klydeWishlists = await ctx.db
+    .query("klydeWishlists")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", oldClerkId))
+    .collect();
+  for (const wishlist of klydeWishlists) {
+    await ctx.db.patch(wishlist._id, { clerkId: newClerkId });
+  }
+}
+
 /**
  * Appelée à la connexion : crée le profil s'il n'existe pas et rattache
  * automatiquement les demandes passées dont l'email correspond.
@@ -62,18 +233,42 @@ export const syncProfile = mutation({
     const imageUrl = (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined;
 
     if (!profile) {
-      const profileId = await ctx.db.insert("users", {
-        clerkId,
-        email,
-        firstName: identity.givenName ? titleCaseName(identity.givenName) : undefined,
-        lastName: identity.familyName ? titleCaseName(identity.familyName) : undefined,
-        imageUrl,
-        signupApp: source?.app,
-        signupPath: source?.path,
-        createdAt: now,
-        updatedAt: now,
-      });
-      profile = await ctx.db.get(profileId);
+      const profileByEmail = email ? await getProfileByEmail(ctx, email) : null;
+      if (profileByEmail) {
+        const previousClerkIds = Array.from(
+          new Set([...(profileByEmail.previousClerkIds ?? []), profileByEmail.clerkId]),
+        ).filter((id) => id && id !== clerkId);
+        await remapClerkIdEverywhere(ctx, profileByEmail.clerkId, clerkId, now);
+        await ctx.db.patch(profileByEmail._id, {
+          clerkId,
+          previousClerkIds,
+          lastClerkMigrationAt: now,
+          firstName: identity.givenName
+            ? titleCaseName(identity.givenName)
+            : profileByEmail.firstName,
+          lastName: identity.familyName
+            ? titleCaseName(identity.familyName)
+            : profileByEmail.lastName,
+          imageUrl: imageUrl ?? profileByEmail.imageUrl,
+          signupApp: profileByEmail.signupApp ?? source?.app,
+          signupPath: profileByEmail.signupPath ?? source?.path,
+          updatedAt: now,
+        });
+        profile = await ctx.db.get(profileByEmail._id);
+      } else {
+        const profileId = await ctx.db.insert("users", {
+          clerkId,
+          email,
+          firstName: identity.givenName ? titleCaseName(identity.givenName) : undefined,
+          lastName: identity.familyName ? titleCaseName(identity.familyName) : undefined,
+          imageUrl,
+          signupApp: source?.app,
+          signupPath: source?.path,
+          createdAt: now,
+          updatedAt: now,
+        });
+        profile = await ctx.db.get(profileId);
+      }
     } else if (source && (!profile.signupApp || !profile.signupPath)) {
       // Complète la source si elle manquait (profils créés avant le suivi).
       await ctx.db.patch(profile._id, {

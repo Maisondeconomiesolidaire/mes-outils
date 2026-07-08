@@ -459,6 +459,10 @@ export default defineSchema(
     address: v.optional(v.string()),
     postalCode: v.optional(v.string()),
     city: v.optional(v.string()),
+    // Migration Clerk dev -> prod : anciens ids Clerk remplacés à la première
+    // reconnexion via l'adresse email.
+    previousClerkIds: v.optional(v.array(v.string())),
+    lastClerkMigrationAt: v.optional(v.number()),
     // Traçabilité de l'inscription : app (recycapp, mesoutils…) et chemin/
     // formulaire d'origine (/collecte, /boutique/panier…). Fixé à la création.
     signupApp: v.optional(v.string()),
@@ -482,6 +486,7 @@ export default defineSchema(
     readByStaffAt: v.optional(v.number()),
   })
     .index("by_requestId", ["requestId"])
+    .index("by_senderClerkId", ["senderClerkId"])
     .index("by_createdAt", ["createdAt"]),
 
   notifications: defineTable({
@@ -842,6 +847,7 @@ export default defineSchema(
     editedAt: v.optional(v.number()),
     migrationSourceRef: v.optional(v.string()),
   })
+    .index("by_authorClerkId", ["authorClerkId"])
     .index("by_createdAt", ["createdAt"])
     .index("by_migrationSourceRef", ["migrationSourceRef"]),
 
@@ -852,7 +858,9 @@ export default defineSchema(
     authorImageUrl: v.optional(v.string()),
     body: v.string(),
     createdAt: v.number(),
-  }).index("by_postId", ["postId"]),
+  })
+    .index("by_postId", ["postId"])
+    .index("by_authorClerkId", ["authorClerkId"]),
 
   postLikes: defineTable({
     postId: v.id("posts"),
@@ -862,6 +870,7 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_postId", ["postId"])
+    .index("by_clerkId", ["clerkId"])
     .index("by_post_and_user", ["postId", "clerkId"]),
 
   mesoutilsNotifications: defineTable({
@@ -934,6 +943,8 @@ export default defineSchema(
     feedbackNotes: v.optional(v.string()),
   })
     .index("by_roomId", ["roomId"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_bookedForClerkId", ["bookedForClerkId"])
     .index("by_start", ["start"]),
 
   /**
@@ -977,6 +988,8 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_vehicleId", ["vehicleId"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_bookedForClerkId", ["bookedForClerkId"])
     .index("by_status", ["status"])
     .index("by_start", ["start"]),
 
@@ -1026,7 +1039,9 @@ export default defineSchema(
     end: v.optional(v.number()),
     images: v.array(v.id("_storage")),
     createdAt: v.number(),
-  }).index("by_start", ["start"]),
+  })
+    .index("by_authorClerkId", ["authorClerkId"])
+    .index("by_start", ["start"]),
 
   /** Espace partage — bons plans internes (prêt, don, vente, échange). */
   dealPosts: defineTable({
@@ -1047,7 +1062,9 @@ export default defineSchema(
     images: v.array(v.id("_storage")),
     status: v.union(v.literal("open"), v.literal("closed")),
     createdAt: v.number(),
-  }).index("by_createdAt", ["createdAt"]),
+  })
+    .index("by_authorClerkId", ["authorClerkId"])
+    .index("by_createdAt", ["createdAt"]),
 
   /** Messagerie interne entre utilisateurs. */
   directMessages: defineTable({
