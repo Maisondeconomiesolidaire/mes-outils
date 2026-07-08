@@ -308,6 +308,11 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
       setSelectedReservationId(reservationId);
     }
 
+    function openReservationDetailsFromCalendar(reservationId: string, day?: Date) {
+      if (day) setSelectedDay(startOfLocalDayTimestamp(day.getTime()));
+      setSelectedReservationId(reservationId as Id<"roomReservations">);
+    }
+
     return (
       <div className="space-y-3">
         <div className="relative max-w-xl">
@@ -318,6 +323,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
           events={events}
           selected={selectedDay}
           onSelect={openDayPanel}
+          onEventClick={openReservationDetailsFromCalendar}
         />
         {upcoming.length === 0 ? (
           <p className="text-sm text-[var(--muted-foreground)]">Aucune réservation de salle sur la période affichée.</p>

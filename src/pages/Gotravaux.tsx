@@ -884,6 +884,16 @@ function FleetCalendar({
     setDayPanelOpen(true);
   }
 
+  function handleEventClick(id: string, day?: Date) {
+    const entry = entries.find((item) => item.id === id);
+    if (!entry) return;
+    setSelectedDay(startOfDayTimestamp((day ?? new Date(entry.date)).getTime()));
+    if (entry.kind === "reservation") setSelectedReservationId(entry.reservation._id);
+    else if (entry.kind === "service") setSelectedServiceId(entry.service._id);
+    else if (entry.kind === "control") onOpenVehicle(entry.vehicle._id);
+    else onOpenVehicle(entry.task.vehicleId);
+  }
+
   function openReservationDetailsFromPanel(reservationId: Id<"vehicleReservations">) {
     setDayPanelOpen(false);
     setSelectedReservationId(reservationId);
@@ -900,6 +910,7 @@ function FleetCalendar({
         events={calendarEvents}
         selected={selectedDay}
         onSelect={openDayPanel}
+        onEventClick={handleEventClick}
       />
       <div className={`fixed inset-0 z-[70] transition ${dayPanelOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
         <button
