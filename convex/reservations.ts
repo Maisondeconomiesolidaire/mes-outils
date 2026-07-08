@@ -65,8 +65,14 @@ async function ensureVehicleAvailable(
     cursor < end;
     cursor += dayMs
   ) {
-    const reason = await vehicleBusyReason(ctx, vehicleId, cursor);
+    // Collectes / tournées / maintenance occupent le véhicule toute la journée.
+    // Les réservations, elles, sont vérifiées à l'heure près juste après.
+    const reason = await vehicleBusyReason(ctx, vehicleId, cursor, { ignoreReservations: true });
     if (reason) throw new Error(reason);
+  }
+  const approved = await approvedReservationsForVehicle(ctx, vehicleId);
+  if (approved.some((reservation) => overlaps(reservation.start, reservation.end, start, end))) {
+    throw new Error("Ce véhicule est déjà réservé sur ce créneau.");
   }
 }
 
@@ -325,7 +331,12 @@ async function isVehicleFree(
 ) {
   const dayMs = 86_400_000;
   for (let cursor = Math.floor(start / dayMs) * dayMs; cursor < end; cursor += dayMs) {
-    if (await vehicleBusyReason(ctx, vehicleId, cursor)) return false;
+    // Réservations exclues ici : elles se chevauchent à l'heure près (ci-dessous).
+    if (await vehicleBusyReason(ctx, vehicleId, cursor, { ignoreReservations: true })) return false;
+  }
+  const approved = await approvedReservationsForVehicle(ctx, vehicleId);
+  if (approved.some((reservation) => overlaps(reservation.start, reservation.end, start, end))) {
+    return false;
   }
   return true;
 }

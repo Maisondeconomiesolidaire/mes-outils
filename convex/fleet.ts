@@ -33,6 +33,10 @@ export async function vehicleBusyReason(
   opts: {
     excludeRequestId?: Id<"requests">;
     excludeTourneeId?: Id<"tournees">;
+    // Les réservations Mes Outils sont horodatées (créneau à l'heure près). Les
+    // flux de réservation véhicule vérifient les chevauchements précisément et
+    // passent cette option pour ne pas bloquer toute la journée.
+    ignoreReservations?: boolean;
   } = {},
 ): Promise<string | null> {
   const requests = await ctx.db
@@ -62,14 +66,16 @@ export async function vehicleBusyReason(
     }
   }
 
-  const reservations = await ctx.db
-    .query("vehicleReservations")
-    .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
-    .collect();
-  for (const reservation of reservations) {
-    if (reservation.status !== "approved") continue;
-    if (overlapsUtcDay(reservation.start, reservation.end, date)) {
-      return "Réservé via Mes Outils";
+  if (!opts.ignoreReservations) {
+    const reservations = await ctx.db
+      .query("vehicleReservations")
+      .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
+      .collect();
+    for (const reservation of reservations) {
+      if (reservation.status !== "approved") continue;
+      if (overlapsUtcDay(reservation.start, reservation.end, date)) {
+        return "Réservé via Mes Outils";
+      }
     }
   }
 
