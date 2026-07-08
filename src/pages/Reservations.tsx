@@ -709,8 +709,8 @@ function MyReservations() {
               ((reservation.kind === "vehicle" && reservation.status === "approved") ||
                 (reservation.kind === "room" && reservation.status === "confirmed"));
             return (
-              <div key={`${reservation.kind}-${reservation._id}`} className={`flex flex-wrap items-center gap-3 p-4 ${past ? "opacity-60" : ""}`}>
-                <span className="h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-[var(--accent)]">
+              <div key={`${reservation.kind}-${reservation._id}`} className="flex flex-wrap items-center gap-3 p-4">
+                <span className={`h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-[var(--accent)] ${past ? "opacity-60" : ""}`}>
                   {reservation.photoUrl ? (
                     <img src={reservation.photoUrl} alt="" className="h-full w-full object-cover" />
                   ) : (
@@ -719,7 +719,7 @@ function MyReservations() {
                     </span>
                   )}
                 </span>
-                <div className="min-w-0 flex-1">
+                <div className={`min-w-0 flex-1 ${past ? "opacity-60" : ""}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold text-[var(--foreground)]">{reservation.assetName}</p>
                     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusStyle[reservation.status]}`}>{statusLabel[reservation.status]}</span>
