@@ -15,14 +15,26 @@ export function titleCaseName(value: string): string {
     );
 }
 
-/** Normalise les prénom/nom d'un objet client. */
+/** Normalise une adresse email pour comparaison/rattachement (trim + minuscules). */
+export function normalizeEmail(email: string | null | undefined): string {
+  return (email ?? "").trim().toLowerCase();
+}
+
+/**
+ * Normalise les prénom/nom et l'email d'un objet client. L'email est normalisé
+ * (trim + minuscules) pour que le rattachement des demandes par email à
+ * l'inscription fonctionne de façon fiable, y compris pour les demandes créées
+ * en interne par un membre de l'équipe.
+ */
 export function normalizeCustomer<T extends { firstName: string; lastName: string }>(
   customer: T,
 ): T {
+  const email = (customer as { email?: unknown }).email;
   return {
     ...customer,
     firstName: titleCaseName(customer.firstName),
     lastName: titleCaseName(customer.lastName),
+    ...(typeof email === "string" ? { email: normalizeEmail(email) } : {}),
   };
 }
 

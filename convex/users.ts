@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { normalizeCustomer, requireUser, titleCaseName } from "./lib";
+import { normalizeCustomer, normalizeEmail, requireUser, titleCaseName } from "./lib";
 import { STEP } from "./processes";
 import type { Doc, Id } from "./_generated/dataModel";
 
@@ -226,7 +226,7 @@ export const syncProfile = mutation({
   handler: async (ctx, { source }) => {
     const identity = await requireUser(ctx);
     const clerkId = identity.subject;
-    const email = (identity.email ?? "").toLowerCase();
+    const email = normalizeEmail(identity.email);
 
     let profile = await getProfileByClerkId(ctx, clerkId);
     const now = Date.now();
@@ -289,12 +289,13 @@ export const syncProfile = mutation({
       }
     }
 
-    // Rattacher les demandes existantes créées sans compte (par email).
+    // Rattacher les demandes existantes créées sans compte (demandes internes
+    // saisies par l'équipe incluses) dont l'email correspond, à l'inscription.
     if (email) {
       const candidates = await ctx.db.query("requests").collect();
       await Promise.all(
         candidates
-          .filter((r) => !r.userId && r.customer.email?.toLowerCase() === email)
+          .filter((r) => !r.userId && normalizeEmail(r.customer.email) === email)
           .map((r) => ctx.db.patch(r._id, { userId: clerkId })),
       );
     }
