@@ -37,6 +37,12 @@ const VEHICLE_REQUEST_NOTIFY_EMAILS = [
   "y.prata@eco-solidaire.fr",
 ];
 
+const PERMANENT_DELETE_EMAIL = "lahmerselim@gmail.com";
+
+function canPermanentlyDelete(identity: { email?: string | null }) {
+  return identity.email?.trim().toLowerCase() === PERMANENT_DELETE_EMAIL;
+}
+
 function ensureRange(start: number, end: number) {
   if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) {
     throw new Error("Créneau invalide.");
@@ -161,6 +167,7 @@ export const listRoomReservations = query({
     ensureRange(args.start, args.end);
     const reservations = await ctx.db.query("roomReservations").collect();
     return reservations.filter((reservation) =>
+      reservation.status !== "cancelled" &&
       overlaps(reservation.start, reservation.end, args.start, args.end),
     );
   },
@@ -199,6 +206,7 @@ export const bookRoom = mutation({
       .withIndex("by_roomId", (q) => q.eq("roomId", args.roomId))
       .collect();
     const conflict = existing.find((reservation) =>
+      reservation.status !== "cancelled" &&
       overlaps(reservation.start, reservation.end, args.start, args.end),
     );
     if (conflict) {
@@ -218,6 +226,7 @@ export const bookRoom = mutation({
       start: args.start,
       end: args.end,
       notes: args.notes?.trim() || undefined,
+      status: "confirmed",
       createdAt: Date.now(),
     });
     await createMesoutilsNotification(ctx, {
@@ -284,7 +293,11 @@ export const cancelRoomReservation = mutation({
       throw new Error("Annulation non autorisée.");
     }
     const room = await ctx.db.get(reservation.roomId);
-    await ctx.db.delete(args.reservationId);
+    if (canPermanentlyDelete(identity)) {
+      await ctx.db.delete(args.reservationId);
+      return;
+    }
+    await ctx.db.patch(args.reservationId, { status: "cancelled" });
     const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
     const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
@@ -328,7 +341,9 @@ export const availableRooms = query({
       (room) =>
         !reservations.some(
           (reservation) =>
-            reservation.roomId === room._id && overlaps(reservation.start, reservation.end, args.start, args.end),
+            reservation.status !== "cancelled" &&
+            reservation.roomId === room._id &&
+            overlaps(reservation.start, reservation.end, args.start, args.end),
         ),
     );
     return await Promise.all(
@@ -357,6 +372,7 @@ export const listRoomsForSlot = query({
           .filter(
             (reservation) =>
               reservation.roomId === room._id &&
+              reservation.status !== "cancelled" &&
               overlaps(reservation.start, reservation.end, args.start, args.end),
           )
           .sort((a, b) => a.start - b.start)[0];
@@ -433,7 +449,11 @@ export const listVehicleBookings = query({
     const vehicles = await ctx.db.query("vehicles").collect();
     const nameById = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle.name]));
     return reservations
-      .filter((reservation) => reservation.status !== "rejected" && overlaps(reservation.start, reservation.end, args.start, args.end))
+      .filter((reservation) =>
+        reservation.status !== "rejected" &&
+        reservation.status !== "cancelled" &&
+        overlaps(reservation.start, reservation.end, args.start, args.end)
+      )
       .map((reservation) => ({
         _id: reservation._id,
         vehicleName: nameById.get(String(reservation.vehicleId)) ?? "Véhicule",
@@ -505,7 +525,7 @@ export const listMyReservations = query({
           label: reservation.title,
           start: reservation.start,
           end: reservation.end,
-          status: "confirmed" as const,
+          status: reservation.status ?? ("confirmed" as const),
           feedbackSubmittedAt: reservation.feedbackSubmittedAt,
         })),
       ...vehicleRes
@@ -764,7 +784,7 @@ export const listVehicles = query({
 export const listVehicleReservations = query({
   args: {
     status: v.optional(
-      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"), v.literal("cancelled")),
     ),
   },
   handler: async (ctx, args) => {
@@ -968,6 +988,9 @@ async function applyVehicleReservationDecision(
   if (opts.requireRecyclerie && vehicle?.recycappEnabled !== true) {
     throw new Error("Ce véhicule n'est pas rattaché à la Recyclerie.");
   }
+  if (reservation.status === "cancelled") {
+    throw new Error("Cette réservation a été annulée.");
+  }
 
   if (args.decision === "approved") {
     await ensureVehicleAvailable(ctx, reservation.vehicleId, reservation.start, reservation.end);
@@ -1076,7 +1099,7 @@ export const decideRecyclerieVehicleReservation = mutation({
 export const listRecyclerieVehicleReservations = query({
   args: {
     status: v.optional(
-      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected")),
+      v.union(v.literal("pending"), v.literal("approved"), v.literal("rejected"), v.literal("cancelled")),
     ),
   },
   handler: async (ctx, args) => {
@@ -1111,13 +1134,23 @@ export const cancelRecyclerieVehicleReservation = mutation({
   args: { reservationId: v.id("vehicleReservations") },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "reservations", "manage");
+    const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
     const vehicle = await ctx.db.get(reservation.vehicleId);
     if (vehicle?.recycappEnabled !== true) {
       throw new Error("Ce véhicule n'est pas rattaché à la Recyclerie.");
     }
-    await ctx.db.delete(args.reservationId);
+    if (canPermanentlyDelete(identity)) {
+      await ctx.db.delete(args.reservationId);
+      return;
+    }
+    await ctx.db.patch(args.reservationId, {
+      status: "cancelled",
+      decisionNote: "Demande annulée",
+      decidedBy: displayName(identity),
+      decidedAt: Date.now(),
+    });
     const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
     const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
@@ -1153,7 +1186,16 @@ export const cancelVehicleReservation = mutation({
       throw new Error("Annulation non autorisée.");
     }
     const vehicle = await ctx.db.get(reservation.vehicleId);
-    await ctx.db.delete(args.reservationId);
+    if (canPermanentlyDelete(identity)) {
+      await ctx.db.delete(args.reservationId);
+      return;
+    }
+    await ctx.db.patch(args.reservationId, {
+      status: "cancelled",
+      decisionNote: "Demande annulée",
+      decidedBy: displayName(identity),
+      decidedAt: Date.now(),
+    });
     const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
     const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {

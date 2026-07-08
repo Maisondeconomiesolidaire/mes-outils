@@ -766,6 +766,7 @@ function FleetCalendar({
 }) {
   const access = usePermissionsAccess();
   const canManageReservations = canAccess(access, "mesoutils:reservations", "manage");
+  const canDeleteForever = access?.email?.trim().toLowerCase() === "lahmerselim@gmail.com";
   const reservations = useQuery(api.reservations.listVehicleReservations, canSeeReservations ? {} : "skip") as ReservationItem[] | undefined;
   const services = useQuery(api.gotravaux.listScheduledServices, {}) as ServiceItem[] | undefined;
   const decide = useMutation(api.reservations.decideVehicleReservation);
@@ -790,7 +791,7 @@ function FleetCalendar({
     });
   }
   for (const reservation of reservations ?? []) {
-    if (reservation.status === "rejected") continue;
+    if (reservation.status === "rejected" || reservation.status === "cancelled") continue;
     entries.push({
       id: `reservation-${reservation._id}`,
       kind: "reservation",
@@ -952,6 +953,7 @@ function FleetCalendar({
       <ReservationDetailsModal
         reservation={selectedReservation}
         canManage={canManageReservations}
+        canDeleteForever={canDeleteForever}
         onClose={() => setSelectedReservationId(null)}
         onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
@@ -1078,16 +1080,31 @@ function overlapsDay(start: number, end: number | undefined, dayStart: number) {
 function VehicleReservationsPanel() {
   const access = usePermissionsAccess();
   const canManage = canAccess(access, "mesoutils:reservations", "manage");
+  const canDeleteForever = access?.email?.trim().toLowerCase() === "lahmerselim@gmail.com";
   const reservations = useQuery(api.reservations.listVehicleReservations, {}) as ReservationItem[] | undefined;
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
   const [selectedId, setSelectedId] = useState<Id<"vehicleReservations"> | null>(null);
+  const [query, setQuery] = useState("");
 
   if (reservations === undefined) return <FullSpinner label="Chargement des réservations..." />;
-  if (reservations.length === 0) return <EmptyState icon={<CalendarClock className="h-8 w-8" />} title="Aucune réservation" description="Les demandes de réservation apparaîtront ici." />;
 
-  const pending = reservations.filter((r) => r.status === "pending");
-  const others = reservations.filter((r) => r.status !== "pending");
+  const needle = query.trim().toLowerCase();
+  const visibleReservations = reservations.filter((reservation) => {
+    if (!needle) return true;
+    return [
+      reservation.userName,
+      reservation.bookedByName,
+      reservation.purpose,
+      reservation.vehicle?.name,
+      reservation.vehicle?.brand,
+      reservation.vehicle?.model,
+      reservation.vehicle?.plate,
+      reservation.status,
+    ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+  });
+  const pending = visibleReservations.filter((r) => r.status === "pending");
+  const others = visibleReservations.filter((r) => r.status !== "pending");
   const selected = reservations.find((reservation) => reservation._id === selectedId) ?? null;
 
   async function decideAndClose(reservationId: Id<"vehicleReservations">, decision: "approved" | "rejected") {
@@ -1096,19 +1113,33 @@ function VehicleReservationsPanel() {
   }
 
   async function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
-    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?"))) return;
+    const message = canDeleteForever
+      ? "Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?"
+      : "Annuler cette demande de réservation ? Elle restera visible dans l'historique.";
+    if (!(await confirmPermanentDelete(message))) return;
     void cancel({ reservationId });
     setSelectedId(null);
   }
 
   return (
     <div className="space-y-6">
+      <div className="relative max-w-xl">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+        <Input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Rechercher par nom, véhicule, plaque, motif..."
+          className="pl-9"
+        />
+      </div>
+      {reservations.length === 0 ? <EmptyState icon={<CalendarClock className="h-8 w-8" />} title="Aucune réservation" description="Les demandes de réservation apparaîtront ici." /> : null}
+      {reservations.length > 0 && visibleReservations.length === 0 ? <EmptyState icon={<Search className="h-8 w-8" />} title="Aucun résultat" description="Aucune réservation ne correspond à votre recherche." /> : null}
       {pending.length > 0 ? (
         <section className="premium-panel overflow-hidden rounded-2xl">
           <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">À traiter ({pending.length})</h2></div>
           <div className="divide-y divide-[var(--border)]">
             {pending.map((r) => (
-              <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancelReservationWithConfirmation(r._id)} />
+              <ReservationRow key={r._id} reservation={r} canManage={canManage} canDeleteForever={canDeleteForever} onOpen={() => setSelectedId(r._id)} onCancel={() => cancelReservationWithConfirmation(r._id)} />
             ))}
           </div>
         </section>
@@ -1116,13 +1147,14 @@ function VehicleReservationsPanel() {
       <section className="premium-panel overflow-hidden rounded-2xl">
         <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">Historique</h2></div>
         <div className="divide-y divide-[var(--border)]">
-          {others.map((r) => <ReservationRow key={r._id} reservation={r} canManage={canManage} onOpen={() => setSelectedId(r._id)} onCancel={() => cancelReservationWithConfirmation(r._id)} />)}
+          {others.map((r) => <ReservationRow key={r._id} reservation={r} canManage={canManage} canDeleteForever={canDeleteForever} onOpen={() => setSelectedId(r._id)} onCancel={() => cancelReservationWithConfirmation(r._id)} />)}
         </div>
       </section>
 
       <ReservationDetailsModal
         reservation={selected}
         canManage={canManage}
+        canDeleteForever={canDeleteForever}
         onClose={() => setSelectedId(null)}
         onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
@@ -1146,13 +1178,13 @@ type ReservationItem = {
   transportDetails?: string;
   start: number;
   end: number;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "cancelled";
   decisionNote?: string;
   decidedBy?: string;
   decidedAt?: number;
 };
 
-function ReservationRow({ reservation, canManage, onOpen, onCancel }: { reservation: ReservationItem; canManage: boolean; onOpen: () => void; onCancel: () => void }) {
+function ReservationRow({ reservation, canManage, canDeleteForever, onOpen, onCancel }: { reservation: ReservationItem; canManage: boolean; canDeleteForever: boolean; onOpen: () => void; onCancel: () => void }) {
   return (
     <div className="data-row flex flex-wrap items-center gap-4 p-5">
       <div className="h-14 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--muted)]">
@@ -1167,7 +1199,9 @@ function ReservationRow({ reservation, canManage, onOpen, onCancel }: { reservat
         <Button size="sm" variant={reservation.status === "pending" && canManage ? "primary" : "secondary"} onClick={onOpen}>
           <Info className="h-4 w-4" />Détails
         </Button>
-        <button type="button" onClick={onCancel} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600" title="Annuler"><Trash2 className="h-4 w-4" /></button>
+        {reservation.status !== "cancelled" ? (
+          <button type="button" onClick={onCancel} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600" title={canDeleteForever ? "Supprimer" : "Annuler la demande"}><Trash2 className="h-4 w-4" /></button>
+        ) : null}
       </div>
     </div>
   );
@@ -1176,6 +1210,7 @@ function ReservationRow({ reservation, canManage, onOpen, onCancel }: { reservat
 function ReservationDetailsModal({
   reservation,
   canManage,
+  canDeleteForever,
   onClose,
   onApprove,
   onReject,
@@ -1183,6 +1218,7 @@ function ReservationDetailsModal({
 }: {
   reservation: ReservationItem | null;
   canManage: boolean;
+  canDeleteForever: boolean;
   onClose: () => void;
   onApprove: (reservationId: Id<"vehicleReservations">) => Promise<void>;
   onReject: (reservationId: Id<"vehicleReservations">) => Promise<void>;
@@ -1252,7 +1288,9 @@ function ReservationDetailsModal({
 
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={onClose}>Fermer</Button>
-          <Button variant="outline" onClick={() => onCancel(reservation._id)}><Trash2 className="h-4 w-4" />Annuler</Button>
+          {reservation.status !== "cancelled" ? (
+            <Button variant="outline" onClick={() => onCancel(reservation._id)}><Trash2 className="h-4 w-4" />{canDeleteForever ? "Supprimer" : "Annuler la demande"}</Button>
+          ) : null}
           {canManage && reservation.status === "pending" ? (
             <>
               <Button variant="outline" onClick={() => decide("rejected")} disabled={saving !== null}><X className="h-4 w-4" />{saving === "rejected" ? "Refus..." : "Refuser"}</Button>
@@ -1275,8 +1313,8 @@ function DetailItem({ label, value }: { label: string; value: string }) {
 }
 
 function StatusBadge({ status }: { status: ReservationItem["status"] }) {
-  const styles = { approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200", pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200", rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200" };
-  const labels = { approved: "Approuvée", pending: "En attente", rejected: "Refusée" };
+  const styles = { approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200", pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200", rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200", cancelled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200" };
+  const labels = { approved: "Approuvée", pending: "En attente", rejected: "Refusée", cancelled: "Annulée" };
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}>{labels[status]}</span>;
 }
 

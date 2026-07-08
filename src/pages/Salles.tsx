@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { CalendarDays, DoorOpen, Info, Plus, Save, Trash2, Users } from "lucide-react";
+import { CalendarDays, DoorOpen, Info, Plus, Save, Search, Trash2, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
@@ -42,6 +42,7 @@ type RoomReservation = {
   bookedByName?: string;
   start: number;
   end: number;
+  status?: "confirmed" | "cancelled";
   notes?: string;
 };
 
@@ -243,6 +244,8 @@ export function Salles() {
 }
 
 function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda" | "calendar" }) {
+  const access = usePermissionsAccess();
+  const canDeleteForever = access?.email?.trim().toLowerCase() === "lahmerselim@gmail.com";
   // Borne la fenêtre au début du jour (et non à la milliseconde) pour que les
   // arguments de la query restent identiques d'un rendu à l'autre. Sinon Convex
   // considère chaque rendu comme une nouvelle souscription et relance la query
@@ -257,10 +260,27 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   const cancel = useMutation(api.reservations.cancelRoomReservation);
   const roomName = new Map(rooms.map((room) => [String(room._id), room]));
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"roomReservations"> | null>(null);
+  const [query, setQuery] = useState("");
 
   if (reservations === undefined) return <FullSpinner label="Chargement du planning..." />;
 
-  const upcoming = [...reservations].sort((a, b) => a.start - b.start);
+  const needle = query.trim().toLowerCase();
+  const upcoming = [...reservations]
+    .filter((reservation) => {
+      if (!needle) return true;
+      const room = roomName.get(String(reservation.roomId));
+      return [
+        reservation.title,
+        reservation.userName,
+        reservation.bookedByName,
+        reservation.usageType,
+        reservation.notes,
+        room?.name,
+        room?.buildingLabel,
+        room?.siteLabel,
+      ].filter(Boolean).join(" ").toLowerCase().includes(needle);
+    })
+    .sort((a, b) => a.start - b.start);
   const selectedReservation = reservations.find((reservation) => reservation._id === selectedReservationId) ?? null;
   const events: CalendarEvent[] = upcoming.map((reservation) => {
     const room = roomName.get(String(reservation.roomId));
@@ -277,6 +297,10 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   if (mode === "calendar") {
     return (
       <div className="space-y-3">
+        <div className="relative max-w-xl">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher par salle, nom, objet..." className="pl-9" />
+        </div>
         <CalendarBoard
           events={events}
           selected={dayStart}
@@ -293,6 +317,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
             cancelReservationWithConfirmation(reservationId);
             setSelectedReservationId(null);
           }}
+          canDeleteForever={canDeleteForever}
         />
       </div>
     );
@@ -309,12 +334,19 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   }
 
   async function cancelReservationWithConfirmation(reservationId: Id<"roomReservations">) {
-    if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de salle ?"))) return;
+    const message = canDeleteForever
+      ? "Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de salle ?"
+      : "Annuler cette réservation de salle ? Elle restera conservée en base.";
+    if (!(await confirmPermanentDelete(message))) return;
     void cancel({ reservationId });
   }
 
   return (
     <div className="space-y-5">
+      <div className="relative max-w-xl">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+        <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher par salle, nom, objet..." className="pl-9" />
+      </div>
       {Array.from(byDay.entries()).map(([day, items]) => (
         <section key={day} className="premium-panel overflow-hidden rounded-2xl">
           <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-2.5">
@@ -341,7 +373,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
                     type="button"
                     onClick={() => cancelReservationWithConfirmation(reservation._id)}
                     className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"
-                    title="Annuler"
+                    title={canDeleteForever ? "Supprimer" : "Annuler la réservation"}
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -359,6 +391,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
           cancelReservationWithConfirmation(reservationId);
           setSelectedReservationId(null);
         }}
+        canDeleteForever={canDeleteForever}
       />
     </div>
   );
@@ -369,11 +402,13 @@ function RoomReservationDetailsModal({
   room,
   onClose,
   onCancel,
+  canDeleteForever,
 }: {
   reservation: RoomReservation | null;
   room: Room | null;
   onClose: () => void;
   onCancel: (reservationId: Id<"roomReservations">) => void;
+  canDeleteForever: boolean;
 }) {
   if (!reservation) return null;
 
@@ -426,7 +461,7 @@ function RoomReservationDetailsModal({
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
             <Button variant="ghost" onClick={onClose}>Fermer</Button>
             <Button variant="outline" onClick={() => onCancel(reservation._id)}>
-              <Trash2 className="h-4 w-4" />Annuler la réservation
+              <Trash2 className="h-4 w-4" />{canDeleteForever ? "Supprimer" : "Annuler la réservation"}
             </Button>
           </div>
         </div>

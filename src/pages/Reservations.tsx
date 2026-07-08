@@ -600,11 +600,13 @@ type MyReservation = {
   label: string;
   start: number;
   end: number;
-  status: "confirmed" | "pending" | "approved" | "rejected";
+  status: "confirmed" | "pending" | "approved" | "rejected" | "cancelled";
   feedbackSubmittedAt?: number;
 };
 
 function MyReservations() {
+  const access = usePermissionsAccess();
+  const canDeleteForever = access?.email?.trim().toLowerCase() === "lahmerselim@gmail.com";
   const reservations = useQuery(api.reservations.listMyReservations) as MyReservation[] | undefined;
   const cancelRoom = useMutation(api.reservations.cancelRoomReservation);
   const cancelVehicle = useMutation(api.reservations.cancelVehicleReservation);
@@ -629,17 +631,21 @@ function MyReservations() {
 
   const filtered = reservations.filter((r) => filter === "all" || r.kind === filter);
 
-  const statusLabel: Record<MyReservation["status"], string> = { confirmed: "Confirmée", pending: "En attente", approved: "Approuvée", rejected: "Refusée" };
+  const statusLabel: Record<MyReservation["status"], string> = { confirmed: "Confirmée", pending: "En attente", approved: "Approuvée", rejected: "Refusée", cancelled: "Annulée" };
   const statusStyle: Record<MyReservation["status"], string> = {
     confirmed: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
     approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
     pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
     rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
+    cancelled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200",
   };
 
   async function cancelReservationWithConfirmation(reservation: MyReservation) {
     const label = reservation.kind === "room" ? "cette réservation de salle" : "cette réservation de véhicule";
-    if (!(await confirmPermanentDelete(`Êtes-vous sûr(e) de vouloir supprimer définitivement ${label} ?`))) return;
+    const message = canDeleteForever
+      ? `Êtes-vous sûr(e) de vouloir supprimer définitivement ${label} ?`
+      : `Annuler ${label} ? Elle restera visible dans l'historique.`;
+    if (!(await confirmPermanentDelete(message))) return;
     if (reservation.kind === "room") {
       void cancelRoom({ reservationId: reservation._id as Id<"roomReservations"> });
     } else {
@@ -727,13 +733,13 @@ function MyReservations() {
                   <p className="truncate text-sm text-[var(--muted-foreground)]">{reservation.label}</p>
                   <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}</p>
                 </div>
-                {!past && reservation.status !== "rejected" ? (
+                {!past && reservation.status !== "rejected" && reservation.status !== "cancelled" ? (
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => cancelReservationWithConfirmation(reservation)}
                   >
-                    Annuler
+                    {canDeleteForever ? "Supprimer" : "Annuler la demande"}
                   </Button>
                 ) : null}
                 {canSendFeedback ? (

@@ -922,6 +922,7 @@ export default defineSchema(
     attendees: v.optional(v.number()),
     start: v.number(),
     end: v.number(),
+    status: v.optional(v.union(v.literal("confirmed"), v.literal("cancelled"))),
     notes: v.optional(v.string()),
     createdAt: v.number(),
     // Retour (« remarques ») demandé automatiquement après le créneau.
@@ -960,6 +961,7 @@ export default defineSchema(
       v.literal("pending"),
       v.literal("approved"),
       v.literal("rejected"),
+      v.literal("cancelled"),
     ),
     decisionNote: v.optional(v.string()),
     decidedBy: v.optional(v.string()),
