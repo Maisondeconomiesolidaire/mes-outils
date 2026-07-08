@@ -1,6 +1,7 @@
 import { useQuery } from "convex/react";
 import { CarFront, Check, DoorOpen, MessageSquareText, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import { EmptyState } from "./ui/EmptyState";
 import { FullSpinner } from "./ui/Spinner";
 import { formatDate, formatDateTimeWithDay } from "../lib/format";
@@ -46,10 +47,17 @@ function Check3({ label, value }: { label: string; value?: boolean }) {
  * Liste des remarques (retours) laissées par les utilisateurs après leurs
  * réservations, pour les encadrants. Véhicules (Gotravaux) ou salles (Salles).
  */
-export function ReservationRemarks({ kind }: { kind: "vehicle" | "room" }) {
+export function ReservationRemarks({
+  kind,
+  vehicleId,
+}: {
+  kind: "vehicle" | "room";
+  /** Restreint aux remarques d'un véhicule précis (onglet dans la fiche véhicule). */
+  vehicleId?: Id<"vehicles">;
+}) {
   const vehicleRemarks = useQuery(
     api.reservations.listVehicleRemarks,
-    kind === "vehicle" ? {} : "skip",
+    kind === "vehicle" ? { vehicleId } : "skip",
   );
   const roomRemarks = useQuery(
     api.reservations.listRoomRemarks,

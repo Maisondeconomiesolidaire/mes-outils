@@ -709,12 +709,17 @@ export const requestRoomFeedbackForPastReservations = internalMutation({
 // ─── Remarques (retours) pour les encadrants ─────────────────────────────────
 
 export const listVehicleRemarks = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { vehicleId: v.optional(v.id("vehicles")) },
+  handler: async (ctx, { vehicleId }) => {
     await requireCrmPermission(ctx, "mesoutils:gotravaux", "read");
-    const reservations = (
-      await ctx.db.query("vehicleReservations").order("desc").take(300)
-    ).filter((r) => r.feedbackSubmittedAt);
+    const raw = vehicleId
+      ? await ctx.db
+          .query("vehicleReservations")
+          .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
+          .order("desc")
+          .collect()
+      : await ctx.db.query("vehicleReservations").order("desc").take(300);
+    const reservations = raw.filter((r) => r.feedbackSubmittedAt);
     const vehicles = await ctx.db.query("vehicles").collect();
     const byId = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
 

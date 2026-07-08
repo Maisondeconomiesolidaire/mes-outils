@@ -9,6 +9,7 @@ import {
   FileText,
   Info,
   MapPin,
+  MessageSquareText,
   Plus,
   Route,
   Search,
@@ -452,14 +453,15 @@ function CreateVehicleModal({ open, onClose }: { open: boolean; onClose: () => v
   );
 }
 
-/* ─── Modal détails véhicule (3 onglets) ─────────────────────────────────── */
+/* ─── Modal détails véhicule (4 onglets) ─────────────────────────────────── */
 
 function VehicleDetailsModal({ vehicle, onClose, canCreate, canEdit }: { vehicle: Vehicle; onClose: () => void; canCreate: boolean; canEdit: boolean }) {
-  const [tab, setTab] = useState<"info" | "maintenance" | "documents">("info");
+  const [tab, setTab] = useState<"info" | "maintenance" | "documents" | "remarques">("info");
   const tabs = [
     { key: "info" as const, label: "Informations", icon: Info },
     { key: "maintenance" as const, label: "Maintenances", icon: Wrench },
     { key: "documents" as const, label: "Documents", icon: FileText },
+    { key: "remarques" as const, label: "Remarques", icon: MessageSquareText },
   ];
 
   return (
@@ -478,6 +480,7 @@ function VehicleDetailsModal({ vehicle, onClose, canCreate, canEdit }: { vehicle
       {tab === "info" ? <VehicleInfoForm vehicle={vehicle} onSaved={onClose} canSave={canEdit} /> : null}
       {tab === "maintenance" ? <VehicleMaintenanceTab vehicleId={vehicle._id} canCreate={canCreate} canEdit={canEdit} /> : null}
       {tab === "documents" ? <VehicleDocumentsTab vehicleId={vehicle._id} canEdit={canEdit} /> : null}
+      {tab === "remarques" ? <ReservationRemarks kind="vehicle" vehicleId={vehicle._id} /> : null}
     </Modal>
   );
 }
