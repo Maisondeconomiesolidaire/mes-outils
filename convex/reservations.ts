@@ -179,6 +179,74 @@ export const listRoomReservations = query({
   },
 });
 
+async function userForClerkId(ctx: QueryCtx | MutationCtx, clerkId: string | undefined) {
+  if (!clerkId) return null;
+  return await ctx.db
+    .query("users")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+    .unique();
+}
+
+function userDisplayName(user: Doc<"users"> | null) {
+  if (!user) return null;
+  return (
+    [user.firstName, user.lastName].filter(Boolean).join(" ").trim() ||
+    user.email.trim() ||
+    null
+  );
+}
+
+async function resolveReservationTarget(
+  ctx: QueryCtx | MutationCtx,
+  identity: {
+    subject: string;
+    name?: string | null;
+    givenName?: string | null;
+    familyName?: string | null;
+    email?: string | null;
+  },
+  forClerkId: string | undefined,
+  forName: string | undefined,
+) {
+  if (!forClerkId || forClerkId === identity.subject) {
+    return {
+      onBehalf: false,
+      clerkId: undefined,
+      name: displayName(identity),
+    };
+  }
+
+  const user = await userForClerkId(ctx, forClerkId);
+  const name = forName?.trim() || userDisplayName(user);
+  if (!name) throw new Error("Utilisateur introuvable.");
+  return {
+    onBehalf: true,
+    clerkId: forClerkId,
+    name,
+  };
+}
+
+export const listReservationDirectory = query({
+  args: {},
+  handler: async (ctx): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> => {
+    await requireCrmPermission(ctx, PAGE_KEY, "create");
+    const users = await ctx.db.query("users").collect();
+    const seen = new Set<string>();
+    return users
+      .filter((user) => {
+        if (seen.has(user.clerkId)) return false;
+        seen.add(user.clerkId);
+        return true;
+      })
+      .map((user) => ({
+        clerkId: user.clerkId,
+        name: userDisplayName(user) ?? user.clerkId,
+        imageUrl: user.imageUrl ?? null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  },
+});
+
 export const bookRoom = mutation({
   args: {
     roomId: v.id("rooms"),
@@ -219,13 +287,13 @@ export const bookRoom = mutation({
       throw new Error("Ce créneau est déjà réservé pour cette salle.");
     }
 
-    const onBehalf = args.forName?.trim();
+    const target = await resolveReservationTarget(ctx, identity, args.forClerkId, args.forName);
     const reservationId = await ctx.db.insert("roomReservations", {
       roomId: args.roomId,
       clerkId: identity.subject,
-      userName: onBehalf || displayName(identity),
-      bookedByName: onBehalf ? displayName(identity) : undefined,
-      bookedForClerkId: onBehalf ? args.forClerkId : undefined,
+      userName: target.name,
+      bookedByName: target.onBehalf ? displayName(identity) : undefined,
+      bookedForClerkId: target.clerkId,
       title: args.title.trim(),
       usageType: args.usageType?.trim() || undefined,
       attendees: args.attendees,
@@ -236,22 +304,22 @@ export const bookRoom = mutation({
       createdAt: Date.now(),
     });
     await createMesoutilsNotification(ctx, {
-      recipientClerkId: onBehalf ? args.forClerkId : identity.subject,
+      recipientClerkId: target.clerkId ?? identity.subject,
       kind: "room_reservation_confirmed",
       title: "Votre réservation de salle est confirmée",
       body: `${room.name} · ${args.title.trim()}`,
       assetImageUrl: (room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl) ?? undefined,
       href: "/reservations?v=mine",
     });
-    const requesterName = onBehalf || displayName(identity);
+    const requesterName = target.name;
     const requesterPhotoUrl =
-      (onBehalf ? await photoForClerkId(ctx, args.forClerkId) : pictureUrl(identity)) ??
+      (target.onBehalf ? await photoForClerkId(ctx, target.clerkId) : pictureUrl(identity)) ??
       undefined;
     const roomImageUrl =
       (room.photo ? await ctx.storage.getUrl(room.photo) : room.photoUrl) ?? undefined;
 
-    const email = onBehalf
-      ? await emailForClerkId(ctx, args.forClerkId)
+    const email = target.onBehalf
+      ? await emailForClerkId(ctx, target.clerkId)
       : identity.email ?? await emailForClerkId(ctx, identity.subject);
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
@@ -889,7 +957,7 @@ export const requestVehicle = mutation({
       throw new Error("Ce véhicule est déjà réservé sur ce créneau.");
     }
 
-    const onBehalf = args.forName?.trim();
+    const target = await resolveReservationTarget(ctx, identity, args.forClerkId, args.forName);
     const willTransport = args.willTransport ?? false;
     const transportDetails = willTransport
       ? args.transportDetails?.trim() || undefined
@@ -897,9 +965,9 @@ export const requestVehicle = mutation({
     const reservationId = await ctx.db.insert("vehicleReservations", {
       vehicleId: args.vehicleId,
       clerkId: identity.subject,
-      userName: onBehalf || displayName(identity),
-      bookedByName: onBehalf ? displayName(identity) : undefined,
-      bookedForClerkId: onBehalf ? args.forClerkId : undefined,
+      userName: target.name,
+      bookedByName: target.onBehalf ? displayName(identity) : undefined,
+      bookedForClerkId: target.clerkId,
       purpose: args.purpose.trim(),
       usageType: args.usageType,
       expectedKm: args.expectedKm,
@@ -913,9 +981,9 @@ export const requestVehicle = mutation({
 
     // Les responsables sont notifiés de chaque demande de réservation véhicule :
     // notification in-app (pour ceux qui ont un compte) + email systématique.
-    const requesterName = onBehalf || displayName(identity);
+    const requesterName = target.name;
     const requesterPhotoUrl =
-      (onBehalf ? await photoForClerkId(ctx, args.forClerkId) : pictureUrl(identity)) ??
+      (target.onBehalf ? await photoForClerkId(ctx, target.clerkId) : pictureUrl(identity)) ??
       undefined;
     const assetImageUrl =
       (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle.photoUrl) ?? undefined;
@@ -961,13 +1029,13 @@ export const requestVehicle = mutation({
       });
     }
 
-    const email = onBehalf
-      ? await emailForClerkId(ctx, args.forClerkId)
+    const email = target.onBehalf
+      ? await emailForClerkId(ctx, target.clerkId)
       : identity.email ?? null;
     if (email) {
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
-        name: onBehalf || displayName(identity),
+        name: requesterName,
         assetKind: "vehicle",
         assetName: vehicle.name,
         label: args.purpose.trim(),

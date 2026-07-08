@@ -142,7 +142,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
 
   const bookRoom = useMutation(api.reservations.bookRoom);
   const requestVehicle = useMutation(api.reservations.requestVehicle);
-  const directory = (useQuery(api.community.listStaffDirectory, {}) ?? []) as Person[];
+  const directory = (useQuery(api.reservations.listReservationDirectory, {}) ?? []) as Person[];
 
   const [bookingRoom, setBookingRoom] = useState<Room | null>(null);
   const [bookingVehicle, setBookingVehicle] = useState<Vehicle | null>(null);
