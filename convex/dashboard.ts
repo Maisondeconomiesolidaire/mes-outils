@@ -40,6 +40,11 @@ export const stats = query({
     let lost = 0;
     let incomplete = 0;
     let scheduledToday = 0;
+    const quoteTotals = {
+      open: 0,
+      won: 0,
+      lost: 0,
+    };
 
     for (const r of all) {
       byType[r.type]++;
@@ -48,12 +53,15 @@ export const stats = query({
     for (const r of requests) {
       if (r.outcome === "open") {
         open++;
+        quoteTotals.open += r.quoteAmount ?? 0;
         byStage[deriveStage(r)]++;
         if (!r.complete) incomplete++;
       } else if (r.outcome === "gagnee") {
         won++;
+        quoteTotals.won += r.quoteAmount ?? 0;
       } else {
         lost++;
+        quoteTotals.lost += r.quoteAmount ?? 0;
       }
       if (
         r.scheduledDate &&
@@ -73,6 +81,7 @@ export const stats = query({
       scheduledToday,
       byType,
       byStage,
+      quoteTotals,
     };
   },
 });
