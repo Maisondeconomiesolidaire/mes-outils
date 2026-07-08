@@ -43,6 +43,23 @@ function withFieldEdits(
   return next;
 }
 
+function sameValue(a: unknown, b: unknown) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function setPatchIfChanged<T>(
+  patch: Record<string, unknown>,
+  changed: string[],
+  key: string,
+  currentValue: T,
+  nextValue: T,
+  trackFieldEdit = true,
+) {
+  if (sameValue(currentValue, nextValue)) return;
+  patch[key] = nextValue;
+  if (trackFieldEdit) changed.push(key);
+}
+
 const customerArg = v.object({
   firstName: v.string(),
   lastName: v.string(),
@@ -1040,19 +1057,24 @@ export const patchManagement = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "demandes", "update");
     const request = await ctx.db.get(args.id);
-    const patch: Record<string, unknown> = { updatedAt: Date.now() };
+    if (!request) throw new Error("Demande introuvable.");
+    const patch: Record<string, unknown> = {};
     const changed: string[] = [];
     if (args.site !== undefined) {
-      patch.site = args.site;
-      changed.push("site");
+      setPatchIfChanged(patch, changed, "site", request.site, args.site);
     }
     if (args.assignedTo !== undefined) {
-      patch.assignedTo = args.assignedTo ?? undefined;
-      changed.push("assignedTo");
+      setPatchIfChanged(
+        patch,
+        changed,
+        "assignedTo",
+        request.assignedTo,
+        args.assignedTo ?? undefined,
+      );
     }
     if (args.assignedVehicle !== undefined) {
       if (args.assignedVehicle) {
-        const date = request?.scheduledDate ?? Date.now();
+        const date = request.scheduledDate ?? Date.now();
         const reason = await vehicleBusyReason(ctx, args.assignedVehicle, date, {
           excludeRequestId: args.id,
         });
@@ -1060,32 +1082,82 @@ export const patchManagement = mutation({
           throw new Error(`Véhicule indisponible à cette date : ${reason}`);
         }
       }
-      patch.assignedVehicle = args.assignedVehicle ?? undefined;
-      changed.push("assignedVehicle");
+      setPatchIfChanged(
+        patch,
+        changed,
+        "assignedVehicle",
+        request.assignedVehicle,
+        args.assignedVehicle ?? undefined,
+      );
     }
     if (args.estimatedHours !== undefined) {
-      patch.estimatedHours = args.estimatedHours ?? undefined;
-      changed.push("estimatedHours");
+      setPatchIfChanged(
+        patch,
+        changed,
+        "estimatedHours",
+        request.estimatedHours,
+        args.estimatedHours ?? undefined,
+      );
     }
     if (args.actualHours !== undefined) {
-      patch.actualHours = args.actualHours ?? undefined;
-      changed.push("actualHours");
+      setPatchIfChanged(
+        patch,
+        changed,
+        "actualHours",
+        request.actualHours,
+        args.actualHours ?? undefined,
+      );
     }
     if (args.quoteAmount !== undefined) {
-      patch.quoteAmount = args.quoteAmount ?? undefined;
-      changed.push("quoteAmount");
+      setPatchIfChanged(
+        patch,
+        changed,
+        "quoteAmount",
+        request.quoteAmount,
+        args.quoteAmount ?? undefined,
+      );
     }
     if (args.quoteDetails !== undefined) {
-      patch.quoteDetails = args.quoteDetails ?? undefined;
-      changed.push("quoteDetails");
+      setPatchIfChanged(
+        patch,
+        changed,
+        "quoteDetails",
+        request.quoteDetails,
+        args.quoteDetails ?? undefined,
+      );
     }
     if (args.visitNeeded !== undefined) {
-      patch.visitNeeded = args.visitNeeded ?? undefined;
-      changed.push("visitNeeded");
+      setPatchIfChanged(
+        patch,
+        changed,
+        "visitNeeded",
+        request.visitNeeded,
+        args.visitNeeded ?? undefined,
+      );
     }
-    if (args.beforePhotos !== undefined) patch.beforePhotos = args.beforePhotos;
-    if (args.afterPhotos !== undefined) patch.afterPhotos = args.afterPhotos;
-    const fieldEdits = withFieldEdits(request?.fieldEdits, changed, args.actorName);
+    if (args.beforePhotos !== undefined) {
+      setPatchIfChanged(
+        patch,
+        changed,
+        "beforePhotos",
+        request.beforePhotos,
+        args.beforePhotos,
+        false,
+      );
+    }
+    if (args.afterPhotos !== undefined) {
+      setPatchIfChanged(
+        patch,
+        changed,
+        "afterPhotos",
+        request.afterPhotos,
+        args.afterPhotos,
+        false,
+      );
+    }
+    if (Object.keys(patch).length === 0) return;
+    patch.updatedAt = Date.now();
+    const fieldEdits = withFieldEdits(request.fieldEdits, changed, args.actorName);
     if (fieldEdits) patch.fieldEdits = fieldEdits;
     await ctx.db.patch(args.id, patch);
   },
@@ -1351,10 +1423,13 @@ export const updateCustomer = mutation({
   handler: async (ctx, { id, customer, actorName }) => {
     await requireCrmPermission(ctx, "demandes", "update");
     const request = await ctx.db.get(id);
+    if (!request) throw new Error("Demande introuvable.");
+    const nextCustomer = normalizeCustomer(customer);
+    if (sameValue(normalizeCustomer(request.customer), nextCustomer)) return;
     await ctx.db.patch(id, {
-      customer: normalizeCustomer(customer),
+      customer: nextCustomer,
       updatedAt: Date.now(),
-      fieldEdits: withFieldEdits(request?.fieldEdits, ["customer"], actorName),
+      fieldEdits: withFieldEdits(request.fieldEdits, ["customer"], actorName),
     });
   },
 });
@@ -1376,18 +1451,25 @@ export const updateAerogommageDetails = mutation({
       throw new Error("Type de demande invalide.");
     }
 
-    await ctx.db.patch(id, {
-      comment: comment?.trim() || undefined,
-      aerogommage: items,
+    const nextComment = comment?.trim() || undefined;
+    const nextComplete = isAerogommageComplete(request.customer, items);
+    const patch: Record<string, unknown> = {};
+    const changed: string[] = [];
+    setPatchIfChanged(patch, changed, "comment", request.comment, nextComment);
+    setPatchIfChanged(patch, changed, "aerogommage", request.aerogommage, items);
+    setPatchIfChanged(
+      patch,
+      changed,
+      "aerogommageOptions",
+      request.aerogommageOptions,
       aerogommageOptions,
-      complete: isAerogommageComplete(request.customer, items),
-      updatedAt: Date.now(),
-      fieldEdits: withFieldEdits(
-        request.fieldEdits,
-        ["comment", "aerogommage", "aerogommageOptions"],
-        actorName,
-      ),
-    });
+    );
+    setPatchIfChanged(patch, changed, "complete", request.complete, nextComplete, false);
+    if (Object.keys(patch).length === 0) return;
+    patch.updatedAt = Date.now();
+    const fieldEdits = withFieldEdits(request.fieldEdits, changed, actorName);
+    if (fieldEdits) patch.fieldEdits = fieldEdits;
+    await ctx.db.patch(id, patch);
   },
 });
 
