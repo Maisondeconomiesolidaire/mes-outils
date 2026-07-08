@@ -775,6 +775,7 @@ function FleetCalendar({
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
   const [selectedDay, setSelectedDay] = useState(() => startOfDayTimestamp(Date.now()));
+  const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"vehicleReservations"> | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<Id<"requests"> | null>(null);
   const entries: AgendaEntry[] = [];
@@ -882,10 +883,16 @@ function FleetCalendar({
     const entry = entries.find((item) => item.id === id);
     if (!entry) return;
     setSelectedDay(startOfDayTimestamp((day ?? new Date(entry.date)).getTime()));
+    setDayPanelOpen(true);
     if (entry.kind === "reservation") setSelectedReservationId(entry.reservation._id);
     else if (entry.kind === "service") setSelectedServiceId(entry.service._id);
     else if (entry.kind === "control") onOpenVehicle(entry.vehicle._id);
     else onOpenVehicle(entry.task.vehicleId);
+  }
+
+  function openDayPanel(day: Date) {
+    setSelectedDay(startOfDayTimestamp(day.getTime()));
+    setDayPanelOpen(true);
   }
 
   return (
@@ -893,66 +900,86 @@ function FleetCalendar({
       <CalendarBoard
         events={calendarEvents}
         selected={selectedDay}
-        onSelect={(day) => setSelectedDay(startOfDayTimestamp(day.getTime()))}
+        onSelect={openDayPanel}
         onEventClick={handleEventClick}
       />
-      <section className="premium-panel overflow-hidden rounded-2xl">
-        <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-3">
-          <p className="text-sm font-bold capitalize text-[var(--foreground)]">{formatDate(selectedDay)}</p>
-        </div>
-        {selectedDayEntries.length === 0 ? (
-          <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Aucune réservation, maintenance, prestation ou contrôle sur cette journée." />
-        ) : (
-          <div className="divide-y divide-[var(--border)]">
-            {selectedDayEntries.map((entry) => (
-              <div key={entry.id} className={`flex flex-wrap items-center gap-4 border-l-4 px-5 py-3 ${toneStyles[entry.tone]}`}>
-                <span className="w-14 shrink-0 text-sm font-semibold text-[var(--foreground)]">{formatDateTime(entry.date).slice(-5)}</span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[var(--foreground)]">{entry.label}</p>
-                  <p className="truncate text-xs text-[var(--muted-foreground)]">{entry.sublabel}</p>
-                  {entry.endDate ? <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(entry.date)} → {formatDateTime(entry.endDate)}</p> : null}
-                </div>
-                {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente</span> : null}
-                {entry.kind === "reservation" ? (
-                  <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(entry.reservation._id)}>
-                    <Info className="h-4 w-4" />Détails
-                  </Button>
-                ) : entry.kind === "service" ? (
-                  <Button size="sm" variant="secondary" onClick={() => setSelectedServiceId(entry.service._id)}>
-                    <Info className="h-4 w-4" />Détails
-                  </Button>
-                ) : entry.kind === "control" ? (
-                  <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.vehicle._id)}>
-                    <Info className="h-4 w-4" />Véhicule
-                  </Button>
-                ) : (
-                  <div className="ml-auto flex flex-wrap items-center gap-2">
-                    <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.task.vehicleId)}>
-                      <Info className="h-4 w-4" />Véhicule
-                    </Button>
-                    <Select
-                      value={entry.task.status}
-                      disabled={!canEdit}
-                      onChange={(event) =>
-                        onUpdateTask({
-                          taskId: entry.task._id,
-                          status: event.target.value as TaskStatus,
-                          priority: entry.task.priority,
-                        })
-                      }
-                      className="h-9 w-auto"
-                    >
-                      <option value="todo">À faire</option>
-                      <option value="in_progress">En cours</option>
-                      <option value="done">Terminée</option>
-                    </Select>
-                  </div>
-                )}
-              </div>
-            ))}
+      <div className={`fixed inset-0 z-[70] transition ${dayPanelOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
+        <button
+          type="button"
+          aria-label="Fermer les événements du jour"
+          onClick={() => setDayPanelOpen(false)}
+          className={`absolute inset-0 bg-black/30 transition-opacity ${dayPanelOpen ? "opacity-100" : "opacity-0"}`}
+        />
+        <aside
+          className={`absolute right-0 top-0 flex h-full w-full max-w-xl flex-col border-l border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] shadow-2xl transition-transform duration-300 ease-out ${dayPanelOpen ? "translate-x-0" : "translate-x-full"}`}
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Événements</p>
+              <h2 className="mt-1 text-lg font-bold capitalize">{formatDate(selectedDay)}</h2>
+            </div>
+            <button type="button" onClick={() => setDayPanelOpen(false)} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-[var(--accent)]">
+              <X className="h-5 w-5" />
+            </button>
           </div>
-        )}
-      </section>
+          <div className="flex-1 overflow-y-auto">
+            {selectedDayEntries.length === 0 ? (
+              <div className="p-5">
+                <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Agenda vide" description="Aucune réservation, maintenance, prestation ou contrôle sur cette journée." />
+              </div>
+            ) : (
+              <div className="divide-y divide-[var(--border)]">
+                {selectedDayEntries.map((entry) => (
+                  <div key={entry.id} className={`flex flex-wrap items-center gap-4 border-l-4 px-5 py-3 ${toneStyles[entry.tone]}`}>
+                    <span className="w-14 shrink-0 text-sm font-semibold text-[var(--foreground)]">{formatDateTime(entry.date).slice(-5)}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-[var(--foreground)]">{entry.label}</p>
+                      <p className="truncate text-xs text-[var(--muted-foreground)]">{entry.sublabel}</p>
+                      {entry.endDate ? <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(entry.date)} → {formatDateTime(entry.endDate)}</p> : null}
+                    </div>
+                    {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente</span> : null}
+                    {entry.kind === "reservation" ? (
+                      <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(entry.reservation._id)}>
+                        <Info className="h-4 w-4" />Détails
+                      </Button>
+                    ) : entry.kind === "service" ? (
+                      <Button size="sm" variant="secondary" onClick={() => setSelectedServiceId(entry.service._id)}>
+                        <Info className="h-4 w-4" />Détails
+                      </Button>
+                    ) : entry.kind === "control" ? (
+                      <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.vehicle._id)}>
+                        <Info className="h-4 w-4" />Véhicule
+                      </Button>
+                    ) : (
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.task.vehicleId)}>
+                          <Info className="h-4 w-4" />Véhicule
+                        </Button>
+                        <Select
+                          value={entry.task.status}
+                          disabled={!canEdit}
+                          onChange={(event) =>
+                            onUpdateTask({
+                              taskId: entry.task._id,
+                              status: event.target.value as TaskStatus,
+                              priority: entry.task.priority,
+                            })
+                          }
+                          className="h-9 w-auto"
+                        >
+                          <option value="todo">À faire</option>
+                          <option value="in_progress">En cours</option>
+                          <option value="done">Terminée</option>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </aside>
+      </div>
       <ReservationDetailsModal
         reservation={selectedReservation}
         canManage={canManageReservations}

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { CalendarDays, DoorOpen, Info, Plus, Save, Search, Trash2, Users } from "lucide-react";
+import { CalendarDays, DoorOpen, Info, Plus, Save, Search, Trash2, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
@@ -260,6 +260,8 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   const cancel = useMutation(api.reservations.cancelRoomReservation);
   const roomName = new Map(rooms.map((room) => [String(room._id), room]));
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"roomReservations"> | null>(null);
+  const [selectedDay, setSelectedDay] = useState(dayStart);
+  const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const [query, setQuery] = useState("");
 
   if (reservations === undefined) return <FullSpinner label="Chargement du planning..." />;
@@ -282,6 +284,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
     })
     .sort((a, b) => a.start - b.start);
   const selectedReservation = reservations.find((reservation) => reservation._id === selectedReservationId) ?? null;
+  const selectedDayReservations = upcoming.filter((reservation) => overlapsLocalDay(reservation.start, reservation.end, selectedDay));
   const events: CalendarEvent[] = upcoming.map((reservation) => {
     const room = roomName.get(String(reservation.roomId));
     return {
@@ -295,6 +298,11 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   });
 
   if (mode === "calendar") {
+    function openDayPanel(day: Date) {
+      setSelectedDay(startOfLocalDayTimestamp(day.getTime()));
+      setDayPanelOpen(true);
+    }
+
     return (
       <div className="space-y-3">
         <div className="relative max-w-xl">
@@ -303,12 +311,74 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
         </div>
         <CalendarBoard
           events={events}
-          selected={dayStart}
-          onEventClick={(id) => setSelectedReservationId(id as Id<"roomReservations">)}
+          selected={selectedDay}
+          onSelect={openDayPanel}
+          onEventClick={(id, day) => {
+            if (day) openDayPanel(day);
+            setSelectedReservationId(id as Id<"roomReservations">);
+          }}
         />
         {upcoming.length === 0 ? (
           <p className="text-sm text-[var(--muted-foreground)]">Aucune réservation de salle sur la période affichée.</p>
         ) : null}
+        <div className={`fixed inset-0 z-[70] transition ${dayPanelOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
+          <button
+            type="button"
+            aria-label="Fermer les réservations du jour"
+            onClick={() => setDayPanelOpen(false)}
+            className={`absolute inset-0 bg-black/30 transition-opacity ${dayPanelOpen ? "opacity-100" : "opacity-0"}`}
+          />
+          <aside
+            className={`absolute right-0 top-0 flex h-full w-full max-w-xl flex-col border-l border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] shadow-2xl transition-transform duration-300 ease-out ${dayPanelOpen ? "translate-x-0" : "translate-x-full"}`}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Réservations</p>
+                <h2 className="mt-1 text-lg font-bold capitalize">{formatDate(selectedDay)}</h2>
+              </div>
+              <button type="button" onClick={() => setDayPanelOpen(false)} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-[var(--accent)]">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {selectedDayReservations.length === 0 ? (
+                <div className="p-5">
+                  <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Aucune réservation" description="Aucune réservation de salle sur cette journée." />
+                </div>
+              ) : (
+                <div className="divide-y divide-[var(--border)]">
+                  {selectedDayReservations.map((reservation) => {
+                    const room = roomName.get(String(reservation.roomId));
+                    return (
+                      <div key={reservation._id} className="flex flex-wrap items-center gap-4 border-l-4 border-l-brand-500 px-5 py-3">
+                        <span className="w-14 shrink-0 text-sm font-semibold text-[var(--foreground)]">{formatDateTime(reservation.start).slice(-5)}</span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-semibold text-[var(--foreground)]">
+                            {reservation.title} · {room?.name ?? "Salle"}
+                          </p>
+                          <p className="truncate text-xs text-[var(--muted-foreground)]">
+                            {reservation.userName} · {formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}
+                          </p>
+                        </div>
+                        <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(reservation._id)}>
+                          <Info className="h-4 w-4" />Détails
+                        </Button>
+                        <button
+                          type="button"
+                          onClick={() => cancelReservationWithConfirmation(reservation._id)}
+                          className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"
+                          title={canDeleteForever ? "Supprimer" : "Annuler la réservation"}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
         <RoomReservationDetailsModal
           reservation={selectedReservation}
           room={selectedReservation ? roomName.get(String(selectedReservation.roomId)) ?? null : null}
@@ -395,6 +465,22 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
       />
     </div>
   );
+}
+
+function startOfLocalDayTimestamp(input: number) {
+  const date = new Date(input);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function endOfLocalDayTimestamp(input: number) {
+  const date = new Date(input);
+  date.setHours(23, 59, 59, 999);
+  return date.getTime();
+}
+
+function overlapsLocalDay(start: number, end: number | undefined, dayStart: number) {
+  return start <= endOfLocalDayTimestamp(dayStart) && (end ?? start) >= dayStart;
 }
 
 function RoomReservationDetailsModal({
