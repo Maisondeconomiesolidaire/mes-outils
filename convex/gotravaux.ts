@@ -335,6 +335,10 @@ export const listScheduledServices = query({
             ? await ctx.storage.getUrl(vehicle.photo)
             : (vehicle?.photoUrl ?? null),
           customerName: customerFullName(request.customer),
+          scheduledByName:
+            request.fieldEdits?.scheduledDate?.by ??
+            request.fieldEdits?.assignedVehicle?.by ??
+            null,
           address: address.address ?? null,
           postalCode: address.postalCode ?? null,
           city: address.city ?? null,

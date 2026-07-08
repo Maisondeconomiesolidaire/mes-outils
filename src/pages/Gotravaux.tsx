@@ -93,6 +93,7 @@ type ServiceItem = {
   vehiclePlate?: string | null;
   vehiclePhotoUrl?: string | null;
   customerName: string;
+  scheduledByName?: string | null;
   address?: string | null;
   postalCode?: string | null;
   city?: string | null;
@@ -808,13 +809,17 @@ function FleetCalendar({
     });
   }
   for (const service of services ?? []) {
+    const serviceSublabel =
+      service.type === "collecte"
+        ? [service.scheduledByName ? `Planifié par ${service.scheduledByName}` : null, service.city].filter(Boolean).join(" · ")
+        : [service.customerName, service.city].filter(Boolean).join(" · ");
     entries.push({
       id: `service-${service._id}`,
       kind: "service",
       service,
       date: service.scheduledDate,
       label: `${SERVICE_LABELS[service.type]} · ${service.vehicleName ?? vehicleName.get(String(service.vehicleId)) ?? "Véhicule"}`,
-      sublabel: [service.customerName, service.city].filter(Boolean).join(" · "),
+      sublabel: serviceSublabel,
       tone: "service",
     });
   }
@@ -1064,7 +1069,11 @@ function ServiceDetailsModal({ service, onClose }: { service: ServiceItem | null
           <DetailItem label="Type de service" value={SERVICE_LABELS[service.type]} />
           <DetailItem label="Véhicule" value={service.vehicleName ?? "—"} />
           <DetailItem label="Date planifiée" value={formatDateTime(service.scheduledDate)} />
-          <DetailItem label="Client" value={service.customerName || "—"} />
+          {service.type === "collecte" ? (
+            <DetailItem label="Planifié par" value={service.scheduledByName || "Non renseigné"} />
+          ) : (
+            <DetailItem label="Client" value={service.customerName || "—"} />
+          )}
         </dl>
 
         <div className="rounded-xl border border-[var(--border)] p-3">
