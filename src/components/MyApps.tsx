@@ -44,7 +44,7 @@ const APPS: PortalApp[] = [
     label: "Mes Outils",
     description: "Portail interne : accès aux applications, espace partage et réservations.",
     logoSrc: "/mesoutils-light.png",
-    href: env.VITE_MESOUTILS_URL ?? "https://eco-solidaire.fr",
+    href: env.VITE_MESOUTILS_URL ?? "https://mesoutils.eco-solidaire.fr",
     cardBg: "#e6f6ec",
   },
   {
