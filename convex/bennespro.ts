@@ -538,8 +538,20 @@ export const invoiceDepotDib = internalAction({
     }
 
     try {
-      // 1. Client Stripe de l'entreprise (créé une seule fois).
+      // 1. Client Stripe de l'entreprise (réutilisé, jamais dupliqué).
       let customerId = company.stripeCustomerId;
+      // Pas encore mémorisé : on cherche d'abord un client Stripe existant avec
+      // la même adresse email avant d'en créer un — évite qu'un nouveau client
+      // Stripe soit créé à chaque facture.
+      if (!customerId && company.contactEmail) {
+        const search = await stripeGet(
+          secretKey,
+          `customers?email=${encodeURIComponent(company.contactEmail)}&limit=1`,
+        );
+        const existing = Array.isArray(search.data) ? search.data[0] : undefined;
+        const existingId = (existing as { id?: unknown } | undefined)?.id;
+        if (typeof existingId === "string") customerId = existingId;
+      }
       if (!customerId) {
         const customer = await stripeRequest(secretKey, "customers", {
           name: company.name,
@@ -549,6 +561,9 @@ export const invoiceDepotDib = internalAction({
           ...(company.siret ? { "metadata[siret]": company.siret } : {}),
         });
         customerId = customer.id as string;
+      }
+      // Mémorise l'id (retrouvé ou créé) sur l'entreprise pour les prochaines fois.
+      if (customerId && customerId !== company.stripeCustomerId) {
         await ctx.runMutation(internal.bennespro.saveCompanyStripeCustomer, {
           companyId: company._id,
           stripeCustomerId: customerId,
