@@ -229,11 +229,14 @@ async function resolveReservationTarget(
 export const listReservationDirectory = query({
   args: {},
   handler: async (ctx): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> => {
+    const identity = await requireUser(ctx);
     await requireCrmPermission(ctx, PAGE_KEY, "create");
     const users = await ctx.db.query("users").collect();
     const seen = new Set<string>();
     return users
       .filter((user) => {
+        // On s'exclut soi-même : « Réserver pour → Moi-même » gère déjà ce cas.
+        if (user.clerkId === identity.subject) return false;
         if (seen.has(user.clerkId)) return false;
         seen.add(user.clerkId);
         return true;
