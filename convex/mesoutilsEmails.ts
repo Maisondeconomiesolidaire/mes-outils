@@ -413,7 +413,6 @@ export const ROOM_RESERVATION_MANAGER_EMAILS = [
  */
 export const RECYCLERIE_VEHICLE_NOTICE_EMAILS = [
   "a.dargent@eco-solidaire.fr",
-  "e.carette@eco-solidaire.fr",
   "s.tiennot@eco-solidaire.fr",
 ];
 

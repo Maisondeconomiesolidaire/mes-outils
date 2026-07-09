@@ -303,11 +303,15 @@ export const sendRequestConfirmation = internalAction({
   },
 });
 
-/** Staff prévenu à chaque nouvelle demande (aérogommage, collecte, etc.). */
+/** Staff prévenu à chaque nouvelle demande (collecte, article, vélo, etc.). */
 const NEW_REQUEST_STAFF_EMAILS = [
   "accueil.recyclerie@eco-solidaire.fr",
-  "e.carette@eco-solidaire.fr",
   "s.tiennot@eco-solidaire.fr",
+];
+
+const AEROGOMMAGE_STAFF_EMAILS = [
+  ...NEW_REQUEST_STAFF_EMAILS,
+  "e.carette@eco-solidaire.fr",
 ];
 
 export const sendNewRequestToStaff = internalAction({
@@ -328,7 +332,9 @@ export const sendNewRequestToStaff = internalAction({
         <div style="margin:0 0 22px;">${button(`${appUrl()}/crm/notifications`, "Voir la demande")}</div>
       `,
     });
-    await resendSend(NEW_REQUEST_STAFF_EMAILS, `Nouvelle demande · ${label} #${reference}`, html);
+    const recipients =
+      type === "aerogommage" ? AEROGOMMAGE_STAFF_EMAILS : NEW_REQUEST_STAFF_EMAILS;
+    await resendSend(recipients, `Nouvelle demande · ${label} #${reference}`, html);
   },
 });
 

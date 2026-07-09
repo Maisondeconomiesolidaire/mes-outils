@@ -145,8 +145,9 @@ async function createNewRequestNotification(
     });
   }
 
-  // Email à l'équipe recyclerie (accueil / e.carette / s.tiennot) — décalé pour
-  // rester sous la limite Resend (2 req/s) avec l'email client.
+  // Email à l'équipe recyclerie — décalé pour rester sous la limite Resend
+  // (2 req/s) avec l'email client. E. Carette est ajouté uniquement pour
+  // les demandes d'aérogommage par l'action d'envoi.
   if (request) {
     await ctx.scheduler.runAfter(1200, internal.emails.sendNewRequestToStaff, {
       type: request.type,
