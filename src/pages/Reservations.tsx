@@ -409,7 +409,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
             </>
           ) : null}
 
-          <Field label="Réserver pour"><PersonSelect people={directory} value={forUser?.clerkId ?? null} onChange={setForUser} /></Field>
+          <Field label="Réserver pour"><PersonSelect people={directory} value={forUser} onChange={setForUser} /></Field>
           {bookingVehicle ? <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">La réservation d'un véhicule est soumise à l'approbation d'un responsable.</p> : null}
           {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
           <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">

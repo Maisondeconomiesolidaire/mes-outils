@@ -12,7 +12,12 @@ export function PersonSelect({
   selfLabel = "Moi-même",
 }: {
   people: Person[];
-  value: string | null;
+  /**
+   * Personne sélectionnée (objet complet) — on l'affiche directement, sans la
+   * rechercher dans `people`. La sélection reste donc stable même si l'annuaire
+   * se recharge ou si un clerkId change (artefacts de migration Clerk dev/prod).
+   */
+  value: Person | null;
   onChange: (person: Person | null) => void;
   selfLabel?: string;
 }) {
@@ -29,7 +34,7 @@ export function PersonSelect({
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const selected = people.find((person) => person.clerkId === value) ?? null;
+  const selected = value;
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return people;
@@ -79,7 +84,7 @@ export function PersonSelect({
               {value === null ? <Check className="h-4 w-4 text-brand-600" /> : null}
             </button>
             {filtered.map((person) => {
-              const isActive = person.clerkId === value;
+              const isActive = person.clerkId === value?.clerkId;
               return (
                 <button
                   key={person.clerkId}

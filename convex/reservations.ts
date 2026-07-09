@@ -231,14 +231,19 @@ export const listReservationDirectory = query({
   handler: async (ctx): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> => {
     const identity = await requireUser(ctx);
     await requireCrmPermission(ctx, PAGE_KEY, "create");
+    const selfEmail = (identity.email ?? "").trim().toLowerCase();
     const users = await ctx.db.query("users").collect();
     const seen = new Set<string>();
     return users
       .filter((user) => {
+        const email = user.email.trim().toLowerCase();
         // Uniquement les membres internes (adresse @eco-solidaire.fr).
-        if (!user.email.trim().toLowerCase().endsWith("@eco-solidaire.fr")) return false;
-        // On s'exclut soi-même : « Réserver pour → Moi-même » gère déjà ce cas.
+        if (!email.endsWith("@eco-solidaire.fr")) return false;
+        // On s'exclut soi-même (« Réserver pour → Moi-même » gère ce cas). On
+        // compare aussi par email : le clerkId peut différer de la session à
+        // cause des artefacts de migration Clerk dev/prod.
         if (user.clerkId === identity.subject) return false;
+        if (selfEmail && email === selfEmail) return false;
         if (seen.has(user.clerkId)) return false;
         seen.add(user.clerkId);
         return true;
