@@ -235,6 +235,8 @@ export const listReservationDirectory = query({
     const seen = new Set<string>();
     return users
       .filter((user) => {
+        // Uniquement les membres internes (adresse @eco-solidaire.fr).
+        if (!user.email.trim().toLowerCase().endsWith("@eco-solidaire.fr")) return false;
         // On s'exclut soi-même : « Réserver pour → Moi-même » gère déjà ce cas.
         if (user.clerkId === identity.subject) return false;
         if (seen.has(user.clerkId)) return false;
