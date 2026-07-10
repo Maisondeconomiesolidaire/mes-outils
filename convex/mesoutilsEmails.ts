@@ -17,7 +17,7 @@ export const VEHICLE_REQUEST_MANAGER_EMAILS = [
 
 /** URL publique de l'app Mes Outils, pour les liens et le logo des emails. */
 function appUrl() {
-  return (process.env.MESOUTILS_APP_URL ?? "https://mesoutils.eco-solidaire.fr").replace(/\/$/, "");
+  return (process.env.MESOUTILS_APP_URL ?? "https://mesoutils.groupemes.fr").replace(/\/$/, "");
 }
 
 /** URL absolue du logo Mes Outils (version détourée pour email, servie par l'app). */

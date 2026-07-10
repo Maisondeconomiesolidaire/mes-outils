@@ -1,14 +1,14 @@
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 
-// Adresse d'expédition. Domaine `mesoutils.eco-solidaire.fr` vérifié sur Resend
+// Adresse d'expédition. Domaine `mesoutils.groupemes.fr` vérifié sur Resend
 // (partagé par toutes les apps de l'écosystème) — meilleure délivrabilité que
 // l'ancienne adresse de test onboarding@resend.dev.
 const FROM = "Recyclerie <no-reply@mesoutils.eco-solidaire.fr>";
 
 /** URL publique de l'app (liens des emails). À régler via `npx convex env set APP_URL`. */
 function appUrl() {
-  return (process.env.APP_URL ?? "https://recycapp.vercel.app").replace(/\/$/, "");
+  return (process.env.APP_URL ?? "https://recycapp.groupemes.fr").replace(/\/$/, "");
 }
 
 /** URL du déploiement Convex (HTTP actions), pour servir les images d'emails. */
@@ -306,7 +306,8 @@ export const sendRequestConfirmation = internalAction({
 /** Staff prévenu à chaque nouvelle demande (collecte, article, vélo, etc.). */
 const NEW_REQUEST_STAFF_EMAILS = [
   "accueil.recyclerie@eco-solidaire.fr",
-  "s.tiennot@eco-solidaire.fr",
+  "v.horcholle@eco-solidaire.fr",
+  "o.dalencourt@eco-solidaire.fr",
 ];
 
 const AEROGOMMAGE_STAFF_EMAILS = [

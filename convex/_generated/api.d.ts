@@ -14,6 +14,7 @@ import type * as articles from "../articles.js";
 import type * as ateliers from "../ateliers.js";
 import type * as bennespro from "../bennespro.js";
 import type * as bikes from "../bikes.js";
+import type * as clerkMigration from "../clerkMigration.js";
 import type * as clients from "../clients.js";
 import type * as community from "../community.js";
 import type * as crons from "../crons.js";
@@ -59,6 +60,7 @@ declare const fullApi: ApiFromModules<{
   ateliers: typeof ateliers;
   bennespro: typeof bennespro;
   bikes: typeof bikes;
+  clerkMigration: typeof clerkMigration;
   clients: typeof clients;
   community: typeof community;
   crons: typeof crons;

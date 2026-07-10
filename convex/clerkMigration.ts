@@ -1,23 +1,30 @@
-import { action, internalQuery } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { action, query } from "./_generated/server";
+import { api } from "./_generated/api";
 
 /**
  * Migration Clerk dev -> prod (domaine groupemes.fr).
  *
- * On « exporte » les utilisateurs vers l'instance Clerk PROD en les recréant par
- * email (sans mot de passe) : ils n'auront qu'à faire « mot de passe oublié ».
+ * On exporte les utilisateurs DEV vers l'instance Clerk PROD en les recréant
+ * par email (sans mot de passe) : ils n'auront qu'à faire « mot de passe
+ * oublié ».
  * Leurs données restent rattachées automatiquement : à la première connexion
  * prod, `users.syncProfile` retrouve le profil par email et remplace l'ancien
  * clerkId dev par le nouveau clerkId prod (remapClerkIdEverywhere).
  *
- * Prérequis : `npx convex env set --prod CLERK_PROD_SECRET_KEY sk_live_...`
- * (clé secrète de l'instance PROD). On utilise une variable dédiée pour ne pas
- * perturber `CLERK_SECRET_KEY` (encore en dev pendant la bascule).
+ * Prérequis recommandés pendant la bascule :
+ * - `CLERK_DEV_SECRET_KEY`  : ancienne clé DEV (source des comptes à exporter)
+ * - `CLERK_SECRET_KEY`      : clé PROD active (source de vérité après bascule)
+ * - `CLERK_PROD_SECRET_KEY` : fallback si `CLERK_SECRET_KEY` pointe encore DEV
  */
 
-export const usersForClerkExport = internalQuery({
+export const usersForClerkExport = query({
   args: {},
   handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity) {
+      const access = await ctx.runQuery(api.permissions.myAccess, {});
+      if (!access.isAdmin) throw new Error("Réservé aux administrateurs.");
+    }
     const users = await ctx.db.query("users").collect();
     return users
       .map((user) => ({
@@ -30,6 +37,69 @@ export const usersForClerkExport = internalQuery({
 });
 
 type ClerkErrorBody = { errors?: Array<{ code?: string; message?: string }> };
+type ClerkEmailAddress = { id?: string; email_address?: string };
+type ClerkUserPayload = {
+  id?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  primary_email_address_id?: string | null;
+  email_addresses?: ClerkEmailAddress[];
+};
+
+function clerkPrimaryEmail(user: ClerkUserPayload) {
+  const emails = Array.isArray(user.email_addresses) ? user.email_addresses : [];
+  const primaryId = user.primary_email_address_id ?? null;
+  const primary = emails.find((email) => email.id === primaryId) ?? emails[0];
+  const value = primary?.email_address?.trim().toLowerCase() ?? "";
+  return value || null;
+}
+
+async function listClerkUsers(secret: string) {
+  const users: Array<{ email: string; firstName?: string; lastName?: string }> = [];
+  const pageSize = 100;
+  let offset = 0;
+
+  for (;;) {
+    const url = new URL("https://api.clerk.com/v1/users");
+    url.searchParams.set("limit", String(pageSize));
+    url.searchParams.set("offset", String(offset));
+    url.searchParams.set("order_by", "created_at");
+
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        "Content-Type": "application/json",
+      },
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => ({}))) as ClerkErrorBody;
+      throw new Error(body.errors?.[0]?.message ?? `Clerk source API ${response.status}`);
+    }
+
+    const payload = (await response.json()) as unknown;
+    const rawUsers = Array.isArray(payload)
+      ? payload
+      : Array.isArray((payload as { data?: unknown }).data)
+        ? (payload as { data: unknown[] }).data
+        : [];
+
+    for (const rawUser of rawUsers) {
+      const user = rawUser as ClerkUserPayload;
+      const email = clerkPrimaryEmail(user);
+      if (!email) continue;
+      users.push({
+        email,
+        firstName: user.first_name?.trim() || undefined,
+        lastName: user.last_name?.trim() || undefined,
+      });
+    }
+
+    if (rawUsers.length < pageSize) break;
+    offset += rawUsers.length;
+  }
+
+  return users;
+}
 
 export const exportUsersToProdClerk = action({
   args: {},
@@ -44,14 +114,32 @@ export const exportUsersToProdClerk = action({
       if (!access.isAdmin) throw new Error("Réservé aux administrateurs.");
     }
 
-    const secret = process.env.CLERK_PROD_SECRET_KEY;
-    if (!secret) {
+    const sourceSecret = process.env.CLERK_DEV_SECRET_KEY ?? process.env.CLERK_SECRET_KEY;
+    const targetSecret = process.env.CLERK_PROD_SECRET_KEY ?? process.env.CLERK_SECRET_KEY;
+    if (!sourceSecret) {
       throw new Error(
-        "CLERK_PROD_SECRET_KEY manquante. Fais : npx convex env set --prod CLERK_PROD_SECRET_KEY sk_live_...",
+        "CLERK_DEV_SECRET_KEY manquante. Conserve l'ancienne clé DEV ou renseigne-la explicitement.",
+      );
+    }
+    if (!targetSecret) {
+      throw new Error(
+        "Aucune clé Clerk PROD disponible. Renseigne CLERK_SECRET_KEY ou CLERK_PROD_SECRET_KEY côté prod.",
       );
     }
 
-    const users = await ctx.runQuery(internal.clerkMigration.usersForClerkExport, {});
+    const clerkUsers = await listClerkUsers(sourceSecret);
+    const dbUsers = await ctx.runQuery(api.clerkMigration.usersForClerkExport, {});
+    const byEmail = new Map<string, { email: string; firstName?: string; lastName?: string }>();
+    for (const user of dbUsers) byEmail.set(user.email, user);
+    for (const user of clerkUsers) {
+      const existing = byEmail.get(user.email);
+      byEmail.set(user.email, {
+        email: user.email,
+        firstName: user.firstName ?? existing?.firstName,
+        lastName: user.lastName ?? existing?.lastName,
+      });
+    }
+    const users = Array.from(byEmail.values()).sort((a, b) => a.email.localeCompare(b.email));
     let created = 0;
     let skipped = 0;
     let failed = 0;
@@ -62,7 +150,7 @@ export const exportUsersToProdClerk = action({
         const response = await fetch("https://api.clerk.com/v1/users", {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${secret}`,
+            Authorization: `Bearer ${targetSecret}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
@@ -70,6 +158,7 @@ export const exportUsersToProdClerk = action({
             ...(user.firstName ? { first_name: user.firstName } : {}),
             ...(user.lastName ? { last_name: user.lastName } : {}),
             skip_password_requirement: true,
+            skip_password_checks: true,
           }),
         });
         if (response.ok) {

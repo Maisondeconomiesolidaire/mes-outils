@@ -166,6 +166,60 @@ export const availableOn = query({
   },
 });
 
+export const listRemarks = query({
+  args: { vehicleId: v.id("vehicles") },
+  handler: async (ctx, { vehicleId }) => {
+    await requireCrmPermission(ctx, "flotte", "read");
+    const vehicle = await ctx.db.get(vehicleId);
+    if (!vehicle || vehicle.recycappEnabled !== true) {
+      throw new Error("Véhicule introuvable.");
+    }
+
+    const raw = await ctx.db
+      .query("vehicleReservations")
+      .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
+      .order("desc")
+      .collect();
+    const reservations = raw.filter((reservation) => reservation.feedbackSubmittedAt);
+    const lastMileage =
+      raw.reduce<number | null>((highest, reservation) => {
+        if (
+          typeof reservation.feedbackMileage !== "number" ||
+          !Number.isFinite(reservation.feedbackMileage)
+        ) {
+          return highest;
+        }
+        if (highest === null) {
+          return reservation.feedbackMileage;
+        }
+        return Math.max(highest, reservation.feedbackMileage);
+      }, typeof vehicle.odometerKm === "number" ? vehicle.odometerKm : null) ?? null;
+
+    return {
+      vehicleId: vehicle._id,
+      vehicleName: vehicle.name,
+      remarks: reservations
+        .sort((a, b) => (b.feedbackSubmittedAt ?? 0) - (a.feedbackSubmittedAt ?? 0))
+        .map((reservation) => ({
+          _id: reservation._id,
+          userName: reservation.userName,
+          purpose: reservation.purpose,
+          usageType: reservation.usageType ?? null,
+          start: reservation.start,
+          end: reservation.end,
+          submittedAt: reservation.feedbackSubmittedAt ?? 0,
+          mileage: reservation.feedbackMileage ?? null,
+          lastRecordedMileage: lastMileage,
+          fuelRestored: reservation.feedbackFuelRestored ?? null,
+          vehicleEmpty: reservation.feedbackVehicleEmpty ?? null,
+          vehicleClean: reservation.feedbackVehicleClean ?? null,
+          issues: reservation.feedbackIssues ?? null,
+          notes: reservation.feedbackNotes ?? null,
+        })),
+    };
+  },
+});
+
 /** Véhicules pris (demandes + tournées) sur une période, pour le calendrier. */
 export const takenInRange = query({
   args: { from: v.number(), to: v.number() },

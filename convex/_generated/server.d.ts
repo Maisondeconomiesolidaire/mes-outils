@@ -30,6 +30,8 @@ type Env = {
   readonly BENNESPRO_EMAIL_LOGO_ID: string | undefined;
   readonly BENNESPRO_STRIPE_SECRET_KEY: string | undefined;
   readonly BENNESPRO_STRIPE_TVA_TAX_RATE_ID: string | undefined;
+  readonly CLERK_DEV_SECRET_KEY: string | undefined;
+  readonly CLERK_PROD_SECRET_KEY: string | undefined;
   readonly CLERK_SECRET_KEY: string | undefined;
   readonly CONVEX_SITE_URL: string | undefined;
   readonly EMAIL_LOGO_ID: string | undefined;
