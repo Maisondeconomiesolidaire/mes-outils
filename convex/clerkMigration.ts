@@ -1,6 +1,5 @@
 import { action, internalQuery } from "./_generated/server";
 import { api, internal } from "./_generated/api";
-import { requireUser } from "./lib";
 
 /**
  * Migration Clerk dev -> prod (domaine groupemes.fr).
@@ -37,9 +36,13 @@ export const exportUsersToProdClerk = action({
   handler: async (
     ctx,
   ): Promise<{ total: number; created: number; skipped: number; failed: number; errors: string[] }> => {
-    await requireUser(ctx);
-    const access = await ctx.runQuery(api.permissions.myAccess, {});
-    if (!access.isAdmin) throw new Error("Réservé aux administrateurs.");
+    // Depuis le navigateur : réservé aux admins. Depuis la CLI (`npx convex
+    // run`, sans identité) : autorisé (accès déploiement = de confiance).
+    const identity = await ctx.auth.getUserIdentity();
+    if (identity) {
+      const access = await ctx.runQuery(api.permissions.myAccess, {});
+      if (!access.isAdmin) throw new Error("Réservé aux administrateurs.");
+    }
 
     const secret = process.env.CLERK_PROD_SECRET_KEY;
     if (!secret) {
