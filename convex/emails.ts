@@ -36,7 +36,7 @@ const TYPE_LABELS: Record<string, string> = {
   aerogommage: "Aérogommage",
   collecte: "Collecte",
   article: "Boutique",
-  velo: "Cycle en Bray",
+  velo: "Recyclerie",
   livraison: "Livraison",
 };
 
@@ -156,7 +156,7 @@ function shell(opts: {
           <tr>
             <td style="background:linear-gradient(135deg,#ffffff,#fff7ef,#ffe9d6);padding:22px 28px;border-bottom:1px solid #f1ece5;">
               <a href="${base}/boutique" target="_blank" style="text-decoration:none;">
-                <img src="${logoUrl()}" height="40" alt="Cycle en Bray" style="display:block;height:40px;" />
+                <img src="${logoUrl()}" height="40" alt="Recyclerie" style="display:block;height:40px;" />
               </a>
             </td>
           </tr>
@@ -171,7 +171,7 @@ function shell(opts: {
           <!-- Pied de page -->
           <tr>
             <td class="px" style="padding:22px 32px;background:#faf8f5;border-top:1px solid #f1ece5;">
-              <p style="margin:0 0 6px;font-family:Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#52525b;">Recyclerie Cycle en Bray</p>
+              <p style="margin:0 0 6px;font-family:Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#52525b;">Recyclerie</p>
               <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.6;color:#a1a1aa;">
                 4 rue de la prairie, 60650 Lachapelle-aux-Pots<br/>
                 Réemploi, collecte, aérogommage &amp; atelier vélo
@@ -355,7 +355,7 @@ export const sendNewMessage = internalAction({
     const html = shell({
       preheader: `Nouveau message concernant votre demande ${label} #${reference}.`,
       heading: "Vous avez reçu un nouveau message 💬",
-      intro: `Bonjour ${esc(name)},<br/><br/>L'équipe Cycle en Bray vous a écrit au sujet de votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>).`,
+      intro: `Bonjour ${esc(name)},<br/><br/>L'équipe Recyclerie vous a écrit au sujet de votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>).`,
       contentHtml: `
         <blockquote style="margin:0 0 22px;padding:14px 18px;background:#faf8f5;border-left:3px solid ${BRAND};border-radius:10px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">${esc(snippet)}</blockquote>
         <div style="margin:0 0 22px;">${button(conversationUrl, "Répondre au message")}</div>
@@ -412,7 +412,7 @@ export const sendNewDocument = internalAction({
     const html = shell({
       preheader: `Un nouveau document est disponible pour votre demande ${label} #${reference}.`,
       heading: "Un nouveau document est disponible 📄",
-      intro: `Bonjour ${esc(name)},<br/><br/>L'équipe Cycle en Bray a ajouté un document à votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>).`,
+      intro: `Bonjour ${esc(name)},<br/><br/>L'équipe Recyclerie a ajouté un document à votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>).`,
       contentHtml: `
         <div style="margin:0 0 20px;padding:14px 18px;background:#faf8f5;border:1px solid #ece9e4;border-radius:12px;font-family:Helvetica,Arial,sans-serif;font-size:15px;color:#3f3f46;">📎 ${esc(docName)}</div>
         <div style="margin:0 0 22px;">${button(url, "Voir mes documents")}</div>
