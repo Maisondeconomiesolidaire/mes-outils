@@ -1422,6 +1422,8 @@ export default defineSchema(
     lon: v.optional(v.number()),
     /** Distance aller (km) depuis la base — sert au calcul des déplacements. */
     distanceKm: v.number(),
+    /** Coût kilométrique HT utilisé pour les déplacements sur ce projet. */
+    travelRatePerKm: v.optional(v.number()),
     status: v.union(
       v.literal("en_cours"),
       v.literal("termine"),
@@ -1454,6 +1456,7 @@ export default defineSchema(
       v.object({
         roundTrips: v.number(),
         distanceKm: v.number(),
+        ratePerKm: v.optional(v.number()),
         cost: v.number(),
       }),
     ),
@@ -1471,6 +1474,7 @@ export default defineSchema(
   /** Fournisseurs. */
   ptSuppliers: defineTable({
     name: v.string(),
+    supplierType: v.optional(v.string()),
     contactName: v.optional(v.string()),
     email: v.optional(v.string()),
     phone: v.optional(v.string()),

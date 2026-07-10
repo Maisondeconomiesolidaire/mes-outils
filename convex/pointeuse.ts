@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireStaff } from "./lib";
+import type { Doc, Id } from "./_generated/dataModel";
+import { requireAdmin, requireStaff } from "./lib";
 
 /**
  * App « Pointeuse LSDB » — suivi des salariés et des chantiers.
@@ -11,10 +12,10 @@ import { requireStaff } from "./lib";
  *
  * Règles de calcul (figées en snapshot au moment du pointage) :
  *  - coût d'un salarié   = heures × taux horaire environné ;
- *  - coût des déplacements = nb d'aller-retours × distance aller (km) × 2 × 1 €/km.
+ *  - coût des déplacements = nb d'aller-retours × distance aller (km) × 2 × coût kilométrique du projet.
  */
 
-const TRAVEL_RATE_PER_KM = 1; // 1 € / km
+const DEFAULT_TRAVEL_RATE_PER_KM = 1; // 1 € / km
 
 /* ─── Salariés ────────────────────────────────────────────────────────────── */
 
@@ -166,6 +167,7 @@ const projectFields = {
   lat: v.optional(v.number()),
   lon: v.optional(v.number()),
   distanceKm: v.number(),
+  travelRatePerKm: v.optional(v.number()),
   status: projectStatus,
   notes: v.optional(v.string()),
 };
@@ -178,7 +180,11 @@ export const listProjects = query({
     const clients = await ctx.db.query("ptClients").collect();
     const nameById = new Map(clients.map((c) => [c._id, c.name]));
     return projects
-      .map((p) => ({ ...p, clientName: nameById.get(p.clientId) ?? "—" }))
+      .map((p) => ({
+        ...p,
+        clientName: nameById.get(p.clientId) ?? "—",
+        travelRatePerKm: p.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
+      }))
       .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
@@ -192,6 +198,7 @@ export const createProject = mutation({
     return await ctx.db.insert("ptProjects", {
       ...args,
       name: args.name.trim(),
+      travelRatePerKm: args.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
       createdAt: Date.now(),
     });
   },
@@ -201,7 +208,11 @@ export const updateProject = mutation({
   args: { projectId: v.id("ptProjects"), ...projectFields },
   handler: async (ctx, { projectId, ...patch }) => {
     await requireStaff(ctx);
-    await ctx.db.patch(projectId, { ...patch, name: patch.name.trim() });
+    await ctx.db.patch(projectId, {
+      ...patch,
+      name: patch.name.trim(),
+      travelRatePerKm: patch.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
+    });
   },
 });
 
@@ -275,7 +286,11 @@ export const projectSummary = query({
     );
 
     return {
-      project: { ...project, clientName: client?.name ?? "—" },
+      project: {
+        ...project,
+        clientName: client?.name ?? "—",
+        travelRatePerKm: project.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
+      },
       entries,
       expenses,
       invoices,
@@ -297,6 +312,7 @@ export const projectSummary = query({
 
 const supplierFields = {
   name: v.string(),
+  supplierType: v.optional(v.string()),
   contactName: v.optional(v.string()),
   email: v.optional(v.string()),
   phone: v.optional(v.string()),
@@ -320,6 +336,7 @@ export const createSupplier = mutation({
     return await ctx.db.insert("ptSuppliers", {
       ...args,
       name: args.name.trim(),
+      supplierType: args.supplierType?.trim() || undefined,
       createdAt: Date.now(),
     });
   },
@@ -329,7 +346,11 @@ export const updateSupplier = mutation({
   args: { supplierId: v.id("ptSuppliers"), ...supplierFields },
   handler: async (ctx, { supplierId, ...patch }) => {
     await requireStaff(ctx);
-    await ctx.db.patch(supplierId, { ...patch, name: patch.name.trim() });
+    await ctx.db.patch(supplierId, {
+      ...patch,
+      name: patch.name.trim(),
+      supplierType: patch.supplierType?.trim() || undefined,
+    });
   },
 });
 
@@ -413,15 +434,21 @@ export const createTimeEntry = mutation({
     }
     const laborCost = round2(lines.reduce((s, l) => s + l.cost, 0));
 
-    // Coût déplacements : AR × distance aller × 2 × 1 €/km.
+    // Coût déplacements : AR × distance aller × 2 × coût kilométrique du projet.
     const roundTrips = args.roundTrips ?? 0;
+    const ratePerKm = project.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM;
     const travelCost =
       roundTrips > 0
-        ? round2(roundTrips * project.distanceKm * 2 * TRAVEL_RATE_PER_KM)
+        ? round2(roundTrips * project.distanceKm * 2 * ratePerKm)
         : 0;
     const travel =
       roundTrips > 0
-        ? { roundTrips, distanceKm: project.distanceKm, cost: travelCost }
+        ? {
+            roundTrips,
+            distanceKm: project.distanceKm,
+            ratePerKm,
+            cost: travelCost,
+          }
         : undefined;
 
     const entryId = await ctx.db.insert("ptTimeEntries", {
@@ -667,6 +694,452 @@ export const dashboard = query({
   },
 });
 
+/* ─── Import historique Pointeuse ────────────────────────────────────────── */
+
+const legacyEmployee = v.object({
+  ref: v.optional(v.string()),
+  firstName: v.string(),
+  lastName: v.string(),
+  status: v.string(),
+  hourlyRate: v.number(),
+  active: v.optional(v.boolean()),
+  createdAt: v.optional(v.number()),
+});
+
+const legacyClient = v.object({
+  name: v.string(),
+  email: v.optional(v.string()),
+  phone: v.optional(v.string()),
+  address: v.optional(v.string()),
+  postalCode: v.optional(v.string()),
+  city: v.optional(v.string()),
+  status: v.optional(v.string()),
+  createdAt: v.optional(v.number()),
+});
+
+const legacyProject = v.object({
+  name: v.string(),
+  clientName: v.optional(v.string()),
+  address: v.optional(v.string()),
+  postalCode: v.optional(v.string()),
+  city: v.optional(v.string()),
+  distanceKm: v.optional(v.number()),
+  travelRatePerKm: v.optional(v.number()),
+  status: v.optional(v.string()),
+  notes: v.optional(v.string()),
+  createdAt: v.optional(v.number()),
+  lastModifiedAt: v.optional(v.number()),
+  pointageRefs: v.optional(v.array(v.string())),
+});
+
+const legacySupplier = v.object({
+  name: v.string(),
+  address: v.optional(v.string()),
+  supplierType: v.optional(v.string()),
+});
+
+const legacyTimeGroup = v.object({
+  pointageRef: v.string(),
+  projectName: v.optional(v.string()),
+  clientName: v.optional(v.string()),
+  date: v.optional(v.number()),
+  travelRoundTrips: v.optional(v.number()),
+  notes: v.optional(v.string()),
+  lines: v.array(
+    v.object({
+      employeeName: v.string(),
+      hours: v.number(),
+      cost: v.optional(v.number()),
+    }),
+  ),
+});
+
+export const adminImportLegacyPointeuse = mutation({
+  args: {
+    employees: v.array(legacyEmployee),
+    clients: v.array(legacyClient),
+    projects: v.array(legacyProject),
+    suppliers: v.array(legacySupplier),
+    timeGroups: v.array(legacyTimeGroup),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx);
+
+    const now = Date.now();
+    const fallbackClientName = "Import historique";
+    const fallbackProjectName = "Pointage sans projet (import historique)";
+
+    const existingClients = await ctx.db.query("ptClients").collect();
+    const clientByName = new Map(
+      existingClients.map((client) => [normalizeKey(client.name), client]),
+    );
+    const existingEmployees = await ctx.db.query("ptEmployees").collect();
+    const employeeByName = new Map(
+      existingEmployees.map((employee) => [
+        normalizeKey(`${employee.firstName} ${employee.lastName}`),
+        employee,
+      ]),
+    );
+    const existingProjects = await ctx.db.query("ptProjects").collect();
+    const projectByName = new Map(
+      existingProjects.map((project) => [normalizeKey(project.name), project]),
+    );
+    const existingSuppliers = await ctx.db.query("ptSuppliers").collect();
+    const supplierByName = new Map(
+      existingSuppliers.map((supplier) => [normalizeKey(supplier.name), supplier]),
+    );
+
+    let clientsCreated = 0;
+    let clientsUpdated = 0;
+    const ensureClient = async (legacy: {
+      name: string;
+      email?: string;
+      phone?: string;
+      address?: string;
+      postalCode?: string;
+      city?: string;
+      status?: string;
+      createdAt?: number;
+    }) => {
+      const key = normalizeKey(legacy.name);
+      const existing = clientByName.get(key);
+      const patch = buildClientPatch(existing, legacy);
+      if (existing) {
+        if (Object.keys(patch).length > 0) {
+          await ctx.db.patch(existing._id, patch);
+          const next = { ...existing, ...patch } as Doc<"ptClients">;
+          clientByName.set(key, next);
+          clientsUpdated += 1;
+          return next;
+        }
+        return existing;
+      }
+      const clientId = await ctx.db.insert("ptClients", {
+        name: legacy.name.trim(),
+        ...(legacy.email ? { email: legacy.email.trim() } : {}),
+        ...(legacy.phone ? { phone: legacy.phone.trim() } : {}),
+        ...(legacy.address ? { address: legacy.address.trim() } : {}),
+        ...(legacy.postalCode ? { postalCode: legacy.postalCode.trim() } : {}),
+        ...(legacy.city ? { city: legacy.city.trim() } : {}),
+        ...(legacy.status ? { notes: `Statut historique: ${legacy.status.trim()}` } : {}),
+        createdAt: legacy.createdAt ?? now,
+      });
+      const created = (await ctx.db.get(clientId)) as Doc<"ptClients">;
+      clientByName.set(key, created);
+      clientsCreated += 1;
+      return created;
+    };
+
+    for (const client of args.clients) {
+      await ensureClient(client);
+    }
+    const fallbackClient = await ensureClient({ name: fallbackClientName });
+
+    let employeesCreated = 0;
+    let employeesUpdated = 0;
+    for (const employee of args.employees) {
+      const key = normalizeKey(`${employee.firstName} ${employee.lastName}`);
+      const existing = employeeByName.get(key);
+      const nextStatus = mapLegacyEmployeeStatus(employee.status);
+      const nextRate = employee.hourlyRate;
+      const nextActive = employee.active ?? true;
+      if (existing) {
+        const patch: Partial<Doc<"ptEmployees">> = {};
+        if (existing.firstName !== employee.firstName.trim()) {
+          patch.firstName = employee.firstName.trim();
+        }
+        if (existing.lastName !== employee.lastName.trim()) {
+          patch.lastName = employee.lastName.trim();
+        }
+        if (existing.status !== nextStatus) patch.status = nextStatus;
+        if (existing.hourlyRate !== nextRate) patch.hourlyRate = nextRate;
+        if (existing.active !== nextActive) patch.active = nextActive;
+        if (Object.keys(patch).length > 0) {
+          await ctx.db.patch(existing._id, patch);
+          employeeByName.set(key, { ...existing, ...patch } as Doc<"ptEmployees">);
+          employeesUpdated += 1;
+        }
+      } else {
+        const employeeId = await ctx.db.insert("ptEmployees", {
+          firstName: employee.firstName.trim(),
+          lastName: employee.lastName.trim(),
+          status: nextStatus,
+          hourlyRate: nextRate,
+          active: nextActive,
+          createdAt: employee.createdAt ?? now,
+        });
+        employeeByName.set(key, (await ctx.db.get(employeeId)) as Doc<"ptEmployees">);
+        employeesCreated += 1;
+      }
+    }
+
+    let projectsCreated = 0;
+    let projectsUpdated = 0;
+    const ensureProject = async (legacy: {
+      name: string;
+      clientName?: string;
+      address?: string;
+      postalCode?: string;
+      city?: string;
+      distanceKm?: number;
+      travelRatePerKm?: number;
+      status?: string;
+      notes?: string;
+      createdAt?: number;
+    }) => {
+      const key = normalizeKey(legacy.name);
+      const existing = projectByName.get(key);
+      const client =
+        legacy.clientName && clientByName.get(normalizeKey(legacy.clientName))
+          ? clientByName.get(normalizeKey(legacy.clientName))!
+          : fallbackClient;
+      const nextStatus = mapLegacyProjectStatus(legacy.status);
+      const nextRate = legacy.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM;
+      const nextDistance = legacy.distanceKm ?? 0;
+      if (existing) {
+        const patch: Partial<Doc<"ptProjects">> = {};
+        if (existing.name !== legacy.name.trim()) patch.name = legacy.name.trim();
+        if (existing.clientId !== client._id) patch.clientId = client._id;
+        if ((existing.address ?? "") !== (legacy.address?.trim() ?? "")) {
+          patch.address = legacy.address?.trim() || undefined;
+        }
+        if ((existing.postalCode ?? "") !== (legacy.postalCode?.trim() ?? "")) {
+          patch.postalCode = legacy.postalCode?.trim() || undefined;
+        }
+        if ((existing.city ?? "") !== (legacy.city?.trim() ?? "")) {
+          patch.city = legacy.city?.trim() || undefined;
+        }
+        if (existing.distanceKm !== nextDistance) patch.distanceKm = nextDistance;
+        if ((existing.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM) !== nextRate) {
+          patch.travelRatePerKm = nextRate;
+        }
+        if (existing.status !== nextStatus) patch.status = nextStatus;
+        if ((existing.notes ?? "") !== (legacy.notes?.trim() ?? "")) {
+          patch.notes = legacy.notes?.trim() || undefined;
+        }
+        if (Object.keys(patch).length > 0) {
+          await ctx.db.patch(existing._id, patch);
+          projectByName.set(key, { ...existing, ...patch } as Doc<"ptProjects">);
+          projectsUpdated += 1;
+          return { ...existing, ...patch } as Doc<"ptProjects">;
+        }
+        return existing;
+      }
+      const projectId = await ctx.db.insert("ptProjects", {
+        name: legacy.name.trim(),
+        clientId: client._id,
+        ...(legacy.address ? { address: legacy.address.trim() } : {}),
+        ...(legacy.postalCode ? { postalCode: legacy.postalCode.trim() } : {}),
+        ...(legacy.city ? { city: legacy.city.trim() } : {}),
+        distanceKm: nextDistance,
+        travelRatePerKm: nextRate,
+        status: nextStatus,
+        ...(legacy.notes ? { notes: legacy.notes.trim() } : {}),
+        createdAt: legacy.createdAt ?? now,
+      });
+      const created = (await ctx.db.get(projectId)) as Doc<"ptProjects">;
+      projectByName.set(key, created);
+      projectsCreated += 1;
+      return created;
+    };
+
+    for (const project of args.projects) {
+      await ensureProject(project);
+    }
+    const fallbackProject = await ensureProject({
+      name: fallbackProjectName,
+      clientName: fallbackClient.name,
+      notes: "Projet de secours pour les pointages historiques sans référence projet.",
+      createdAt: now,
+    });
+
+    let suppliersCreated = 0;
+    let suppliersUpdated = 0;
+    for (const supplier of args.suppliers) {
+      const key = normalizeKey(supplier.name);
+      const existing = supplierByName.get(key);
+      if (existing) {
+        const patch: Partial<Doc<"ptSuppliers">> = {};
+        if ((existing.address ?? "") !== (supplier.address?.trim() ?? "")) {
+          patch.address = supplier.address?.trim() || undefined;
+        }
+        if ((existing.supplierType ?? "") !== (supplier.supplierType?.trim() ?? "")) {
+          patch.supplierType = supplier.supplierType?.trim() || undefined;
+        }
+        if (Object.keys(patch).length > 0) {
+          await ctx.db.patch(existing._id, patch);
+          supplierByName.set(key, { ...existing, ...patch } as Doc<"ptSuppliers">);
+          suppliersUpdated += 1;
+        }
+      } else {
+        const supplierId = await ctx.db.insert("ptSuppliers", {
+          name: supplier.name.trim(),
+          ...(supplier.address ? { address: supplier.address.trim() } : {}),
+          ...(supplier.supplierType ? { supplierType: supplier.supplierType.trim() } : {}),
+          createdAt: now,
+        });
+        supplierByName.set(key, (await ctx.db.get(supplierId)) as Doc<"ptSuppliers">);
+        suppliersCreated += 1;
+      }
+    }
+
+    let timeEntriesCreated = 0;
+    let timeEntriesUpdated = 0;
+    for (const group of args.timeGroups) {
+      const project =
+        group.projectName && projectByName.get(normalizeKey(group.projectName))
+          ? projectByName.get(normalizeKey(group.projectName))!
+          : fallbackProject;
+
+      const lines = group.lines
+        .map((line) => {
+          const employee = employeeByName.get(normalizeKey(line.employeeName));
+          if (!employee || line.hours <= 0) return null;
+          const hourlyRate = employee.hourlyRate;
+          const cost = round2(line.cost ?? line.hours * hourlyRate);
+          return {
+            employeeId: employee._id,
+            hours: line.hours,
+            hourlyRate,
+            cost,
+          };
+        })
+        .filter((line): line is NonNullable<typeof line> => Boolean(line));
+      if (lines.length === 0) continue;
+
+      const laborCost = round2(lines.reduce((sum, line) => sum + line.cost, 0));
+      const ratePerKm = project.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM;
+      const roundTrips = group.travelRoundTrips ?? 0;
+      const travelCost =
+        roundTrips > 0
+          ? round2(roundTrips * project.distanceKm * 2 * ratePerKm)
+          : 0;
+      const travel =
+        roundTrips > 0
+          ? {
+              roundTrips,
+              distanceKm: project.distanceKm,
+              ratePerKm,
+              cost: travelCost,
+            }
+          : undefined;
+      const notes = buildImportedTimeEntryNotes(group.pointageRef, group.notes);
+      const date = group.date ?? project.createdAt ?? now;
+
+      const existing = (await ctx.db
+        .query("ptTimeEntries")
+        .withIndex("by_project", (q) => q.eq("projectId", project._id))
+        .collect()).find((entry) => entry.notes === notes);
+
+      const payload = {
+        projectId: project._id,
+        clientId: project.clientId,
+        date,
+        lines,
+        travel,
+        laborCost,
+        travelCost,
+        totalCost: round2(laborCost + travelCost),
+        notes,
+        documentIds: existing?.documentIds ?? [],
+        createdAt: existing?.createdAt ?? date,
+        createdBy: "import historique",
+      };
+
+      if (existing) {
+        await ctx.db.patch(existing._id, payload);
+        timeEntriesUpdated += 1;
+      } else {
+        await ctx.db.insert("ptTimeEntries", payload);
+        timeEntriesCreated += 1;
+      }
+    }
+
+    return {
+      clientsCreated,
+      clientsUpdated,
+      employeesCreated,
+      employeesUpdated,
+      projectsCreated,
+      projectsUpdated,
+      suppliersCreated,
+      suppliersUpdated,
+      timeEntriesCreated,
+      timeEntriesUpdated,
+    };
+  },
+});
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+function normalizeKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function mapLegacyEmployeeStatus(status: string): Doc<"ptEmployees">["status"] {
+  const normalized = normalizeKey(status);
+  if (normalized === "mad (mise a disposition)" || normalized === "mad") {
+    return "MAD";
+  }
+  if (
+    normalized === "compagnon permanent" ||
+    normalized === "compagnon insertion" ||
+    normalized === "renfort ponctuel" ||
+    normalized === "encadrant"
+  ) {
+    return status === "MAD (Mise à disposition)"
+      ? "MAD"
+      : (status as Doc<"ptEmployees">["status"]);
+  }
+  return "Compagnon permanent";
+}
+
+function mapLegacyProjectStatus(status?: string): Doc<"ptProjects">["status"] {
+  const normalized = normalizeKey(status ?? "");
+  if (normalized === "termine") return "termine";
+  if (normalized === "en pause") return "en_pause";
+  return "en_cours";
+}
+
+function buildClientPatch(
+  existing: Doc<"ptClients"> | undefined,
+  legacy: {
+    name: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+    postalCode?: string;
+    city?: string;
+    status?: string;
+  },
+) {
+  if (!existing) return {};
+  const patch: Partial<Doc<"ptClients">> = {};
+  if (existing.name !== legacy.name.trim()) patch.name = legacy.name.trim();
+  if (!existing.email && legacy.email?.trim()) patch.email = legacy.email.trim();
+  if (!existing.phone && legacy.phone?.trim()) patch.phone = legacy.phone.trim();
+  if (!existing.address && legacy.address?.trim()) patch.address = legacy.address.trim();
+  if (!existing.postalCode && legacy.postalCode?.trim()) {
+    patch.postalCode = legacy.postalCode.trim();
+  }
+  if (!existing.city && legacy.city?.trim()) patch.city = legacy.city.trim();
+  if (legacy.status?.trim()) {
+    const statusNote = `Statut historique: ${legacy.status.trim()}`;
+    if (!existing.notes?.includes(statusNote)) {
+      patch.notes = existing.notes ? `${existing.notes}\n${statusNote}` : statusNote;
+    }
+  }
+  return patch;
+}
+
+function buildImportedTimeEntryNotes(pointageRef: string, notes?: string) {
+  const base = `Import historique Bubble · ${pointageRef}`;
+  return notes?.trim() ? `${base}\n${notes.trim()}` : base;
 }
