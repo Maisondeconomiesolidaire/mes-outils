@@ -1204,6 +1204,18 @@ async function applyVehicleReservationDecision(
     });
   }
 
+  await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendVehicleReservationManagerUpdate, {
+    state: args.decision,
+    requesterName: reservation.userName,
+    requesterPhotoUrl,
+    vehicleName: vehicle?.name ?? "Véhicule",
+    vehicleImageUrl,
+    label: reservation.purpose,
+    start: reservation.start,
+    end: reservation.end,
+    note: args.note?.trim() || undefined,
+  });
+
   // Véhicule Recyclerie accepté : on prévient l'équipe (sans lien Gotravaux).
   if (args.decision === "approved" && vehicle?.recycappEnabled === true) {
     await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendRecyclerieVehicleNotice, {
@@ -1327,6 +1339,19 @@ export const cancelRecyclerieVehicleReservation = mutation({
           undefined,
       });
     }
+    await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendVehicleReservationManagerUpdate, {
+      state: "cancelled",
+      requesterName: reservation.userName,
+      requesterPhotoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
+      vehicleName: vehicle?.name ?? "Véhicule",
+      vehicleImageUrl:
+        (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+        undefined,
+      label: reservation.purpose,
+      start: reservation.start,
+      end: reservation.end,
+      note: "Demande annulée",
+    });
   },
 });
 
@@ -1372,5 +1397,18 @@ export const cancelVehicleReservation = mutation({
           undefined,
       });
     }
+    await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendVehicleReservationManagerUpdate, {
+      state: "cancelled",
+      requesterName: reservation.userName,
+      requesterPhotoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
+      vehicleName: vehicle?.name ?? "Véhicule",
+      vehicleImageUrl:
+        (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+        undefined,
+      label: reservation.purpose,
+      start: reservation.start,
+      end: reservation.end,
+      note: "Demande annulée",
+    });
   },
 });

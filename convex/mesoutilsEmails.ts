@@ -401,6 +401,72 @@ export const sendVehicleRequestToManagers = internalAction({
   },
 });
 
+export const sendVehicleReservationManagerUpdate = internalAction({
+  args: {
+    state: v.union(
+      v.literal("approved"),
+      v.literal("rejected"),
+      v.literal("cancelled"),
+    ),
+    requesterName: v.string(),
+    vehicleName: v.string(),
+    label: v.string(),
+    start: v.number(),
+    end: v.number(),
+    note: v.optional(v.string()),
+    requesterPhotoUrl: v.optional(v.string()),
+    vehicleImageUrl: v.optional(v.string()),
+    vehicleImageStorageId: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const heading =
+      args.state === "approved"
+        ? "Réservation véhicule acceptée"
+        : args.state === "rejected"
+          ? "Réservation véhicule refusée"
+          : "Réservation véhicule annulée";
+    const intro =
+      args.state === "approved"
+        ? "Une demande de réservation véhicule a été acceptée."
+        : args.state === "rejected"
+          ? "Une demande de réservation véhicule a été refusée."
+          : "Une demande de réservation véhicule a été annulée.";
+
+    const rows: Array<[string, string]> = [
+      ["Véhicule", args.vehicleName],
+      ["Motif", args.label],
+      ["Créneau", formatRange(args.start, args.end)],
+    ];
+    if (args.note) rows.push(["Note", args.note]);
+
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.vehicleImageUrl,
+      imageStorageId: args.vehicleImageStorageId,
+    });
+
+    const html = shell({
+      preheader: `${args.requesterName} · ${args.vehicleName} · ${heading}`,
+      heading,
+      heroUrl,
+      intro,
+      contentHtml: `
+        ${userChip(args.requesterName, args.requesterPhotoUrl, "Demandeur")}
+        ${detailCard(rows)}
+        ${button(appLink("/gotravaux?v=reservations"), "Voir les réservations")}
+      `,
+    });
+
+    const subject =
+      args.state === "approved"
+        ? `Réservation acceptée · ${args.vehicleName} (${args.requesterName})`
+        : args.state === "rejected"
+          ? `Réservation refusée · ${args.vehicleName} (${args.requesterName})`
+          : `Réservation annulée · ${args.vehicleName} (${args.requesterName})`;
+
+    await resendSend(VEHICLE_REQUEST_MANAGER_EMAILS, subject, html, FROM);
+  },
+});
+
 /** Adresses des responsables notifiés des réservations de salle. */
 export const ROOM_RESERVATION_MANAGER_EMAILS = [
   "a.still@eco-solidaire.fr",
