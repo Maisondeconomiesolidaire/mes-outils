@@ -17,6 +17,7 @@ type Remark = {
   submittedAt: number;
   usageType?: "pro" | "personal";
   mileage?: number;
+  lastRecordedMileage?: number;
   fuelRestored?: boolean;
   vehicleEmpty?: boolean;
   vehicleClean?: boolean;
@@ -109,9 +110,14 @@ export function ReservationRemarks({
           <div className="mt-3 flex flex-wrap gap-2">
             {kind === "vehicle" ? (
               <>
+                {remark.lastRecordedMileage !== undefined ? (
+                  <span className="rounded-full bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-[var(--foreground)]">
+                    Dernier relevé : {remark.lastRecordedMileage.toLocaleString("fr-FR")} km
+                  </span>
+                ) : null}
                 {remark.mileage !== undefined ? (
                   <span className="rounded-full bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-[var(--foreground)]">
-                    {remark.mileage.toLocaleString("fr-FR")} km
+                    Retour utilisateur : {remark.mileage.toLocaleString("fr-FR")} km
                   </span>
                 ) : null}
                 {remark.usageType === "personal" ? (

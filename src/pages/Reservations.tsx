@@ -52,7 +52,19 @@ const TIME_OPTIONS = [
 type Occupied = { userName: string; start: number; end: number } | null;
 type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: string; buildingLabel?: string; capacity?: number; photoUrl?: string | null; occupiedBy?: Occupied };
 type Vehicle = { _id: Id<"vehicles">; name: string; plate?: string; kind: string; brand?: string; model?: string; seats?: number; reservablePro?: boolean; reservablePersonal?: boolean; site?: "60" | "76"; siteLabel?: string; photoUrl?: string | null; occupiedBy?: Occupied; unavailableReason?: string | null };
-
+type MyReservation = {
+  _id: string;
+  kind: "room" | "vehicle";
+  assetName: string;
+  photoUrl?: string | null;
+  usageType?: "pro" | "personal";
+  label: string;
+  start: number;
+  end: number;
+  status: "confirmed" | "pending" | "approved" | "rejected" | "cancelled";
+  feedbackSubmittedAt?: number;
+  lastRecordedMileage?: number;
+};
 type DaySelection = { start: number; end: number };
 
 function startOfDayMs(input: number | Date): number {
@@ -585,19 +597,6 @@ function Agenda({
   );
 }
 
-type MyReservation = {
-  _id: string;
-  kind: "room" | "vehicle";
-  assetName: string;
-  photoUrl?: string | null;
-  usageType?: "pro" | "personal";
-  label: string;
-  start: number;
-  end: number;
-  status: "confirmed" | "pending" | "approved" | "rejected" | "cancelled";
-  feedbackSubmittedAt?: number;
-};
-
 function MyReservations() {
   const access = usePermissionsAccess();
   const canDeleteForever = access?.email?.trim().toLowerCase() === "lahmerselim@gmail.com";
@@ -620,6 +619,15 @@ function MyReservations() {
   };
   const [feedbackForm, setFeedbackForm] = useState(emptyFeedback);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const feedbackMileageValue = Number(feedbackForm.mileage);
+  const minMileageError =
+    feedbackTarget?.kind === "vehicle" &&
+    typeof feedbackTarget.lastRecordedMileage === "number" &&
+    feedbackForm.mileage.trim() &&
+    Number.isFinite(feedbackMileageValue) &&
+    feedbackMileageValue < feedbackTarget.lastRecordedMileage
+      ? `Le kilométrage ne peut pas être inférieur à ${feedbackTarget.lastRecordedMileage.toLocaleString("fr-FR")} km`
+      : null;
 
   if (reservations === undefined) return <FullSpinner label="Chargement de vos réservations..." />;
 
@@ -660,6 +668,10 @@ function MyReservations() {
         const mileage = Number(feedbackForm.mileage);
         if (!feedbackForm.mileage.trim() || !Number.isFinite(mileage) || mileage < 0) {
           void alertDialog("Merci de renseigner le kilométrage relevé.");
+          setFeedbackSubmitting(false);
+          return;
+        }
+        if (minMileageError) {
           setFeedbackSubmitting(false);
           return;
         }
@@ -776,6 +788,9 @@ function MyReservations() {
                       placeholder="Ex. 125430"
                     />
                   </Field>
+                  {minMileageError ? (
+                    <p className="mt-1 text-sm text-red-500">{minMileageError}</p>
+                  ) : null}
                 </div>
                 {feedbackTarget.usageType === "personal" ? (
                   <Checkbox

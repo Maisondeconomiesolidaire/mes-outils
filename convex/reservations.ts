@@ -117,6 +117,30 @@ async function approvedReservationsForVehicle(
   return reservations.filter((reservation) => reservation.status === "approved");
 }
 
+async function lastRecordedMileageForVehicle(
+  ctx: QueryCtx | MutationCtx,
+  vehicleId: Id<"vehicles">,
+) {
+  const [vehicle, reservations] = await Promise.all([
+    ctx.db.get(vehicleId),
+    ctx.db
+      .query("vehicleReservations")
+      .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
+      .collect(),
+  ]);
+  const reservationMileage = reservations.reduce<number | undefined>((max, reservation) => {
+    const mileage = reservation.feedbackMileage;
+    if (typeof mileage !== "number" || !Number.isFinite(mileage)) return max;
+    return max === undefined ? mileage : Math.max(max, mileage);
+  }, undefined);
+  if (typeof vehicle?.odometerKm === "number" && Number.isFinite(vehicle.odometerKm)) {
+    return reservationMileage === undefined
+      ? vehicle.odometerKm
+      : Math.max(vehicle.odometerKm, reservationMileage);
+  }
+  return reservationMileage;
+}
+
 export const listRooms = query({
   args: {},
   handler: async (ctx) => {
@@ -601,6 +625,20 @@ export const listMyReservations = query({
         ),
       ),
     );
+    const lastMileageByVehicleId = new Map(
+      vehicles.map((vehicle) => [String(vehicle._id), vehicle.odometerKm]),
+    );
+    for (const reservation of vehicleRes) {
+      if (typeof reservation.feedbackMileage !== "number" || !Number.isFinite(reservation.feedbackMileage)) {
+        continue;
+      }
+      const key = String(reservation.vehicleId);
+      const current = lastMileageByVehicleId.get(key);
+      lastMileageByVehicleId.set(
+        key,
+        typeof current === "number" ? Math.max(current, reservation.feedbackMileage) : reservation.feedbackMileage,
+      );
+    }
 
     const mine = [
       ...roomRes
@@ -630,6 +668,7 @@ export const listMyReservations = query({
           end: reservation.end,
           status: reservation.status,
           feedbackSubmittedAt: reservation.feedbackSubmittedAt,
+          lastRecordedMileage: lastMileageByVehicleId.get(String(reservation.vehicleId)),
         })),
     ];
     return mine.sort((a, b) => b.start - a.start);
@@ -663,6 +702,16 @@ export const submitVehicleFeedback = mutation({
     }
     if (!Number.isFinite(args.mileage) || args.mileage < 0) {
       throw new Error("Kilométrage invalide.");
+    }
+    const lastRecordedMileage = await lastRecordedMileageForVehicle(ctx, reservation.vehicleId);
+    if (
+      typeof lastRecordedMileage === "number" &&
+      Number.isFinite(lastRecordedMileage) &&
+      args.mileage < lastRecordedMileage
+    ) {
+      throw new Error(
+        `Le kilométrage ne peut pas être inférieur à ${Math.round(lastRecordedMileage)} km.`,
+      );
     }
 
     await ctx.db.patch(args.reservationId, {
@@ -800,6 +849,20 @@ export const listVehicleRemarks = query({
     const reservations = raw.filter((r) => r.feedbackSubmittedAt);
     const vehicles = await ctx.db.query("vehicles").collect();
     const byId = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
+    const lastMileageByVehicleId = new Map(
+      vehicles.map((vehicle) => [String(vehicle._id), vehicle.odometerKm]),
+    );
+    for (const reservation of raw) {
+      if (typeof reservation.feedbackMileage !== "number" || !Number.isFinite(reservation.feedbackMileage)) {
+        continue;
+      }
+      const key = String(reservation.vehicleId);
+      const current = lastMileageByVehicleId.get(key);
+      lastMileageByVehicleId.set(
+        key,
+        typeof current === "number" ? Math.max(current, reservation.feedbackMileage) : reservation.feedbackMileage,
+      );
+    }
 
     return await Promise.all(
       reservations
@@ -818,6 +881,7 @@ export const listVehicleRemarks = query({
             end: r.end,
             submittedAt: r.feedbackSubmittedAt ?? 0,
             mileage: r.feedbackMileage,
+            lastRecordedMileage: lastMileageByVehicleId.get(String(r.vehicleId)),
             fuelRestored: r.feedbackFuelRestored,
             vehicleEmpty: r.feedbackVehicleEmpty,
             vehicleClean: r.feedbackVehicleClean,
