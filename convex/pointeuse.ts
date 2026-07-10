@@ -780,6 +780,12 @@ export const adminImportLegacyPointeuse = mutation({
         employee,
       ]),
     );
+    const employeeByFirstName = new Map<string, Doc<"ptEmployees">>();
+    for (const employee of existingEmployees) {
+      const key = normalizeKey(employee.firstName);
+      if (!key || employeeByFirstName.has(key)) continue;
+      employeeByFirstName.set(key, employee);
+    }
     const existingProjects = await ctx.db.query("ptProjects").collect();
     const projectByName = new Map(
       existingProjects.map((project) => [normalizeKey(project.name), project]),
@@ -856,7 +862,11 @@ export const adminImportLegacyPointeuse = mutation({
         if (existing.active !== nextActive) patch.active = nextActive;
         if (Object.keys(patch).length > 0) {
           await ctx.db.patch(existing._id, patch);
-          employeeByName.set(key, { ...existing, ...patch } as Doc<"ptEmployees">);
+          const next = { ...existing, ...patch } as Doc<"ptEmployees">;
+          employeeByName.set(key, next);
+          if (!employeeByFirstName.has(normalizeKey(next.firstName))) {
+            employeeByFirstName.set(normalizeKey(next.firstName), next);
+          }
           employeesUpdated += 1;
         }
       } else {
@@ -868,7 +878,11 @@ export const adminImportLegacyPointeuse = mutation({
           active: nextActive,
           createdAt: employee.createdAt ?? now,
         });
-        employeeByName.set(key, (await ctx.db.get(employeeId)) as Doc<"ptEmployees">);
+        const created = (await ctx.db.get(employeeId)) as Doc<"ptEmployees">;
+        employeeByName.set(key, created);
+        if (!employeeByFirstName.has(normalizeKey(created.firstName))) {
+          employeeByFirstName.set(normalizeKey(created.firstName), created);
+        }
         employeesCreated += 1;
       }
     }
@@ -993,7 +1007,9 @@ export const adminImportLegacyPointeuse = mutation({
 
       const lines = group.lines
         .map((line) => {
-          const employee = employeeByName.get(normalizeKey(line.employeeName));
+          const employee =
+            employeeByName.get(normalizeKey(line.employeeName)) ??
+            employeeByFirstName.get(normalizeKey(line.employeeName));
           if (!employee || line.hours <= 0) return null;
           const hourlyRate = employee.hourlyRate;
           const cost = round2(line.cost ?? line.hours * hourlyRate);
