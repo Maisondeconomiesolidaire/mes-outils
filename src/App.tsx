@@ -8,6 +8,7 @@ import { Gotravaux } from "./pages/Gotravaux";
 import { Messagerie } from "./pages/Messagerie";
 import { Notifications } from "./pages/Notifications";
 import { Portail } from "./pages/Portail";
+import { Conges } from "./pages/Conges";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
 import { ConfirmRoot } from "./lib/confirm";
@@ -53,6 +54,14 @@ export default function App() {
           element={
             <RequirePermission pageKey="mesoutils:salles">
               <Salles />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/conges"
+          element={
+            <RequirePermission>
+              <Conges />
             </RequirePermission>
           }
         />

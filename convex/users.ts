@@ -159,6 +159,14 @@ async function remapClerkIdEverywhere(
     await ctx.db.patch(reservation._id, { bookedForClerkId: newClerkId });
   }
 
+  const leaveRequests = await ctx.db
+    .query("leaveRequests")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", oldClerkId))
+    .collect();
+  for (const leave of leaveRequests) {
+    await ctx.db.patch(leave._id, { clerkId: newClerkId });
+  }
+
   const events = await ctx.db
     .query("events")
     .withIndex("by_authorClerkId", (q) => q.eq("authorClerkId", oldClerkId))

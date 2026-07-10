@@ -313,6 +313,7 @@ export const submitAerogommage = mutation({
     options: v.optional(aerogommageOptionsArg),
   },
   handler: async (ctx, { customer, comment, photos, items, options }) => {
+    await requireUser(ctx);
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,
@@ -387,6 +388,7 @@ export const submitCollecte = mutation({
     }),
   },
   handler: async (ctx, { customer, comment, photos, details }) => {
+    await requireUser(ctx);
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,
@@ -437,6 +439,7 @@ export const submitVelo = mutation({
     }),
   },
   handler: async (ctx, { customer, comment, photos, details }) => {
+    await requireUser(ctx);
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,
@@ -479,6 +482,7 @@ export const submitLivraison = mutation({
     referencePhoto: v.optional(v.id("_storage")),
   },
   handler: async (ctx, { customer, comment, articlePhoto, referencePhoto }) => {
+    await requireUser(ctx);
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,

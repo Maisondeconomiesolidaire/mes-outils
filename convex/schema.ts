@@ -485,6 +485,38 @@ export default defineSchema(
     .index("by_clerkId", ["clerkId"])
     .index("by_email", ["email"]),
 
+  /** Demandes de congés / absences déposées depuis Mes Outils. */
+  leaveRequests: defineTable({
+    clerkId: v.string(),
+    requesterName: v.string(),
+    requesterEmail: v.optional(v.string()),
+    type: v.union(
+      v.literal("cp"),
+      v.literal("rtt"),
+      v.literal("sans_solde"),
+      v.literal("maladie"),
+      v.literal("autre"),
+    ),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected"),
+      v.literal("cancelled"),
+    ),
+    startDate: v.string(),
+    endDate: v.string(),
+    note: v.optional(v.string()),
+    decisionNote: v.optional(v.string()),
+    decidedAt: v.optional(v.number()),
+    decidedByClerkId: v.optional(v.string()),
+    decidedByName: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_clerkId", ["clerkId"])
+    .index("by_status_and_startDate", ["status", "startDate"])
+    .index("by_startDate", ["startDate"]),
+
   /** Messagerie client ⇄ administrateurs, rattachée à une demande. */
   messages: defineTable({
     requestId: v.id("requests"),

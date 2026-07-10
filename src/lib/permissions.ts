@@ -375,6 +375,7 @@ export const PORTAL_NAV = [
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations", icon: CalendarCheck },
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
+  { to: "/conges", label: "Congés", icon: CalendarDays },
   { to: "/messagerie", label: "Messagerie", icon: MessageCircle },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },

@@ -27,6 +27,7 @@ import type * as gotravaux from "../gotravaux.js";
 import type * as http from "../http.js";
 import type * as importLegacy from "../importLegacy.js";
 import type * as klyde from "../klyde.js";
+import type * as leaves from "../leaves.js";
 import type * as lib from "../lib.js";
 import type * as livraison from "../livraison.js";
 import type * as mesoutilsEmails from "../mesoutilsEmails.js";
@@ -73,6 +74,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   importLegacy: typeof importLegacy;
   klyde: typeof klyde;
+  leaves: typeof leaves;
   lib: typeof lib;
   livraison: typeof livraison;
   mesoutilsEmails: typeof mesoutilsEmails;
