@@ -54,6 +54,24 @@ function clerkPrimaryEmail(user: ClerkUserPayload) {
   return value || null;
 }
 
+function isClerkDuplicateError(responseStatus: number, body: ClerkErrorBody) {
+  const errors = Array.isArray(body.errors) ? body.errors : [];
+  return (
+    responseStatus === 409 ||
+    errors.some((error) => {
+      const code = (error.code ?? "").toLowerCase();
+      const message = (error.message ?? "").toLowerCase();
+      return (
+        code.includes("already_exists") ||
+        code.includes("identifier_exists") ||
+        code.includes("duplicate") ||
+        message.includes("already exists") ||
+        message.includes("has already been taken")
+      );
+    })
+  );
+}
+
 async function listClerkUsers(secret: string) {
   const users: Array<{ email: string; firstName?: string; lastName?: string }> = [];
   const pageSize = 100;
@@ -159,20 +177,15 @@ export const exportUsersToProdClerk = action({
             ...(user.lastName ? { last_name: user.lastName } : {}),
             skip_password_requirement: true,
             skip_password_checks: true,
+            legal_accepted_at: new Date().toISOString(),
           }),
         });
         if (response.ok) {
           created += 1;
         } else {
           const body = (await response.json().catch(() => ({}))) as ClerkErrorBody;
-          const code = body.errors?.[0]?.code ?? "";
           // Email déjà présent côté prod : on considère l'utilisateur exporté.
-          if (
-            response.status === 422 ||
-            code.includes("already_exists") ||
-            code.includes("identifier_exists") ||
-            code.includes("duplicate")
-          ) {
+          if (isClerkDuplicateError(response.status, body)) {
             skipped += 1;
           } else {
             failed += 1;
