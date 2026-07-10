@@ -60,7 +60,7 @@ export default function App() {
         <Route
           path="/conges"
           element={
-            <RequirePermission>
+            <RequirePermission pageKey="mesoutils:conges">
               <Conges />
             </RequirePermission>
           }

@@ -234,6 +234,13 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
   },
   {
     app: "mesoutils",
+    key: "mesoutils:conges",
+    label: "Congés",
+    description: "Demandes d'absences, suivi et validation des congés.",
+    actions: ["read", "create", "manage"],
+  },
+  {
+    app: "mesoutils",
     key: "mesoutils:admin",
     label: "Admin Mes Outils",
     description: "Gestion transverse des droits Mes Outils et recyclerie.",
@@ -375,7 +382,7 @@ export const PORTAL_NAV = [
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations", icon: CalendarCheck },
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
-  { to: "/conges", label: "Congés", icon: CalendarDays },
+  { to: "/conges", label: "Congés", pageKey: "mesoutils:conges", icon: CalendarDays },
   { to: "/messagerie", label: "Messagerie", icon: MessageCircle },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },

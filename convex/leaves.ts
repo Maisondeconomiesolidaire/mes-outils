@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { getCrmAccessForIdentity, requireUser } from "./lib";
+import { getCrmAccessForIdentity, requireCrmPermission, requireUser } from "./lib";
 
 function displayName(identity: {
   name?: string | null;
@@ -25,9 +25,6 @@ function parseDay(value: string) {
 async function requireMesoutilsStaff(ctx: QueryCtx | MutationCtx) {
   const identity = await requireUser(ctx);
   const access = await getCrmAccessForIdentity(ctx, identity);
-  if (!access.staff && !access.admin) {
-    throw new Error("Accès staff requis.");
-  }
   return { identity, access };
 }
 
@@ -49,6 +46,7 @@ const leaveStatusValidator = v.union(
 export const listMine = query({
   args: {},
   handler: async (ctx) => {
+    await requireCrmPermission(ctx, "mesoutils:conges", "read");
     const { identity, access } = await requireMesoutilsStaff(ctx);
     const mine = await ctx.db
       .query("leaveRequests")
@@ -82,6 +80,7 @@ export const create = mutation({
     note: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, "mesoutils:conges", "create");
     const { identity } = await requireMesoutilsStaff(ctx);
     const start = parseDay(args.startDate);
     const end = parseDay(args.endDate);
@@ -108,6 +107,7 @@ export const create = mutation({
 export const cancel = mutation({
   args: { leaveId: v.id("leaveRequests") },
   handler: async (ctx, { leaveId }) => {
+    await requireCrmPermission(ctx, "mesoutils:conges", "read");
     const { identity, access } = await requireMesoutilsStaff(ctx);
     const leave = await ctx.db.get(leaveId);
     if (!leave) throw new Error("Demande introuvable.");
@@ -133,6 +133,7 @@ export const decide = mutation({
     decisionNote: v.optional(v.string()),
   },
   handler: async (ctx, { leaveId, status, decisionNote }) => {
+    await requireCrmPermission(ctx, "mesoutils:conges", "manage");
     const { identity, access } = await requireMesoutilsStaff(ctx);
     if (!access.admin) throw new Error("Accès administrateur requis.");
     const leave = await ctx.db.get(leaveId);
@@ -157,6 +158,7 @@ export const listAll = query({
     status: v.optional(leaveStatusValidator),
   },
   handler: async (ctx, { status }) => {
+    await requireCrmPermission(ctx, "mesoutils:conges", "manage");
     const { access } = await requireMesoutilsStaff(ctx);
     if (!access.admin) throw new Error("Accès administrateur requis.");
     const leaves = status
