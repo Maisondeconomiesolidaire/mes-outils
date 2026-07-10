@@ -129,6 +129,23 @@ export async function requireAdmin(ctx: QueryCtx | MutationCtx | ActionCtx) {
   throw new Error("Accès réservé aux administrateurs.");
 }
 
+/**
+ * Accès à l'application Pointeuse (données RH sensibles) : réservé aux admins et
+ * aux utilisateurs disposant d'au moins un droit « pointeuse: » attribué depuis
+ * la page Admin. Ne suffit pas d'être « staff ».
+ */
+export async function requirePointeuseAccess(ctx: QueryCtx | MutationCtx | ActionCtx) {
+  const identity = await requireUser(ctx);
+  if (hasDb(ctx)) {
+    const access = await getCrmAccessForIdentity(ctx, identity);
+    if (access.admin) return identity;
+    if (access.grants.some((grant) => grant.pageKey.startsWith("pointeuse:"))) return identity;
+    throw new Error("Accès à la Pointeuse non autorisé.");
+  }
+  if (isAdminIdentity(identity)) return identity;
+  throw new Error("Accès à la Pointeuse non autorisé.");
+}
+
 export type CrmPermissionAction =
   | "read"
   | "create"

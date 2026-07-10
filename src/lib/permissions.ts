@@ -5,6 +5,7 @@ import {
   Bike,
   CarFront,
   Bell,
+  ClipboardList,
   DoorOpen,
   Home,
   MessageCircle,
@@ -47,7 +48,15 @@ export type Access = {
 };
 
 export type AppDefinition = {
-  key: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointage" | "collecte";
+  key:
+    | "recycapp"
+    | "mesoutils"
+    | "klyde"
+    | "cycleenbray"
+    | "bennespro"
+    | "pointeuse"
+    | "pointage"
+    | "collecte";
   label: string;
   description: string;
   icon: LucideIcon;
@@ -60,7 +69,7 @@ export type AppDefinition = {
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro";
+  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse";
   key: string;
   label: string;
   description: string;
@@ -327,7 +336,73 @@ export const BENNESPRO_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES];
+export const POINTEUSE_PAGES: PermissionPage[] = [
+  {
+    app: "pointeuse",
+    key: "pointeuse:dashboard",
+    label: "Tableau de bord",
+    description: "Vue d'ensemble des pointages, projets et coûts.",
+    actions: ["read"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:pointages",
+    label: "Pointages",
+    description: "Saisie et suivi des heures des salariés.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:projets",
+    label: "Projets / Chantiers",
+    description: "Projets, chantiers et leur suivi.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:clients",
+    label: "Clients",
+    description: "Clients des chantiers.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:salaries",
+    label: "Salariés",
+    description: "Fiches salariés (données RH sensibles).",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:fournisseurs",
+    label: "Fournisseurs",
+    description: "Fournisseurs et sous-traitants.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:depenses",
+    label: "Dépenses",
+    description: "Dépenses et achats liés aux chantiers.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:factures",
+    label: "Factures",
+    description: "Facturation des chantiers.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:admin",
+    label: "Admin Pointeuse",
+    description: "Configuration et droits de l'application Pointeuse.",
+    actions: ["read", "manage"],
+  },
+];
+
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
@@ -373,6 +448,17 @@ export const APPS: AppDefinition[] = [
     external: true,
     accent: "from-amber-500 to-zinc-900",
     cardBg: "#a4cebe",
+  },
+  {
+    key: "pointeuse",
+    label: "Pointeuse",
+    description: "Suivi des salariés, pointages, projets, dépenses et factures.",
+    icon: ClipboardList,
+    logoSrc: "/logo-lsdb.png",
+    href: "https://pointeuse.groupemes.fr",
+    external: true,
+    accent: "from-orange-500 to-amber-600",
+    cardBg: "#fff1e5",
   },
 ];
 
@@ -455,6 +541,9 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
   if (appKey === "bennespro") {
     return access.grants.some((grant) => grant.pageKey.startsWith("bennespro:"));
   }
+  if (appKey === "pointeuse") {
+    return access.grants.some((grant) => grant.pageKey.startsWith("pointeuse:"));
+  }
   return access.grants.some((grant) => !grant.pageKey.includes(":"));
 }
 
@@ -465,5 +554,6 @@ export function groupPagesByApp() {
     { key: "klyde", label: "Klyde", pages: KLYDE_PAGES },
     { key: "cycleenbray", label: "Cycle en Bray", pages: CYCLEENBRAY_PAGES },
     { key: "bennespro", label: "Bennes & Pro", pages: BENNESPRO_PAGES },
+    { key: "pointeuse", label: "Pointeuse", pages: POINTEUSE_PAGES },
   ] as const;
 }
