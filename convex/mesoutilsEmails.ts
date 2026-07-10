@@ -404,7 +404,6 @@ export const sendVehicleRequestToManagers = internalAction({
 /** Adresses des responsables notifiés des réservations de salle. */
 export const ROOM_RESERVATION_MANAGER_EMAILS = [
   "a.still@eco-solidaire.fr",
-  "y.prata@eco-solidaire.fr",
 ];
 
 /**
@@ -469,7 +468,7 @@ export const sendRecyclerieVehicleNotice = internalAction({
   },
 });
 
-/** Notifie les responsables (a.still / y.prata) d'une réservation de salle. */
+/** Notifie les responsables d'une réservation de salle. */
 export const sendRoomReservationToManagers = internalAction({
   args: {
     requesterName: v.string(),
