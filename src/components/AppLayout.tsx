@@ -7,6 +7,7 @@ import { api } from "../../convex/_generated/api";
 import { PORTAL_NAV, canAccess } from "../lib/permissions";
 import { cn } from "../lib/cn";
 import { usePermissionsAccess } from "./RequirePermission";
+import { AppSwitcher } from "./AppSwitcher";
 import { Button } from "./ui/Button";
 import { Field, Input } from "./ui/Field";
 import { FullSpinner } from "./ui/Spinner";
@@ -318,9 +319,12 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
           <Menu className="h-5 w-5" />
         </button>
         <Link to="/"><img src={logoSrc} alt="Mes Outils" className="h-8 w-auto" /></Link>
-        <Link to="/compte" className="ml-auto">
-          <UserAvatar name={user?.fullName ?? "Moi"} src={user?.imageUrl} />
-        </Link>
+        <div className="ml-auto flex items-center gap-1">
+          <AppSwitcher current="mesoutils" />
+          <Link to="/compte">
+            <UserAvatar name={user?.fullName ?? "Moi"} src={user?.imageUrl} />
+          </Link>
+        </div>
       </header>
 
       {/* Tiroir mobile */}
@@ -375,8 +379,9 @@ function SidebarContent({
 }) {
   return (
     <>
-      <div className="flex h-20 items-center overflow-hidden border-b border-[var(--border)] px-5">
+      <div className="flex h-20 items-center justify-between gap-2 overflow-hidden border-b border-[var(--border)] px-5">
         <Link to="/"><img src={logoSrc} alt="Mes Outils" className="h-16 w-auto" /></Link>
+        <AppSwitcher current="mesoutils" />
       </div>
 
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">

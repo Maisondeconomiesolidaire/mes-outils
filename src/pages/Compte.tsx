@@ -5,8 +5,6 @@ import { SectionHeader } from "../components/SectionHeader";
 import { Button } from "../components/ui/Button";
 import { Field, Input } from "../components/ui/Field";
 import { FullSpinner } from "../components/ui/Spinner";
-import { MyAppsGrid } from "../components/MyApps";
-import { cn } from "../lib/cn";
 import { confirmPermanentDelete } from "../lib/confirm";
 
 export function Compte() {
@@ -14,7 +12,6 @@ export function Compte() {
   const { signOut } = useClerk();
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab] = useState<"infos" | "apps">("infos");
   const [firstName, setFirstName] = useState(user?.firstName ?? "");
   const [lastName, setLastName] = useState(user?.lastName ?? "");
   const [savingInfo, setSavingInfo] = useState(false);
@@ -81,28 +78,6 @@ export function Compte() {
     <div className="mx-auto max-w-2xl space-y-6">
       <SectionHeader title="Mon compte" />
 
-      <nav className="flex gap-1 overflow-x-auto border-b border-[var(--border)]">
-        {([{ key: "infos", label: "Informations" }, { key: "apps", label: "Mes applications" }] as const).map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setTab(t.key)}
-            className={cn(
-              "shrink-0 border-b-2 px-4 py-2.5 text-sm font-semibold transition",
-              tab === t.key
-                ? "border-brand-500 text-brand-600"
-                : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-
-      {tab === "apps" ? (
-        <MyAppsGrid current="mesoutils" />
-      ) : (
-      <>
       <section className="premium-panel rounded-2xl p-5">
         <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
           <span className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-2xl font-semibold text-white">
@@ -164,8 +139,6 @@ export function Compte() {
           </Button>
         </div>
       </section>
-      </>
-      )}
     </div>
   );
 }
