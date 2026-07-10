@@ -44,7 +44,7 @@ const APPS: PortalApp[] = [
     label: "Mes Outils",
     description: "Portail interne : accès aux applications, espace partage et réservations.",
     logoSrc: "/mesoutils-light.png",
-    href: env.VITE_MESOUTILS_URL ?? "https://mesoutils.eco-solidaire.fr",
+    href: env.VITE_MESOUTILS_URL ?? "https://mesoutils.groupemes.fr",
     cardBg: "#e6f6ec",
   },
   {
@@ -52,7 +52,7 @@ const APPS: PortalApp[] = [
     label: "Recyclerie",
     description: "CRM de gestion pour les demandes, la boutique, le stock et les clients.",
     logoSrc: "/recyclerie-logo.png",
-    href: env.VITE_RECYCAPP_URL ?? "https://mesrecycleries.vercel.app/crm",
+    href: env.VITE_RECYCAPP_URL ?? "https://recycapp.groupemes.fr/crm",
     cardBg: "#ffffff",
   },
   {
@@ -60,7 +60,7 @@ const APPS: PortalApp[] = [
     label: "Klyd",
     description: "Boutique textile : stock, mise en ligne et suivi des commandes.",
     logoSrc: "/klyd-logo.png",
-    href: env.VITE_KLYD_URL ?? "https://klyd.vercel.app",
+    href: env.VITE_KLYD_URL ?? "https://klyd.groupemes.fr",
     cardBg: "#f6eee5",
   },
   {
@@ -68,7 +68,7 @@ const APPS: PortalApp[] = [
     label: "Cycle en Bray",
     description: "Boutique et CRM de gestion pour la Recyclerie 60 et 76.",
     logoSrc: "/cycle-en-bray-logo.webp",
-    href: env.VITE_CYCLEENBRAY_URL ?? "https://cycleenbray.vercel.app/crm",
+    href: env.VITE_CYCLEENBRAY_URL ?? "https://cycleenbray.groupemes.fr/crm",
     cardBg: "#eef7f1",
   },
   {
@@ -76,7 +76,7 @@ const APPS: PortalApp[] = [
     label: "Bennes & Pro",
     description: "Gestion déchet'lab",
     logoSrc: "/bennespro-logo.png",
-    href: env.VITE_BENNESPRO_URL ?? "https://bennespro.vercel.app",
+    href: env.VITE_BENNESPRO_URL ?? "https://dechetlab.groupemes.fr",
     cardBg: "#a4cebe",
   },
   {
@@ -84,7 +84,7 @@ const APPS: PortalApp[] = [
     label: "Pointeuse",
     description: "Suivi des salariés et des chantiers : pointages, projets, dépenses et factures.",
     logoSrc: "/logo-lsdb.png",
-    href: env.VITE_POINTEUSE_URL ?? "https://pointeuselsdb.vercel.app",
+    href: env.VITE_POINTEUSE_URL ?? "https://pointeuse.groupemes.fr",
     cardBg: "#fff1e5",
   },
 ];
