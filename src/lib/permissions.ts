@@ -455,7 +455,7 @@ export const APPS: AppDefinition[] = [
     description: "Suivi des salariés, pointages, projets, dépenses et factures.",
     icon: ClipboardList,
     logoSrc: "/logo-lsdb.png",
-    href: "https://pointeuse.groupemes.fr",
+    href: "https://pointeuselsdb.groupemes.fr",
     external: true,
     accent: "from-orange-500 to-amber-600",
     cardBg: "#fff1e5",

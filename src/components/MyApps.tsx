@@ -84,7 +84,7 @@ const APPS: PortalApp[] = [
     label: "Pointeuse",
     description: "Suivi des salariés et des chantiers : pointages, projets, dépenses et factures.",
     logoSrc: "/logo-lsdb.png",
-    href: env.VITE_POINTEUSE_URL ?? "https://pointeuse.groupemes.fr",
+    href: env.VITE_POINTEUSE_URL ?? "https://pointeuselsdb.groupemes.fr",
     cardBg: "#fff1e5",
   },
 ];
