@@ -227,6 +227,7 @@ function PostCard({
   const [savingEdit, setSavingEdit] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [likesOpen, setLikesOpen] = useState(false);
+  const [bodyExpanded, setBodyExpanded] = useState(false);
   const likes = useQuery(api.posts.listLikes, likesOpen ? { postId: post._id } : "skip") as
     | PostLike[]
     | undefined;
@@ -351,7 +352,9 @@ function PostCard({
       ) : post.title || post.body || post.externalLink ? (
         <div className="space-y-2 px-4 pb-3">
           {post.title ? <h3 className="text-lg font-semibold text-[var(--foreground)]">{post.title}</h3> : null}
-          {post.body ? <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">{post.body}</p> : null}
+          {post.body ? (
+            <PostBody body={post.body} expanded={bodyExpanded} onExpand={() => setBodyExpanded(true)} />
+          ) : null}
           {post.externalLink ? (
             <p className="break-words text-sm text-[var(--muted-foreground)]">
               Lien externe :{" "}
@@ -617,6 +620,43 @@ function externalHref(value: string) {
   const trimmed = value.trim();
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
+}
+
+function PostBody({
+  body,
+  expanded,
+  onExpand,
+}: {
+  body: string;
+  expanded: boolean;
+  onExpand: () => void;
+}) {
+  const { text, truncated } = truncatePostBody(body, 150);
+  const visibleBody = expanded ? body : text;
+
+  return (
+    <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">
+      {visibleBody}
+      {!expanded && truncated ? (
+        <>
+          {" "}
+          <button
+            type="button"
+            onClick={onExpand}
+            className="font-medium text-[var(--foreground)] underline underline-offset-4 hover:text-brand-700"
+          >
+            lire plus
+          </button>
+        </>
+      ) : null}
+    </p>
+  );
+}
+
+function truncatePostBody(body: string, limit: number) {
+  const chars = Array.from(body);
+  if (chars.length <= limit) return { text: body, truncated: false };
+  return { text: `${chars.slice(0, limit).join("").trimEnd()}...`, truncated: true };
 }
 
 function likeSummary(latestLikeName: string | undefined, likesCount: number) {
