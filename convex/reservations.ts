@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, internalMutation, mutation, query } from "./_generated/server";
+import { action, env, internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
@@ -279,7 +279,7 @@ export const listReservationDirectory = action({
     if (!accessAllows(access, PAGE_KEY, "create")) {
       throw new Error("Accès insuffisant pour réserver pour un collègue.");
     }
-    const secret = process.env.CLERK_SECRET_KEY;
+    const secret = env.CLERK_SECRET_KEY;
     if (!secret) return [];
     const selfEmail = (access.email ?? "").trim().toLowerCase();
 

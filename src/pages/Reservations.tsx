@@ -158,7 +158,15 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const [directory, setDirectory] = useState<Person[]>([]);
   useEffect(() => {
     let cancelled = false;
-    listDirectory().then((r) => { if (!cancelled) setDirectory(r as Person[]); }).catch(() => undefined);
+    async function loadDirectory() {
+      try {
+        const result = await listDirectory({});
+        if (!cancelled) setDirectory(result as Person[]);
+      } catch {
+        if (!cancelled) setDirectory([]);
+      }
+    }
+    void loadDirectory();
     return () => { cancelled = true; };
   }, [listDirectory]);
 
