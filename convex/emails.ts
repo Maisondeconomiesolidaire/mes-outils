@@ -15,7 +15,7 @@ function appUrl() {
 function siteUrl() {
   return (
     process.env.CONVEX_SITE_URL ??
-    "https://sensible-gull-961.eu-west-1.convex.site"
+    "https://hip-marten-394.eu-west-1.convex.site"
   ).replace(/\/$/, "");
 }
 
