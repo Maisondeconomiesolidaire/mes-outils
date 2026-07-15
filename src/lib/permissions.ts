@@ -16,6 +16,7 @@ import {
   Shirt,
   Tag,
   Truck,
+  Users,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -250,6 +251,13 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
   },
   {
     app: "mesoutils",
+    key: "mesoutils:rh",
+    label: "Ressources Humaines",
+    description: "Salariés, données RH et génération des contrats.",
+    actions: ["read", "create", "update", "manage"],
+  },
+  {
+    app: "mesoutils",
     key: "mesoutils:admin",
     label: "Admin Mes Outils",
     description: "Gestion transverse des droits Mes Outils et recyclerie.",
@@ -469,6 +477,7 @@ export const PORTAL_NAV = [
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
   { to: "/conges", label: "Congés", pageKey: "mesoutils:conges", icon: CalendarDays },
+  { to: "/rh", label: "RH", pageKey: "mesoutils:rh", icon: Users },
   { to: "/messagerie", label: "Messagerie", icon: MessageCircle },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },
