@@ -34,6 +34,7 @@ import { FullSpinner } from "../components/ui/Spinner";
 import { useUpload } from "../lib/useUpload";
 import { formatDate, formatDateTime, formatDateTimeWithDay, relativeUnits } from "../lib/format";
 import { canAccess } from "../lib/permissions";
+import { cn } from "../lib/cn";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { ReservationRemarks } from "../components/ReservationRemarks";
 import { SectionTabs } from "../components/ui/SectionTabs";
@@ -78,6 +79,7 @@ type VehicleTask = {
   dueDate?: number;
   endDate?: number;
   createdBy: string;
+  createdAt: number;
 };
 
 type ServiceType = "aerogommage" | "collecte" | "article" | "velo" | "livraison";
@@ -535,21 +537,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
       ) : tasks.length === 0 ? (
         <p className="py-6 text-center text-sm text-[var(--muted-foreground)]">Aucune maintenance pour ce véhicule.</p>
       ) : (
-        <div className="space-y-2">
-          {tasks.map((task) => (
-            <div key={task._id} className="rounded-2xl border border-[var(--border)] p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2"><p className="font-semibold text-[var(--foreground)]">{task.title}</p><PriorityBadge priority={task.priority} /></div>
-                <Select value={task.status} disabled={!canEdit} onChange={(e) => updateTask({ taskId: task._id, status: e.target.value as TaskStatus, priority: task.priority })} className="h-9 w-auto">
-                  <option value="todo">À faire</option><option value="in_progress">En cours</option><option value="done">Terminée</option>
-                </Select>
-              </div>
-              <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                {task.dueDate ? formatDate(task.dueDate) : "Sans date"}{task.endDate && task.endDate !== task.dueDate ? ` → ${formatDate(task.endDate)}` : ""}
-              </p>
-            </div>
-          ))}
-        </div>
+        <TaskKanban tasks={tasks} onUpdate={updateTask} canEdit={canEdit} />
       )}
     </div>
   );
@@ -685,28 +673,192 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   );
 }
 
+const TASK_STATUS_COLUMNS = [
+  {
+    key: "todo" as const,
+    label: "A faire",
+    description: "À planifier ou lancer",
+    tone: "border-amber-400 bg-amber-50/70 dark:bg-amber-500/10",
+  },
+  {
+    key: "in_progress" as const,
+    label: "En cours",
+    description: "Interventions en traitement",
+    tone: "border-sky-400 bg-sky-50/70 dark:bg-sky-500/10",
+  },
+  {
+    key: "done" as const,
+    label: "Terminée",
+    description: "Historique clos",
+    tone: "border-emerald-400 bg-emerald-50/70 dark:bg-emerald-500/10",
+  },
+] satisfies Array<{
+  key: TaskStatus;
+  label: string;
+  description: string;
+  tone: string;
+}>;
+
 function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate: ReturnType<typeof useMutation>; canEdit: boolean }) {
   if (tasks.length === 0) return <EmptyState icon={<Wrench className="h-8 w-8" />} title="Aucune maintenance" description="Les maintenances apparaîtront ici." />;
+  return <TaskKanban tasks={tasks} onUpdate={onUpdate} canEdit={canEdit} />;
+}
+
+function TaskKanban({
+  tasks,
+  onUpdate,
+  canEdit,
+}: {
+  tasks: VehicleTask[];
+  onUpdate: ReturnType<typeof useMutation>;
+  canEdit: boolean;
+}) {
+  const [draggedTaskId, setDraggedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
+
+  const tasksByStatus = useMemo(() => {
+    const grouped: Record<TaskStatus, VehicleTask[]> = {
+      todo: [],
+      in_progress: [],
+      done: [],
+    };
+    for (const task of tasks) {
+      grouped[task.status].push(task);
+    }
+    for (const status of Object.keys(grouped) as TaskStatus[]) {
+      grouped[status].sort((a, b) => {
+        const aDate = a.dueDate ?? a.createdAt;
+        const bDate = b.dueDate ?? b.createdAt;
+        return aDate - bDate;
+      });
+    }
+    return grouped;
+  }, [tasks]);
+
+  async function moveTask(task: VehicleTask, nextStatus: TaskStatus) {
+    if (!canEdit || task.status === nextStatus) return;
+    await onUpdate({
+      taskId: task._id,
+      status: nextStatus,
+      priority: task.priority,
+    });
+  }
+
   return (
-    <section className="premium-panel overflow-hidden rounded-2xl">
-      <div className="divide-y divide-[var(--border)]">
-        {tasks.map((task) => (
-          <div key={task._id} className="data-row grid gap-4 p-5 lg:grid-cols-[minmax(0,1fr)_220px_180px] lg:items-center">
-            <div>
-              <div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-[var(--foreground)]">{task.title}</p><PriorityBadge priority={task.priority} /></div>
-              <p className="mt-1 text-sm text-[var(--muted-foreground)]">{task.vehicle?.name ?? "Véhicule"} · créé par {task.createdBy}</p>
-              {task.description ? <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{task.description}</p> : null}
+    <section className="grid gap-4 xl:grid-cols-3">
+      {TASK_STATUS_COLUMNS.map((column) => {
+        const columnTasks = tasksByStatus[column.key];
+        return (
+          <div
+            key={column.key}
+            onDragOver={(event) => {
+              if (!canEdit) return;
+              event.preventDefault();
+            }}
+            onDrop={(event) => {
+              if (!canEdit) return;
+              event.preventDefault();
+              const taskId = event.dataTransfer.getData("text/task-id") as Id<"vehicleMaintenanceTasks">;
+              const task = tasks.find((entry) => entry._id === taskId);
+              if (!task) return;
+              void moveTask(task, column.key);
+              setDraggedTaskId(null);
+            }}
+            className={cn(
+              "flex min-h-[26rem] flex-col rounded-2xl border p-4",
+              column.tone,
+            )}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-bold text-[var(--foreground)]">{column.label}</h3>
+                <p className="mt-1 text-sm text-[var(--muted-foreground)]">{column.description}</p>
+              </div>
+              <span className="rounded-full bg-[var(--card)] px-2.5 py-1 text-xs font-bold text-[var(--foreground)]">
+                {columnTasks.length}
+              </span>
             </div>
-            <div className="flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
-              <CalendarClock className="h-4 w-4" />
-              {task.dueDate ? formatDate(task.dueDate) : "Sans date"}{task.endDate && task.endDate !== task.dueDate ? ` → ${formatDate(task.endDate)}` : ""}
+
+            <div className="mt-4 flex-1 space-y-3">
+              {columnTasks.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--card)]/50 px-4 py-8 text-center text-sm text-[var(--muted-foreground)]">
+                  Aucune maintenance
+                </div>
+              ) : (
+                columnTasks.map((task) => (
+                  <article
+                    key={task._id}
+                    draggable={canEdit}
+                    onDragStart={(event) => {
+                      if (!canEdit) return;
+                      event.dataTransfer.setData("text/task-id", task._id);
+                      event.dataTransfer.effectAllowed = "move";
+                      setDraggedTaskId(task._id);
+                    }}
+                    onDragEnd={() => setDraggedTaskId(null)}
+                    className={cn(
+                      "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm transition",
+                      canEdit && "cursor-grab active:cursor-grabbing",
+                      draggedTaskId === task._id && "opacity-60",
+                    )}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[var(--muted)]">
+                        {task.vehicle?.photoUrl ? (
+                          <img
+                            src={task.vehicle.photoUrl}
+                            alt={task.vehicle.name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]">
+                            <CarFront className="h-5 w-5" />
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-semibold text-[var(--foreground)]">{task.title}</p>
+                          <PriorityBadge priority={task.priority} />
+                        </div>
+                        <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+                          {task.vehicle?.name ?? "Véhicule"} · créé par {task.createdBy}
+                        </p>
+                        {task.description ? (
+                          <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+                            {task.description}
+                          </p>
+                        ) : null}
+                        <div className="mt-3 flex items-center gap-2 text-sm text-[var(--muted-foreground)]">
+                          <CalendarClock className="h-4 w-4" />
+                          {task.dueDate ? formatDate(task.dueDate) : "Sans date"}
+                          {task.endDate && task.endDate !== task.dueDate
+                            ? ` → ${formatDate(task.endDate)}`
+                            : ""}
+                        </div>
+                      </div>
+                    </div>
+
+                    {canEdit ? (
+                      <div className="mt-4">
+                        <Select
+                          value={task.status}
+                          onChange={(event) =>
+                            void moveTask(task, event.target.value as TaskStatus)
+                          }
+                        >
+                          <option value="todo">À faire</option>
+                          <option value="in_progress">En cours</option>
+                          <option value="done">Terminée</option>
+                        </Select>
+                      </div>
+                    ) : null}
+                  </article>
+                ))
+              )}
             </div>
-            <Select value={task.status} disabled={!canEdit} onChange={(e) => onUpdate({ taskId: task._id, status: e.target.value as TaskStatus, priority: task.priority })}>
-              <option value="todo">À faire</option><option value="in_progress">En cours</option><option value="done">Terminée</option>
-            </Select>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </section>
   );
 }

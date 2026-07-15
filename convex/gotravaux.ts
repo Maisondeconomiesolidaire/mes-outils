@@ -163,10 +163,22 @@ export const listVehicleTasks = query({
     });
     const vehicles = await ctx.db.query("vehicles").collect();
     const vehicleById = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
-    return filtered.map((task) => ({
-      ...task,
-      vehicle: vehicleById.get(String(task.vehicleId)) ?? null,
-    }));
+    return await Promise.all(
+      filtered.map(async (task) => {
+        const vehicle = vehicleById.get(String(task.vehicleId)) ?? null;
+        return {
+          ...task,
+          vehicle: vehicle
+            ? {
+                ...vehicle,
+                photoUrl: vehicle.photo
+                  ? await ctx.storage.getUrl(vehicle.photo)
+                  : vehicle.photoUrl,
+              }
+            : null,
+        };
+      }),
+    );
   },
 });
 
