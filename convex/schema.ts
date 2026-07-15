@@ -110,6 +110,39 @@ export const requestOrigin = v.union(
   v.literal("external"),
 );
 
+export const hrEmployeeGender = v.union(v.literal("homme"), v.literal("femme"));
+
+export const hrEmployeeStructure = v.union(
+  v.literal("Pays de Bray Services 60"),
+  v.literal("Pays de Bray Services 76"),
+  v.literal("Recyclerie 60"),
+  v.literal("Recyclerie 76"),
+  v.literal("Les Sens du Bray"),
+  v.literal("Maison d'Economie Solidaire"),
+  v.literal("Pays de Bray Emploi"),
+);
+
+export const hrContractWebhookPayload = v.object({
+  genre_salarie: v.string(),
+  nom_prenom_salarie: v.string(),
+  adresse_salarie: v.string(),
+  num_sec_sociale: v.string(),
+  structure: v.string(),
+  type_contrat: v.string(),
+  type_document: v.string(),
+  date_fin_contrat: v.string(),
+  duree_contrat: v.string(),
+  date_debut_contrat: v.string(),
+  poste: v.string(),
+  duree_periode_essai: v.optional(v.string()),
+  date_debut_periode_essai: v.optional(v.string()),
+  date_fin_periode_essai: v.optional(v.string()),
+  remuneration_brute_horaire: v.string(),
+  duree_mensuel_travail: v.string(),
+  salaire_brut_mensuel: v.string(),
+  PREMIER_CONTRAT: v.string(),
+});
+
 const customer = v.object({
   firstName: v.string(),
   lastName: v.string(),
@@ -1578,6 +1611,47 @@ export default defineSchema(
     uploadedAt: v.number(),
     uploadedBy: v.optional(v.string()),
   }).index("by_project", ["projectId"]),
+
+  /** Salariés RH Mes Outils. */
+  hrEmployees: defineTable({
+    firstName: v.string(),
+    lastName: v.string(),
+    fullName: v.string(),
+    gender: hrEmployeeGender,
+    address: v.string(),
+    structure: hrEmployeeStructure,
+    socialSecurityNumber: v.string(),
+    socialSecurityNumberNormalized: v.string(),
+    firstContractDate: v.optional(v.string()),
+    active: v.boolean(),
+    importedFrom: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    createdBy: v.optional(v.string()),
+    updatedBy: v.optional(v.string()),
+  })
+    .index("by_fullName", ["fullName"])
+    .index("by_lastName_and_firstName", ["lastName", "firstName"])
+    .index("by_socialSecurityNumberNormalized", ["socialSecurityNumberNormalized"])
+    .index("by_structure", ["structure"]),
+
+  /** Historique des générations de contrats RH envoyées à Make. */
+  hrContracts: defineTable({
+    employeeId: v.id("hrEmployees"),
+    payload: hrContractWebhookPayload,
+    webhookUrl: v.string(),
+    webhookStatus: v.union(
+      v.literal("pending"),
+      v.literal("success"),
+      v.literal("error"),
+    ),
+    webhookResponseCode: v.optional(v.number()),
+    webhookResponseBody: v.optional(v.string()),
+    requestedAt: v.number(),
+    requestedBy: v.string(),
+  })
+    .index("by_employee_and_requestedAt", ["employeeId", "requestedAt"])
+    .index("by_requestedAt", ["requestedAt"]),
   },
   { schemaValidation: false },
 );

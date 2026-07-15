@@ -41,6 +41,7 @@ import type * as processes from "../processes.js";
 import type * as requestAnalysis from "../requestAnalysis.js";
 import type * as requests from "../requests.js";
 import type * as reservations from "../reservations.js";
+import type * as rh from "../rh.js";
 import type * as sorties from "../sorties.js";
 import type * as stripe from "../stripe.js";
 import type * as team from "../team.js";
@@ -88,6 +89,7 @@ declare const fullApi: ApiFromModules<{
   requestAnalysis: typeof requestAnalysis;
   requests: typeof requests;
   reservations: typeof reservations;
+  rh: typeof rh;
   sorties: typeof sorties;
   stripe: typeof stripe;
   team: typeof team;

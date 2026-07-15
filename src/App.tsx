@@ -10,6 +10,7 @@ import { Notifications } from "./pages/Notifications";
 import { Portail } from "./pages/Portail";
 import { Conges } from "./pages/Conges";
 import { Reservations } from "./pages/Reservations";
+import { RessourcesHumaines } from "./pages/RessourcesHumaines";
 import { Salles } from "./pages/Salles";
 import { ConfirmRoot } from "./lib/confirm";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
@@ -62,6 +63,14 @@ export default function App() {
           element={
             <RequirePermission pageKey="mesoutils:conges">
               <Conges />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/rh"
+          element={
+            <RequirePermission pageKey="mesoutils:rh">
+              <RessourcesHumaines />
             </RequirePermission>
           }
         />
