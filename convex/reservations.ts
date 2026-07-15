@@ -142,6 +142,10 @@ async function lastRecordedMileageForVehicle(
   return reservationMileage;
 }
 
+function feedbackMileageRecordedAt(reservation: Doc<"vehicleReservations">) {
+  return reservation.feedbackSubmittedAt ?? reservation.end ?? reservation.start ?? reservation._creationTime;
+}
+
 export const listRooms = query({
   args: {},
   handler: async (ctx) => {
@@ -893,22 +897,43 @@ export const listVehicleRemarks = query({
           .collect()
       : await ctx.db.query("vehicleReservations").order("desc").take(300);
     const reservations = raw.filter((r) => r.feedbackSubmittedAt);
-    const vehicles = await ctx.db.query("vehicles").collect();
+    const [vehicles, mileageSource] = await Promise.all([
+      ctx.db.query("vehicles").collect(),
+      vehicleId ? Promise.resolve(raw) : ctx.db.query("vehicleReservations").collect(),
+    ]);
     const byId = new Map(vehicles.map((vehicle) => [String(vehicle._id), vehicle]));
-    const lastMileageByVehicleId = new Map(
-      vehicles.map((vehicle) => [String(vehicle._id), vehicle.odometerKm]),
-    );
-    for (const reservation of raw) {
+    const mileageHistoryByVehicleId = new Map<
+      string,
+      Array<{ id: string; recordedAt: number; mileage: number }>
+    >();
+    for (const reservation of mileageSource) {
       if (typeof reservation.feedbackMileage !== "number" || !Number.isFinite(reservation.feedbackMileage)) {
         continue;
       }
       const key = String(reservation.vehicleId);
-      const current = lastMileageByVehicleId.get(key);
-      lastMileageByVehicleId.set(
-        key,
-        typeof current === "number" ? Math.max(current, reservation.feedbackMileage) : reservation.feedbackMileage,
-      );
+      const history = mileageHistoryByVehicleId.get(key) ?? [];
+      history.push({
+        id: String(reservation._id),
+        recordedAt: feedbackMileageRecordedAt(reservation),
+        mileage: reservation.feedbackMileage,
+      });
+      mileageHistoryByVehicleId.set(key, history);
     }
+    for (const history of mileageHistoryByVehicleId.values()) {
+      history.sort((a, b) => a.recordedAt - b.recordedAt);
+    }
+
+    const previousMileageForReservation = (reservation: Doc<"vehicleReservations">) => {
+      const history = mileageHistoryByVehicleId.get(String(reservation.vehicleId)) ?? [];
+      const reservationId = String(reservation._id);
+      const recordedAt = feedbackMileageRecordedAt(reservation);
+      let previous: number | undefined;
+      for (const entry of history) {
+        if (entry.recordedAt > recordedAt) break;
+        if (entry.id !== reservationId) previous = entry.mileage;
+      }
+      return previous;
+    };
 
     return await Promise.all(
       reservations
@@ -927,7 +952,7 @@ export const listVehicleRemarks = query({
             end: r.end,
             submittedAt: r.feedbackSubmittedAt ?? 0,
             mileage: r.feedbackMileage,
-            lastRecordedMileage: lastMileageByVehicleId.get(String(r.vehicleId)),
+            lastRecordedMileage: previousMileageForReservation(r),
             fuelRestored: r.feedbackFuelRestored,
             vehicleEmpty: r.feedbackVehicleEmpty,
             vehicleClean: r.feedbackVehicleClean,
