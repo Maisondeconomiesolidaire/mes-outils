@@ -283,8 +283,10 @@ export const listReservationDirectory = action({
     if (!accessAllows(access, PAGE_KEY, "create")) {
       throw new Error("Accès insuffisant pour réserver pour un collègue.");
     }
+    const fallbackDirectory: Array<{ clerkId: string; name: string; imageUrl: string | null }> =
+      await ctx.runQuery(api.community.listStaffDirectory, {});
     const secret = env.CLERK_SECRET_KEY;
-    if (!secret) return [];
+    if (!secret) return fallbackDirectory;
     const selfEmail = (access.email ?? "").trim().toLowerCase();
 
     const result: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
@@ -298,7 +300,9 @@ export const listReservationDirectory = action({
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
       });
-      if (!response.ok) break;
+      if (!response.ok) {
+        return fallbackDirectory;
+      }
       const payload = (await response.json()) as unknown;
       const rawUsers: ClerkDirectoryUser[] = Array.isArray(payload)
         ? payload
@@ -327,7 +331,8 @@ export const listReservationDirectory = action({
       offset += rawUsers.length;
     }
 
-    return result.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    const sorted = result.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    return sorted.length > 0 ? sorted : fallbackDirectory;
   },
 });
 
