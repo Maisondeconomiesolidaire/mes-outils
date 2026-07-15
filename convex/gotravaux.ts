@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { api } from "./_generated/api";
 import { accessAllows, customerFullName, requireCrmPermission, requireUser } from "./lib";
 import { buildAddressString, drivingDistanceKm, geocode } from "./livraison";
@@ -456,5 +456,54 @@ export const updateRoom = mutation({
       photoUrl: patch.photoUrl?.trim() || undefined,
       unavailabilityNotes: patch.unavailabilityNotes?.trim() || undefined,
     });
+  },
+});
+
+/* ─── Maintenance (CLI uniquement) ────────────────────────────────────────── */
+
+/**
+ * Liste les auteurs (`createdBy`) des tâches de maintenance véhicule et leur nombre.
+ * `npx convex run gotravaux:adminListMaintenanceCreators --prod`
+ */
+export const adminListMaintenanceCreators = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const tasks = await ctx.db.query("vehicleMaintenanceTasks").collect();
+    const counts = new Map<string, number>();
+    for (const task of tasks) {
+      counts.set(task.createdBy, (counts.get(task.createdBy) ?? 0) + 1);
+    }
+    return {
+      total: tasks.length,
+      byCreator: [...counts.entries()]
+        .map(([createdBy, count]) => ({ createdBy, count }))
+        .sort((a, b) => b.count - a.count),
+    };
+  },
+});
+
+/**
+ * Supprime toutes les tâches de maintenance véhicule dont `createdBy` correspond
+ * (comparaison insensible à la casse/accents, sur nom exact ou fragment).
+ * Dry-run par défaut ; passer `{"createdBy":"Selim Lahmer","apply":true}` pour supprimer.
+ * `npx convex run gotravaux:adminDeleteMaintenanceByCreator '{"createdBy":"Selim Lahmer"}' --prod`
+ */
+export const adminDeleteMaintenanceByCreator = internalMutation({
+  args: { createdBy: v.string(), apply: v.optional(v.boolean()) },
+  handler: async (ctx, { createdBy, apply }) => {
+    const norm = (s: string) =>
+      s.trim().toLocaleLowerCase("fr-FR").normalize("NFD").replace(/[̀-ͯ]/g, "");
+    const needle = norm(createdBy);
+    const tasks = await ctx.db.query("vehicleMaintenanceTasks").collect();
+    const matches = tasks.filter((t) => norm(t.createdBy).includes(needle));
+    if (apply) {
+      for (const t of matches) await ctx.db.delete(t._id);
+    }
+    return {
+      dryRun: !apply,
+      matched: matches.length,
+      deleted: apply ? matches.length : 0,
+      samples: matches.slice(0, 10).map((t) => ({ id: t._id, createdBy: t.createdBy, title: t.title })),
+    };
   },
 });
