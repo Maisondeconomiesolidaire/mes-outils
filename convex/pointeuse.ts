@@ -208,15 +208,51 @@ export const listProjects = query({
       [INVOICES_PAGE_KEY, "read"],
       [INVOICES_PAGE_KEY, "create"],
     ]);
-    const projects = await ctx.db.query("ptProjects").order("desc").collect();
-    const clients = await ctx.db.query("ptClients").collect();
+    const [projects, clients, entries] = await Promise.all([
+      ctx.db.query("ptProjects").order("desc").collect(),
+      ctx.db.query("ptClients").collect(),
+      ctx.db.query("ptTimeEntries").collect(),
+    ]);
     const nameById = new Map(clients.map((c) => [c._id, c.name]));
+    const totalsByProject = new Map<
+      string,
+      { entriesCount: number; totalPointed: number; billedPointed: number; toBillPointed: number }
+    >();
+    for (const entry of entries) {
+      const current = totalsByProject.get(entry.projectId) ?? {
+        entriesCount: 0,
+        totalPointed: 0,
+        billedPointed: 0,
+        toBillPointed: 0,
+      };
+      current.entriesCount += 1;
+      current.totalPointed += entry.totalCost;
+      if ((entry.billingStatus ?? "a_facturer") === "facture") {
+        current.billedPointed += entry.totalCost;
+      } else {
+        current.toBillPointed += entry.totalCost;
+      }
+      totalsByProject.set(entry.projectId, current);
+    }
+
     return projects
-      .map((p) => ({
-        ...p,
-        clientName: nameById.get(p.clientId) ?? "—",
-        travelRatePerKm: p.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
-      }))
+      .map((p) => {
+        const totals = totalsByProject.get(p._id) ?? {
+          entriesCount: 0,
+          totalPointed: 0,
+          billedPointed: 0,
+          toBillPointed: 0,
+        };
+        return {
+          ...p,
+          clientName: nameById.get(p.clientId) ?? "—",
+          travelRatePerKm: p.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
+          entriesCount: totals.entriesCount,
+          totalPointed: round2(totals.totalPointed),
+          billedPointed: round2(totals.billedPointed),
+          toBillPointed: round2(totals.toBillPointed),
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
