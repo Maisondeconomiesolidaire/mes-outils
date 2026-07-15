@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import {
   CalendarPlus,
+  CircleHelp,
   ChevronLeft,
   ChevronRight,
   Image as ImageIcon,
@@ -49,6 +50,7 @@ const DEAL_TYPES = [
   { key: "echange", label: "Échange" },
 ] as const;
 type DealType = (typeof DEAL_TYPES)[number]["key"];
+type DealAdKind = "offre" | "demande";
 
 export function Actualites() {
   const access = usePermissionsAccess();
@@ -920,6 +922,7 @@ type Deal = {
   authorName: string;
   title: string;
   description: string;
+  adKind: DealAdKind;
   dealType: DealType;
   price?: number;
   availableFrom?: number;
@@ -956,6 +959,22 @@ const DEAL_BADGE: Record<DealType, string> = {
   echange: "bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-200",
 };
 
+const DEAL_KIND_FILTERS = [
+  { key: "all", label: "Toutes" },
+  { key: "offre", label: "Je propose" },
+  { key: "demande", label: "Je recherche" },
+] as const;
+
+const DEAL_KIND_BADGE: Record<DealAdKind, string> = {
+  offre: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200",
+  demande: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
+};
+
+const DEAL_KIND_LABEL: Record<DealAdKind, string> = {
+  offre: "Je propose",
+  demande: "Je recherche",
+};
+
 function BonsPlans({ canCreate }: { canCreate: boolean }) {
   const navigate = useNavigate();
   const deals = useQuery(api.community.listDeals) as Deal[] | undefined;
@@ -965,9 +984,28 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
 
   const [open, setOpen] = useState(false);
   const [detailDeal, setDetailDeal] = useState<Deal | null>(null);
-  const [form, setForm] = useState({ title: "", description: "", dealType: "pret" as DealType, price: "", from: null as number | null, to: null as number | null });
+  const [kindFilter, setKindFilter] = useState<"all" | DealAdKind>("all");
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    adKind: "offre" as DealAdKind,
+    dealType: "pret" as DealType,
+    price: "",
+    from: null as number | null,
+    to: null as number | null,
+  });
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const filteredDeals: Deal[] =
+    kindFilter === "all"
+      ? deals ?? []
+      : (deals ?? []).filter((deal) => deal.adKind === kindFilter);
+
+  function openComposer(adKind: DealAdKind) {
+    setForm((current) => ({ ...current, adKind }));
+    setOpen(true);
+  }
 
   function contactDeal(deal: Deal) {
     navigate(contactDealHref(deal));
@@ -980,13 +1018,22 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
       await createDeal({
         title: form.title,
         description: form.description,
+        adKind: form.adKind,
         dealType: form.dealType,
         price: form.dealType === "vente" && form.price ? Number(form.price) : undefined,
         availableFrom: form.from ?? undefined,
         availableTo: form.to ?? undefined,
         images,
       });
-      setForm({ title: "", description: "", dealType: "pret", price: "", from: null, to: null });
+      setForm({
+        title: "",
+        description: "",
+        adKind: form.adKind,
+        dealType: "pret",
+        price: "",
+        from: null,
+        to: null,
+      });
       setImages([]);
       setOpen(false);
     } finally {
@@ -1004,16 +1051,43 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
   return (
     <div className="space-y-5">
       {canCreate ? (
-        <div className="flex justify-end">
-          <Button onClick={() => setOpen(true)}><Plus className="h-4 w-4" /> Proposer un bon plan</Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="outline" onClick={() => openComposer("demande")}>
+            <CircleHelp className="h-4 w-4" /> Je recherche
+          </Button>
+          <Button onClick={() => openComposer("offre")}>
+            <Plus className="h-4 w-4" /> Je propose
+          </Button>
         </div>
       ) : null}
 
-      {deals.length === 0 ? (
-        <EmptyState icon={<Tag className="h-8 w-8" />} title="Aucun bon plan" description="Prêt, don, vente ou échange entre collègues : proposez le premier." />
+      <div className="flex flex-wrap gap-2">
+        {DEAL_KIND_FILTERS.map((filter) => (
+          <button
+            key={filter.key}
+            type="button"
+            onClick={() => setKindFilter(filter.key)}
+            className={cn(
+              "rounded-full px-3 py-1.5 text-sm font-semibold transition",
+              kindFilter === filter.key
+                ? "bg-brand-500 text-white"
+                : "bg-[var(--accent)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+            )}
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
+
+      {filteredDeals.length === 0 ? (
+        <EmptyState
+          icon={<Tag className="h-8 w-8" />}
+          title="Aucun bon plan"
+          description="Prêt, don, vente ou échange entre collègues : proposez le premier."
+        />
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-          {deals.map((deal) => (
+          {filteredDeals.map((deal) => (
             <article key={deal._id} className={cn("flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm transition hover:shadow-md", deal.status === "closed" && "opacity-60")}>
               <button type="button" onClick={() => setDetailDeal(deal)} className="group relative block text-left">
                 {deal.imageUrls[0] ? (
@@ -1029,12 +1103,15 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
               </button>
               <div className="flex flex-1 flex-col p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <span className={cn("rounded-full px-2.5 py-1 text-xs font-bold", DEAL_BADGE[deal.dealType])}>
-                    {DEAL_TYPES.find((t) => t.key === deal.dealType)?.label}
-                  </span>
-                  {deal.price != null ? (
-                    <span className="text-sm font-bold text-[var(--foreground)]">{deal.price} €</span>
-                  ) : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn("rounded-full px-2.5 py-1 text-xs font-bold", DEAL_KIND_BADGE[deal.adKind])}>
+                      {DEAL_KIND_LABEL[deal.adKind]}
+                    </span>
+                    <span className={cn("rounded-full px-2.5 py-1 text-xs font-bold", DEAL_BADGE[deal.dealType])}>
+                      {DEAL_TYPES.find((t) => t.key === deal.dealType)?.label}
+                    </span>
+                  </div>
+                  {deal.price != null ? <span className="text-sm font-bold text-[var(--foreground)]">{deal.price} €</span> : null}
                 </div>
                 <button type="button" onClick={() => setDetailDeal(deal)} className="mt-2 text-left">
                   <h3 className="text-lg font-bold text-[var(--foreground)] hover:text-brand-600">{deal.title}</h3>
@@ -1069,19 +1146,29 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
         </div>
       )}
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Proposer un bon plan">
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title={form.adKind === "demande" ? "Publier une recherche" : "Proposer un bon plan"}
+      >
         <div className="grid gap-4">
           <Field label="Titre" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="Tronçonneuse à prêter" /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Type d'annonce">
+              <Select value={form.adKind} onChange={(e) => setForm({ ...form, adKind: e.target.value as DealAdKind })}>
+                <option value="offre">Je propose</option>
+                <option value="demande">Je recherche</option>
+              </Select>
+            </Field>
             <Field label="Type">
               <Select value={form.dealType} onChange={(e) => setForm({ ...form, dealType: e.target.value as DealType })}>
                 {DEAL_TYPES.map((type) => <option key={type.key} value={type.key}>{type.label}</option>)}
               </Select>
             </Field>
-            {form.dealType === "vente" ? (
-              <Field label="Prix (€)"><Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></Field>
-            ) : <div />}
           </div>
+          {form.dealType === "vente" ? (
+            <Field label="Prix (€)"><Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></Field>
+          ) : null}
           <Field label="Description" required><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="État, conditions, détails..." /></Field>
           <Field label="Disponibilité">
             <DateRangePicker
@@ -1152,7 +1239,10 @@ function DealDetail({ deal, onClose, onContact }: { deal: Deal; onClose: () => v
 
         <div className="flex flex-col">
           <div className="flex items-center justify-between gap-3">
-            <span className={cn("rounded-full px-3 py-1 text-xs font-bold", DEAL_BADGE[deal.dealType])}>{typeLabel}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={cn("rounded-full px-3 py-1 text-xs font-bold", DEAL_KIND_BADGE[deal.adKind])}>{DEAL_KIND_LABEL[deal.adKind]}</span>
+              <span className={cn("rounded-full px-3 py-1 text-xs font-bold", DEAL_BADGE[deal.dealType])}>{typeLabel}</span>
+            </div>
             {deal.price != null ? <span className="text-2xl font-extrabold text-[var(--foreground)]">{deal.price} €</span> : null}
           </div>
           <h2 className="mt-3 text-2xl font-bold text-[var(--foreground)]">{deal.title}</h2>
