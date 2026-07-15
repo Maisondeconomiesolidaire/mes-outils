@@ -1127,6 +1127,7 @@ export default defineSchema(
     authorImageUrl: v.optional(v.string()),
     title: v.string(),
     description: v.string(),
+    adKind: v.optional(v.union(v.literal("offre"), v.literal("demande"))),
     dealType: v.union(
       v.literal("pret"),
       v.literal("don"),
