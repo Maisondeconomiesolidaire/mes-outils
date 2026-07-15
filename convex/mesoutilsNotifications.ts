@@ -7,7 +7,7 @@ export async function createMesoutilsNotification(
   ctx: MutationCtx,
   args: {
     recipientClerkId?: string;
-    kind: "room_reservation_confirmed" | "vehicle_reservation_decided" | "new_direct_message" | "post_liked" | "post_commented" | "deal_interest" | "vehicle_reservation_request";
+    kind: "room_reservation_confirmed" | "equipment_reservation_confirmed" | "vehicle_reservation_decided" | "new_direct_message" | "post_liked" | "post_commented" | "deal_interest" | "vehicle_reservation_request";
     title: string;
     body?: string;
     actorName?: string;

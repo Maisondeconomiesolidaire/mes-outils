@@ -5,6 +5,7 @@ import {
   Bike,
   CarFront,
   Bell,
+  Boxes,
   ClipboardList,
   DoorOpen,
   Home,
@@ -243,6 +244,13 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
   },
   {
     app: "mesoutils",
+    key: "mesoutils:equipements",
+    label: "Équipements",
+    description: "Réservation d'équipements ; la gestion (ajout/modif/suppression) requiert le droit Gestion.",
+    actions: ["read", "create", "manage"],
+  },
+  {
+    app: "mesoutils",
     key: "mesoutils:conges",
     label: "Congés",
     description: "Demandes d'absences, suivi et validation des congés.",
@@ -475,6 +483,7 @@ export const PORTAL_NAV = [
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations", icon: CalendarCheck },
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
+  { to: "/equipements", label: "Équipements", pageKey: "mesoutils:equipements", icon: Boxes },
   { to: "/conges", label: "Congés", pageKey: "mesoutils:conges", icon: CalendarDays },
   { to: "/messagerie", label: "Messagerie", icon: MessageCircle },
   { to: "/notifications", label: "Notifications", icon: Bell },
@@ -507,6 +516,12 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
     { key: "reservations", label: "Réservations", icon: CalendarClock },
     { key: "remarques", label: "Remarques", icon: MessageSquareText },
     { key: "calendar", label: "Calendrier", icon: CalendarDays },
+  ],
+  "/equipements": [
+    { key: "book", label: "Réserver", icon: Boxes },
+    { key: "planning", label: "Planning", icon: CalendarClock },
+    { key: "mine", label: "Mes réservations", icon: CalendarCheck },
+    { key: "manage", label: "Équipements", icon: Wrench },
   ],
 };
 

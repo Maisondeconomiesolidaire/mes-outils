@@ -21,6 +21,7 @@ import type * as crons from "../crons.js";
 import type * as dashboard from "../dashboard.js";
 import type * as documents from "../documents.js";
 import type * as emails from "../emails.js";
+import type * as equipements from "../equipements.js";
 import type * as files from "../files.js";
 import type * as fleet from "../fleet.js";
 import type * as gotravaux from "../gotravaux.js";
@@ -69,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   dashboard: typeof dashboard;
   documents: typeof documents;
   emails: typeof emails;
+  equipements: typeof equipements;
   files: typeof files;
   fleet: typeof fleet;
   gotravaux: typeof gotravaux;

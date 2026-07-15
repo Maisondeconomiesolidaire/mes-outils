@@ -954,6 +954,7 @@ export default defineSchema(
     recipientClerkId: v.string(),
     kind: v.union(
       v.literal("room_reservation_confirmed"),
+      v.literal("equipment_reservation_confirmed"),
       v.literal("vehicle_reservation_decided"),
       v.literal("new_direct_message"),
       v.literal("post_liked"),
@@ -1020,6 +1021,38 @@ export default defineSchema(
     feedbackNotes: v.optional(v.string()),
   })
     .index("by_roomId", ["roomId"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_bookedForClerkId", ["bookedForClerkId"])
+    .index("by_start", ["start"]),
+
+  /** Équipements réservables (mêmes règles que les salles : créneau libre = confirmé). */
+  equipments: defineTable({
+    name: v.string(),
+    category: v.optional(v.string()),
+    reference: v.optional(v.string()),
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    photo: v.optional(v.id("_storage")),
+    photoUrl: v.optional(v.string()),
+    buildingLabel: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    active: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_active", ["active"]),
+
+  equipmentReservations: defineTable({
+    equipmentId: v.id("equipments"),
+    clerkId: v.string(),
+    userName: v.string(),
+    bookedByName: v.optional(v.string()),
+    bookedForClerkId: v.optional(v.string()),
+    title: v.string(),
+    start: v.number(),
+    end: v.number(),
+    status: v.optional(v.union(v.literal("confirmed"), v.literal("cancelled"))),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_equipmentId", ["equipmentId"])
     .index("by_clerkId", ["clerkId"])
     .index("by_bookedForClerkId", ["bookedForClerkId"])
     .index("by_start", ["start"]),

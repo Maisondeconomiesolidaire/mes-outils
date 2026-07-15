@@ -677,25 +677,21 @@ const TASK_STATUS_COLUMNS = [
   {
     key: "todo" as const,
     label: "A faire",
-    description: "À planifier ou lancer",
     tone: "border-amber-400 bg-amber-50/70 dark:bg-amber-500/10",
   },
   {
     key: "in_progress" as const,
     label: "En cours",
-    description: "Interventions en traitement",
     tone: "border-sky-400 bg-sky-50/70 dark:bg-sky-500/10",
   },
   {
     key: "done" as const,
     label: "Terminée",
-    description: "Historique clos",
     tone: "border-emerald-400 bg-emerald-50/70 dark:bg-emerald-500/10",
   },
 ] satisfies Array<{
   key: TaskStatus;
   label: string;
-  description: string;
   tone: string;
 }>;
 
@@ -771,7 +767,6 @@ function TaskKanban({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-[var(--foreground)]">{column.label}</h3>
-                <p className="mt-1 text-sm text-[var(--muted-foreground)]">{column.description}</p>
               </div>
               <span className="rounded-full bg-[var(--card)] px-2.5 py-1 text-xs font-bold text-[var(--foreground)]">
                 {columnTasks.length}
