@@ -286,11 +286,14 @@ export const listReservationDirectory = action({
     const fallbackDirectory: Array<{ clerkId: string; name: string; imageUrl: string | null }> =
       await ctx.runQuery(api.community.listStaffDirectory, {});
     const secret = env.CLERK_SECRET_KEY;
-    if (!secret) return fallbackDirectory;
+    if (!secret) return fallbackDirectory.sort((a, b) => a.name.localeCompare(b.name, "fr"));
     const selfEmail = (access.email ?? "").trim().toLowerCase();
 
-    const result: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
-    const seen = new Set<string>();
+    const result = new Map<string, { clerkId: string; name: string; imageUrl: string | null }>();
+    for (const person of fallbackDirectory) {
+      if (!person.clerkId) continue;
+      result.set(person.clerkId, person);
+    }
     const pageSize = 100;
     for (let offset = 0; ; ) {
       const url = new URL("https://api.clerk.com/v1/users");
@@ -317,10 +320,8 @@ export const listReservationDirectory = action({
         // Membres internes uniquement.
         if (!email.endsWith("@eco-solidaire.fr")) continue;
         if (selfEmail && email === selfEmail) continue;
-        if (seen.has(clerkId)) continue;
-        seen.add(clerkId);
         const name = [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || email;
-        result.push({
+        result.set(clerkId, {
           clerkId,
           name,
           imageUrl: typeof user.image_url === "string" ? user.image_url : null,
@@ -331,8 +332,7 @@ export const listReservationDirectory = action({
       offset += rawUsers.length;
     }
 
-    const sorted = result.sort((a, b) => a.name.localeCompare(b.name, "fr"));
-    return sorted.length > 0 ? sorted : fallbackDirectory;
+    return Array.from(result.values()).sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
 
