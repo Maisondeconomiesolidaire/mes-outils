@@ -457,3 +457,123 @@ export function isLivraisonComplete(
     customerComplete(customer) && hasDeliveryAddress && Boolean(d.articlePhoto)
   );
 }
+
+/** Utilisateur tel que renvoyé par l'API Backend Clerk (`GET /v1/users`). */
+export type ClerkApiUser = {
+  id?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  username?: string | null;
+  image_url?: string | null;
+  primary_email_address_id?: string | null;
+  email_addresses?: Array<{ id?: string; email_address?: string }>;
+  public_metadata?: unknown;
+  created_at?: number | null;
+  last_sign_in_at?: number | null;
+};
+
+/** Domaine des comptes internes (équipe) — seuls comptes « réservables pour ». */
+export const INTERNAL_EMAIL_DOMAIN = "@eco-solidaire.fr";
+
+/**
+ * Réponses Clerk servies en HTTP/2 sans `content-length` : au-delà d'environ
+ * 32 Ko, le corps nous parvient tronqué et `JSON.parse` échoue
+ * ("Unterminated string in JSON at position 32764"), ce qui vidait l'annuaire
+ * « Réserver pour » et la liste des utilisateurs de l'admin. On pagine donc par
+ * petits lots (~1,8 Ko par utilisateur, soit ~18 Ko par page) pour rester
+ * largement sous cette limite.
+ */
+const CLERK_PAGE_SIZE = 10;
+const CLERK_MAX_PAGES = 200;
+
+/** Email principal (minuscules) d'un utilisateur Clerk. */
+export function clerkPrimaryEmail(user: ClerkApiUser): string {
+  const emails = Array.isArray(user.email_addresses) ? user.email_addresses : [];
+  const primary =
+    emails.find((entry) => entry.id === user.primary_email_address_id) ?? emails[0];
+  return (primary?.email_address ?? "").trim().toLowerCase();
+}
+
+function parseClerkPage(body: string): ClerkApiUser[] {
+  let payload: unknown;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    throw new Error(
+      `Réponse Clerk illisible (${body.length} octets, JSON tronqué ou invalide).`,
+    );
+  }
+  if (Array.isArray(payload)) return payload as ClerkApiUser[];
+  const data = (payload as { data?: unknown }).data;
+  return Array.isArray(data) ? (data as ClerkApiUser[]) : [];
+}
+
+/**
+ * Liste **tous** les utilisateurs de l'instance Clerk pointée par
+ * `CLERK_SECRET_KEY` (clé PROD côté déploiement de production). Source de vérité
+ * pour les annuaires : la table `users` Convex ne contient que les comptes ayant
+ * déjà ouvert l'app et peut garder d'anciens comptes dev.
+ *
+ * Lève une erreur explicite si Clerk répond en erreur : les appelants doivent la
+ * remonter plutôt que d'afficher une liste vide silencieuse.
+ */
+export async function fetchAllClerkUsers(
+  secret: string,
+  options: { query?: string } = {},
+): Promise<ClerkApiUser[]> {
+  const users: ClerkApiUser[] = [];
+  const seen = new Set<string>();
+
+  for (let page = 0; page < CLERK_MAX_PAGES; page++) {
+    const url = new URL("https://api.clerk.com/v1/users");
+    url.searchParams.set("limit", String(CLERK_PAGE_SIZE));
+    url.searchParams.set("offset", String(page * CLERK_PAGE_SIZE));
+    url.searchParams.set("order_by", "last_name");
+    if (options.query?.trim()) url.searchParams.set("query", options.query.trim());
+
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      throw new Error(`Clerk a répondu ${response.status} lors de la lecture des comptes.`);
+    }
+    const batch = parseClerkPage(await response.text());
+
+    for (const user of batch) {
+      const id = typeof user.id === "string" ? user.id : "";
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      users.push(user);
+    }
+    if (batch.length < CLERK_PAGE_SIZE) break;
+  }
+
+  return users;
+}
+
+/**
+ * Annuaire des collègues internes : comptes Clerk `@eco-solidaire.fr`, hors
+ * soi-même, triés par nom. Utilisé par les listes « Réserver pour ».
+ */
+export async function fetchInternalClerkDirectory(
+  secret: string,
+  selfEmail: string,
+): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> {
+  const self = selfEmail.trim().toLowerCase();
+  const directory: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
+
+  for (const user of await fetchAllClerkUsers(secret)) {
+    const clerkId = typeof user.id === "string" ? user.id : "";
+    if (!clerkId) continue;
+    const email = clerkPrimaryEmail(user);
+    if (!email.endsWith(INTERNAL_EMAIL_DOMAIN)) continue;
+    if (self && email === self) continue;
+    directory.push({
+      clerkId,
+      name: [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || email,
+      imageUrl: typeof user.image_url === "string" ? user.image_url : null,
+    });
+  }
+
+  return directory.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+}

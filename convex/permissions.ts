@@ -2,6 +2,8 @@ import { v } from "convex/values";
 import { action, env, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import {
+  type ClerkApiUser,
+  fetchAllClerkUsers,
   getCrmAccessForIdentity,
   hasCrmPermission,
   isAdminIdentity,
@@ -195,50 +197,24 @@ export const listClerkUsers = action({
     }
 
     const limit = Math.min(Math.max(Math.floor(args.limit ?? 200), 1), 500);
-    const url = new URL("https://api.clerk.com/v1/users");
-    url.searchParams.set("limit", String(limit));
-    url.searchParams.set("offset", "0");
-    url.searchParams.set("order_by", "-created_at");
-    if (args.query?.trim()) {
-      url.searchParams.set("query", args.query.trim());
+    let rawUsers: ClerkApiUser[];
+    try {
+      rawUsers = await fetchAllClerkUsers(secretKey, { query: args.query });
+    } catch (error) {
+      console.error("listClerkUsers", error);
+      return { users: [], totalCount: 0, setupError: "clerk_api_error" };
     }
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${secretKey}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    if (!response.ok) {
-      return {
-        users: [],
-        totalCount: 0,
-        setupError: `clerk_api_${response.status}`,
-      };
-    }
-
-    const payload: unknown = await response.json();
-    const rawUsers = Array.isArray(payload)
-      ? payload
-      : Array.isArray((payload as { data?: unknown }).data)
-        ? (payload as { data: unknown[] }).data
-        : [];
-    const totalCount = Array.isArray(payload)
-      ? rawUsers.length
-      : typeof (payload as { total_count?: unknown }).total_count === "number"
-        ? (payload as { total_count: number }).total_count
-        : typeof (payload as { totalCount?: unknown }).totalCount === "number"
-          ? (payload as { totalCount: number }).totalCount
-          : rawUsers.length;
+    const users = rawUsers
+      .map((user) => normalizeClerkUser(user as ClerkUserPayload))
+      .filter((user): user is NonNullable<ReturnType<typeof normalizeClerkUser>> =>
+        Boolean(user),
+      )
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
 
     return {
-      users: rawUsers
-        .map((user) => normalizeClerkUser(user as ClerkUserPayload))
-        .filter((user): user is NonNullable<ReturnType<typeof normalizeClerkUser>> =>
-          Boolean(user),
-        ),
-      totalCount,
+      users: users.slice(0, limit),
+      totalCount: users.length,
       setupError: null,
     };
   },
