@@ -208,24 +208,37 @@ export const listProjects = query({
       [INVOICES_PAGE_KEY, "read"],
       [INVOICES_PAGE_KEY, "create"],
     ]);
-    const [projects, clients, entries] = await Promise.all([
+    const [projects, clients, entries, expenses] = await Promise.all([
       ctx.db.query("ptProjects").order("desc").collect(),
       ctx.db.query("ptClients").collect(),
       ctx.db.query("ptTimeEntries").collect(),
+      ctx.db.query("ptExpenses").collect(),
     ]);
     const nameById = new Map(clients.map((c) => [c._id, c.name]));
     const totalsByProject = new Map<
       string,
-      { entriesCount: number; totalPointed: number; billedPointed: number; toBillPointed: number }
+      {
+        entriesCount: number;
+        laborCost: number;
+        travelCost: number;
+        totalPointed: number;
+        billedPointed: number;
+        toBillPointed: number;
+      }
     >();
+    const emptyTotals = () => ({
+      entriesCount: 0,
+      laborCost: 0,
+      travelCost: 0,
+      totalPointed: 0,
+      billedPointed: 0,
+      toBillPointed: 0,
+    });
     for (const entry of entries) {
-      const current = totalsByProject.get(entry.projectId) ?? {
-        entriesCount: 0,
-        totalPointed: 0,
-        billedPointed: 0,
-        toBillPointed: 0,
-      };
+      const current = totalsByProject.get(entry.projectId) ?? emptyTotals();
       current.entriesCount += 1;
+      current.laborCost += entry.laborCost;
+      current.travelCost += entry.travelCost;
       current.totalPointed += entry.totalCost;
       if ((entry.billingStatus ?? "a_facturer") === "facture") {
         current.billedPointed += entry.totalCost;
@@ -235,22 +248,36 @@ export const listProjects = query({
       totalsByProject.set(entry.projectId, current);
     }
 
+    // Les dépenses peuvent exister sans projet rattaché : on n'agrège que
+    // celles qui en ont un.
+    const expensesByProject = new Map<string, { count: number; total: number }>();
+    for (const expense of expenses) {
+      if (!expense.projectId) continue;
+      const current = expensesByProject.get(expense.projectId) ?? { count: 0, total: 0 };
+      current.count += 1;
+      current.total += expense.amount;
+      expensesByProject.set(expense.projectId, current);
+    }
+
     return projects
       .map((p) => {
-        const totals = totalsByProject.get(p._id) ?? {
-          entriesCount: 0,
-          totalPointed: 0,
-          billedPointed: 0,
-          toBillPointed: 0,
-        };
+        const totals = totalsByProject.get(p._id) ?? emptyTotals();
+        const projectExpenses = expensesByProject.get(p._id) ?? { count: 0, total: 0 };
         return {
           ...p,
           clientName: nameById.get(p.clientId) ?? "—",
           travelRatePerKm: p.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
           entriesCount: totals.entriesCount,
+          laborCost: round2(totals.laborCost),
+          travelCost: round2(totals.travelCost),
+          /** Main-d'œuvre + déplacements (ce qui est pointé). */
           totalPointed: round2(totals.totalPointed),
           billedPointed: round2(totals.billedPointed),
           toBillPointed: round2(totals.toBillPointed),
+          expensesCount: projectExpenses.count,
+          totalExpenses: round2(projectExpenses.total),
+          /** Coût complet du projet : pointages + déplacements + dépenses. */
+          totalCost: round2(totals.totalPointed + projectExpenses.total),
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name, "fr"));
@@ -400,6 +427,8 @@ export const projectSummary = query({
         billedPointed,
         toBillPointed: round2(totalPointed - billedPointed),
         totalExpenses,
+        /** Coût complet du projet : pointages + déplacements + dépenses. */
+        totalCost: round2(totalPointed + totalExpenses),
         invoiced,
         paid,
         pending,
