@@ -478,6 +478,12 @@ type ReservationDetail = {
   reason: string;
   personName: string;
   personClerkId: string;
+  /**
+   * Vrai aussi bien pour le bénéficiaire que pour la personne qui a posé le
+   * créneau : réserver pour un collègue laisse les deux responsables de la
+   * réservation, et donc libres de l'annuler.
+   */
+  mine: boolean;
   pending?: boolean;
 };
 
@@ -497,6 +503,10 @@ function Agenda({
   const navigate = useNavigate();
   const { user } = useUser();
   const meId = user?.id ?? null;
+  const access = usePermissionsAccess();
+  const canDeleteForever = access?.email?.trim().toLowerCase() === "lahmerselim@gmail.com";
+  const cancelRoom = useMutation(api.reservations.cancelRoomReservation);
+  const cancelVehicle = useMutation(api.reservations.cancelVehicleReservation);
   const [detailId, setDetailId] = useState<string | null>(null);
 
   const dayStart = days.start;
@@ -514,6 +524,8 @@ function Agenda({
   const roomName = useMemo(() => new Map((rooms ?? []).map((r) => [String(r._id), r.name])), [rooms]);
 
   const details: ReservationDetail[] = useMemo(() => {
+    const isMine = (r: { clerkId: string; bookedForClerkId?: string }) =>
+      Boolean(meId) && (r.clerkId === meId || r.bookedForClerkId === meId);
     const list: ReservationDetail[] = tab === "rooms"
       ? (roomReservations ?? []).map((r) => ({
           id: String(r._id),
@@ -523,6 +535,7 @@ function Agenda({
           reason: r.title,
           personName: r.userName,
           personClerkId: r.bookedForClerkId ?? r.clerkId,
+          mine: isMine(r),
         }))
       : (vehicleBookings ?? []).map((r) => ({
           id: String(r._id),
@@ -532,10 +545,11 @@ function Agenda({
           reason: r.purpose,
           personName: r.userName,
           personClerkId: r.clerkId,
+          mine: isMine(r),
           pending: r.status === "pending",
         }));
     return list.sort((a, b) => a.date - b.date);
-  }, [tab, roomReservations, vehicleBookings, roomName]);
+  }, [tab, roomReservations, vehicleBookings, roomName, meId]);
 
   const calendarEvents: CalendarEvent[] = details.map((entry) => ({
     id: entry.id,
@@ -547,7 +561,22 @@ function Agenda({
   }));
 
   const active = details.find((entry) => entry.id === detailId) ?? null;
-  const isMine = active ? active.personClerkId === meId : false;
+  const isMine = active?.mine ?? false;
+
+  async function cancelActive() {
+    if (!active) return;
+    const label = tab === "rooms" ? "cette réservation de salle" : "cette réservation de véhicule";
+    const message = canDeleteForever
+      ? `Êtes-vous sûr(e) de vouloir supprimer définitivement ${label} ?`
+      : `Annuler ${label} ? Elle restera visible dans l'historique.`;
+    if (!(await confirmPermanentDelete(message))) return;
+    if (tab === "rooms") {
+      await cancelRoom({ reservationId: active.id as Id<"roomReservations"> });
+    } else {
+      await cancelVehicle({ reservationId: active.id as Id<"vehicleReservations"> });
+    }
+    setDetailId(null);
+  }
 
   return (
     <div className="space-y-3 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
@@ -608,7 +637,12 @@ function Agenda({
                 <MessagesSquare className="h-4 w-4" /> Envoyer un message à cette personne
               </Button>
             ) : (
-              <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-sm text-[var(--muted-foreground)]">C'est votre réservation.</p>
+              <div className="grid gap-2">
+                <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-center text-sm text-[var(--muted-foreground)]">C'est votre réservation.</p>
+                <Button size="lg" variant="ghost" onClick={() => void cancelActive()}>
+                  {canDeleteForever ? "Supprimer la réservation" : "Annuler la réservation"}
+                </Button>
+              </div>
             )}
           </div>
         ) : null}

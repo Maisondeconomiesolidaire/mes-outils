@@ -568,6 +568,7 @@ export const listVehicleBookings = query({
         _id: reservation._id,
         vehicleName: nameById.get(String(reservation.vehicleId)) ?? "Véhicule",
         clerkId: reservation.clerkId,
+        bookedForClerkId: reservation.bookedForClerkId,
         userName: reservation.userName,
         purpose: reservation.purpose,
         usageType: reservation.usageType,
