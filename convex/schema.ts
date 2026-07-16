@@ -1078,6 +1078,7 @@ export default defineSchema(
     status: v.union(v.literal("todo"), v.literal("in_progress"), v.literal("done")),
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
+    odometerKm: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),

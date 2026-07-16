@@ -78,8 +78,10 @@ type VehicleTask = {
   status: TaskStatus;
   dueDate?: number;
   endDate?: number;
+  odometerKm?: number;
   createdBy: string;
   createdAt: number;
+  updatedAt: number;
 };
 
 type ServiceType = "aerogommage" | "collecte" | "article" | "velo" | "livraison";
@@ -493,34 +495,50 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
   const createTask = useMutation(api.gotravaux.createVehicleTask);
   const updateTask = useMutation(api.gotravaux.updateVehicleTask);
   const [adding, setAdding] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
+  const [odometerKm, setOdometerKm] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function add() {
     if (!title.trim() || !range.start) return;
     setSaving(true);
     try {
-      await createTask({ vehicleId, title, priority, dueDate: range.start, endDate: range.end ?? undefined });
+      await createTask({
+        vehicleId,
+        title,
+        priority,
+        dueDate: range.start,
+        endDate: range.end ?? undefined,
+        odometerKm: odometerKm ? Number(odometerKm) : undefined,
+      });
       setTitle("");
       setPriority("medium");
       setRange({ start: null, end: null });
+      setOdometerKm("");
       setAdding(false);
     } finally {
       setSaving(false);
     }
   }
 
+  const selectedTask = tasks?.find((task) => task._id === selectedTaskId) ?? null;
+
   return (
-    <div className="space-y-4">
+    <>
+      <div className="space-y-4">
       {adding ? (
         <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4">
           <Field label="Intitulé" required><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Vidange, pneu, contrôle..." /></Field>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Période" required><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
             <Field label="Priorité">
               <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}><option value="low">Basse</option><option value="medium">Moyenne</option><option value="high">Haute</option></Select>
+            </Field>
+            <Field label="Kilométrage">
+              <Input type="number" inputMode="numeric" value={odometerKm} onChange={(e) => setOdometerKm(e.target.value)} placeholder="Ex: 125000" />
             </Field>
           </div>
           <div className="flex justify-end gap-2">
@@ -537,9 +555,11 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
       ) : tasks.length === 0 ? (
         <p className="py-6 text-center text-sm text-[var(--muted-foreground)]">Aucune maintenance pour ce véhicule.</p>
       ) : (
-        <TaskKanban tasks={tasks} onUpdate={updateTask} canEdit={canEdit} />
+        <TaskKanban tasks={tasks} onUpdate={updateTask} canEdit={canEdit} onOpenTask={setSelectedTaskId} />
       )}
-    </div>
+      </div>
+      <MaintenanceDetailsModal task={selectedTask} canEdit={canEdit} onClose={() => setSelectedTaskId(null)} onUpdate={updateTask} />
+    </>
   );
 }
 
@@ -632,14 +652,23 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
+  const [odometerKm, setOdometerKm] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function save() {
     if (!vehicleId || !title.trim() || !range.start) return;
     setSaving(true);
     try {
-      await createTask({ vehicleId, title, description: description || undefined, priority, dueDate: range.start, endDate: range.end ?? undefined });
-      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null });
+      await createTask({
+        vehicleId,
+        title,
+        description: description || undefined,
+        priority,
+        dueDate: range.start,
+        endDate: range.end ?? undefined,
+        odometerKm: odometerKm ? Number(odometerKm) : undefined,
+      });
+      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm("");
       onClose();
     } finally {
       setSaving(false);
@@ -658,10 +687,13 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
         </Field>
         <Field label="Intitulé" required><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Vidange, pneu, contrôle..." /></Field>
         <Field label="Description"><Textarea value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-3">
           <Field label="Période" required><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
           <Field label="Priorité">
             <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}><option value="low">Basse</option><option value="medium">Moyenne</option><option value="high">Haute</option></Select>
+          </Field>
+          <Field label="Kilométrage">
+            <Input type="number" inputMode="numeric" value={odometerKm} onChange={(e) => setOdometerKm(e.target.value)} placeholder="Ex: 125000" />
           </Field>
         </div>
         <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
@@ -700,18 +732,27 @@ const TASK_STATUS_COLUMNS = [
 }>;
 
 function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate: ReturnType<typeof useMutation>; canEdit: boolean }) {
+  const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   if (tasks.length === 0) return <EmptyState icon={<Wrench className="h-8 w-8" />} title="Aucune maintenance" description="Les maintenances apparaîtront ici." />;
-  return <TaskKanban tasks={tasks} onUpdate={onUpdate} canEdit={canEdit} />;
+  const selectedTask = tasks.find((task) => task._id === selectedTaskId) ?? null;
+  return (
+    <>
+      <TaskKanban tasks={tasks} onUpdate={onUpdate} canEdit={canEdit} onOpenTask={setSelectedTaskId} />
+      <MaintenanceDetailsModal task={selectedTask} canEdit={canEdit} onClose={() => setSelectedTaskId(null)} onUpdate={onUpdate} />
+    </>
+  );
 }
 
 function TaskKanban({
   tasks,
   onUpdate,
   canEdit,
+  onOpenTask,
 }: {
   tasks: VehicleTask[];
   onUpdate: ReturnType<typeof useMutation>;
   canEdit: boolean;
+  onOpenTask: (taskId: Id<"vehicleMaintenanceTasks">) => void;
 }) {
   const [draggedTaskId, setDraggedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
 
@@ -788,6 +829,7 @@ function TaskKanban({
                   <article
                     key={task._id}
                     draggable={canEdit}
+                    onClick={() => onOpenTask(task._id)}
                     onDragStart={(event) => {
                       if (!canEdit) return;
                       event.dataTransfer.setData("text/task-id", task._id);
@@ -835,11 +877,27 @@ function TaskKanban({
                             ? ` → ${formatDate(task.endDate)}`
                             : ""}
                         </div>
+                        {task.odometerKm !== undefined ? (
+                          <div className="mt-2 text-sm text-[var(--muted-foreground)]">
+                            Kilométrage: <span className="font-semibold text-[var(--foreground)]">{task.odometerKm.toLocaleString("fr-FR")} km</span>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 
+                    <div className="mt-4 space-y-3">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpenTask(task._id);
+                        }}
+                      >
+                        <Info className="h-4 w-4" />Détails
+                      </Button>
                     {canEdit ? (
-                      <div className="mt-4">
+                      <div onClick={(event) => event.stopPropagation()}>
                         <Select
                           value={task.status}
                           onChange={(event) =>
@@ -852,6 +910,7 @@ function TaskKanban({
                         </Select>
                       </div>
                     ) : null}
+                    </div>
                   </article>
                 ))
               )}
@@ -931,6 +990,7 @@ function FleetCalendar({
   const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"vehicleReservations"> | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<Id<"requests"> | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const entries: AgendaEntry[] = [];
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
@@ -1024,6 +1084,7 @@ function FleetCalendar({
     .sort((a, b) => a.date - b.date);
   const selectedReservation = reservations?.find((reservation) => reservation._id === selectedReservationId) ?? null;
   const selectedService = services?.find((service) => service._id === selectedServiceId) ?? null;
+  const selectedTask = tasks.find((task) => task._id === selectedTaskId) ?? null;
 
   async function decideAndClose(reservationId: Id<"vehicleReservations">, decision: "approved" | "rejected") {
     await decide({ reservationId, decision });
@@ -1048,7 +1109,7 @@ function FleetCalendar({
     if (entry.kind === "reservation") setSelectedReservationId(entry.reservation._id);
     else if (entry.kind === "service") setSelectedServiceId(entry.service._id);
     else if (entry.kind === "control") onOpenVehicle(entry.vehicle._id);
-    else onOpenVehicle(entry.task.vehicleId);
+    else setSelectedTaskId(entry.task._id);
   }
 
   function openReservationDetailsFromPanel(reservationId: Id<"vehicleReservations">) {
@@ -1059,6 +1120,11 @@ function FleetCalendar({
   function openServiceDetailsFromPanel(serviceId: Id<"requests">) {
     setDayPanelOpen(false);
     setSelectedServiceId(serviceId);
+  }
+
+  function openTaskDetailsFromPanel(taskId: Id<"vehicleMaintenanceTasks">) {
+    setDayPanelOpen(false);
+    setSelectedTaskId(taskId);
   }
 
   return (
@@ -1118,8 +1184,8 @@ function FleetCalendar({
                       </Button>
                     ) : (
                       <div className="ml-auto flex flex-wrap items-center gap-2">
-                        <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.task.vehicleId)}>
-                          <Info className="h-4 w-4" />Véhicule
+                        <Button size="sm" variant="secondary" onClick={() => openTaskDetailsFromPanel(entry.task._id)}>
+                          <Info className="h-4 w-4" />Détails
                         </Button>
                         <Select
                           value={entry.task.status}
@@ -1156,6 +1222,7 @@ function FleetCalendar({
         onCancel={cancelReservationWithConfirmation}
       />
       <ServiceDetailsModal service={selectedService} onClose={() => setSelectedServiceId(null)} />
+      <MaintenanceDetailsModal task={selectedTask} canEdit={canEdit} onClose={() => setSelectedTaskId(null)} onUpdate={onUpdateTask} />
     </div>
   );
 }
@@ -1247,6 +1314,146 @@ function ServiceDetailsModal({ service, onClose }: { service: ServiceItem | null
 
         <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={onClose}>Fermer</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function MaintenanceDetailsModal({
+  task,
+  canEdit,
+  onClose,
+  onUpdate,
+}: {
+  task: VehicleTask | null;
+  canEdit: boolean;
+  onClose: () => void;
+  onUpdate: ReturnType<typeof useMutation>;
+}) {
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [status, setStatus] = useState<TaskStatus>("todo");
+  const [range, setRange] = useState<DateRange>({ start: null, end: null });
+  const [odometerKm, setOdometerKm] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!task) return;
+    setTitle(task.title);
+    setDescription(task.description ?? "");
+    setPriority(task.priority);
+    setStatus(task.status);
+    setRange({ start: task.dueDate ?? null, end: task.endDate ?? null });
+    setOdometerKm(task.odometerKm !== undefined ? String(task.odometerKm) : "");
+  }, [task]);
+
+  if (!task) return null;
+  const currentTask = task;
+
+  async function save() {
+    if (!title.trim() || !range.start) return;
+    setSaving(true);
+    try {
+      await onUpdate({
+        taskId: currentTask._id,
+        title,
+        description,
+        priority,
+        status,
+        dueDate: range.start,
+        endDate: range.end ?? null,
+        odometerKm: odometerKm ? Number(odometerKm) : null,
+      });
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Détail de la maintenance" className="sm:max-w-4xl">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
+          {currentTask.vehicle?.photoUrl ? (
+            <img src={currentTask.vehicle.photoUrl} alt={currentTask.vehicle?.name ?? "Véhicule"} className="h-full max-h-[60vh] min-h-64 w-full object-cover" />
+          ) : (
+            <div className="flex min-h-64 items-center justify-center text-[var(--muted-foreground)]">
+              <CarFront className="h-14 w-14" />
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <TaskStatusBadge status={currentTask.status} />
+            <PriorityBadge priority={currentTask.priority} />
+          </div>
+
+          <div>
+            <h2 className="text-2xl font-bold text-[var(--foreground)]">{currentTask.title}</h2>
+            <p className="mt-1 text-sm font-semibold text-[var(--muted-foreground)]">
+              {currentTask.vehicle?.name ?? "Véhicule"}
+              {currentTask.vehicle?.brand || currentTask.vehicle?.model || currentTask.vehicle?.plate
+                ? ` · ${[currentTask.vehicle?.brand, currentTask.vehicle?.model, currentTask.vehicle?.plate].filter(Boolean).join(" · ")}`
+                : ""}
+            </p>
+          </div>
+
+          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+            <DetailItem label="Véhicule" value={currentTask.vehicle?.name ?? "Véhicule"} />
+            <DetailItem label="Créée par" value={currentTask.createdBy} />
+            <DetailItem label="Début" value={currentTask.dueDate ? formatDateTimeWithDay(currentTask.dueDate) : "Non renseigné"} />
+            <DetailItem label="Fin" value={currentTask.endDate ? formatDateTimeWithDay(currentTask.endDate) : "Non renseignée"} />
+            <DetailItem label="Créée le" value={formatDateTimeWithDay(currentTask.createdAt)} />
+            <DetailItem label="Mise à jour" value={formatDateTimeWithDay(currentTask.updatedAt)} />
+            <DetailItem label="Statut" value={TASK_STATUS_LABELS[currentTask.status]} />
+            <DetailItem label="Kilométrage" value={currentTask.odometerKm !== undefined ? `${currentTask.odometerKm.toLocaleString("fr-FR")} km` : "Non renseigné"} />
+          </dl>
+
+          <div className="rounded-xl border border-[var(--border)] p-3">
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Description</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{currentTask.description || "Aucune précision renseignée."}</p>
+          </div>
+
+          {canEdit ? (
+            <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4">
+              <Field label="Intitulé" required><Input value={title} onChange={(event) => setTitle(event.target.value)} /></Field>
+              <Field label="Description"><Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Période" required><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Statut">
+                    <Select value={status} onChange={(event) => setStatus(event.target.value as TaskStatus)}>
+                      <option value="todo">À faire</option>
+                      <option value="in_progress">En cours</option>
+                      <option value="done">Terminée</option>
+                    </Select>
+                  </Field>
+                  <Field label="Priorité">
+                    <Select value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
+                      <option value="low">Basse</option>
+                      <option value="medium">Moyenne</option>
+                      <option value="high">Haute</option>
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+              <Field label="Kilométrage">
+                <Input type="number" inputMode="numeric" value={odometerKm} onChange={(event) => setOdometerKm(event.target.value)} placeholder="Ex: 125000" />
+              </Field>
+            </div>
+          ) : null}
+
+          <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
+            <Button variant="ghost" onClick={onClose}>Fermer</Button>
+            {canEdit ? (
+              <Button onClick={() => void save()} disabled={saving || !title.trim() || !range.start}>
+                {saving ? "Enregistrement..." : "Enregistrer"}
+              </Button>
+            ) : null}
+          </div>
         </div>
       </div>
     </Modal>
@@ -1516,6 +1723,21 @@ function StatusBadge({ status }: { status: ReservationItem["status"] }) {
   const styles = { approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200", pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200", rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200", cancelled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200" };
   const labels = { approved: "Approuvée", pending: "En attente", rejected: "Refusée", cancelled: "Annulée" };
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}>{labels[status]}</span>;
+}
+
+const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: "À faire",
+  in_progress: "En cours",
+  done: "Terminée",
+};
+
+function TaskStatusBadge({ status }: { status: TaskStatus }) {
+  const styles = {
+    todo: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
+    in_progress: "bg-sky-100 text-sky-800 dark:bg-sky-500/20 dark:text-sky-200",
+    done: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200",
+  };
+  return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}>{TASK_STATUS_LABELS[status]}</span>;
 }
 
 function PriorityBadge({ priority }: { priority: TaskPriority }) {

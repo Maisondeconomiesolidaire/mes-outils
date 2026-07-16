@@ -190,11 +190,13 @@ export const createVehicleTask = mutation({
     priority: taskPriority,
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
+    odometerKm: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
-    return await ctx.db.insert("vehicleMaintenanceTasks", {
+    const now = Date.now();
+    const taskId = await ctx.db.insert("vehicleMaintenanceTasks", {
       vehicleId: args.vehicleId,
       title: args.title.trim(),
       description: args.description?.trim() || undefined,
@@ -202,10 +204,21 @@ export const createVehicleTask = mutation({
       status: "todo",
       dueDate: args.dueDate,
       endDate: args.endDate,
+      odometerKm: args.odometerKm,
       createdBy: displayName(identity),
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: now,
+      updatedAt: now,
     });
+    if (typeof args.odometerKm === "number") {
+      const vehicle = await ctx.db.get(args.vehicleId);
+      if (vehicle && (vehicle.odometerKm === undefined || args.odometerKm > vehicle.odometerKm)) {
+        await ctx.db.patch(args.vehicleId, {
+          odometerKm: args.odometerKm,
+          odometerUpdatedAt: new Date(now).toISOString(),
+        });
+      }
+    }
+    return taskId;
   },
 });
 
@@ -268,16 +281,48 @@ export const removeVehicleDocument = mutation({
 export const updateVehicleTask = mutation({
   args: {
     taskId: v.id("vehicleMaintenanceTasks"),
-    status: taskStatus,
-    priority: taskPriority,
+    status: v.optional(taskStatus),
+    priority: v.optional(taskPriority),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    dueDate: v.optional(v.number()),
+    endDate: v.optional(v.union(v.number(), v.null())),
+    odometerKm: v.optional(v.union(v.number(), v.null())),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
-    await ctx.db.patch(args.taskId, {
-      status: args.status,
-      priority: args.priority,
-      updatedAt: Date.now(),
-    });
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Maintenance introuvable.");
+    const now = Date.now();
+    const patch: {
+      status?: "todo" | "in_progress" | "done";
+      priority?: "low" | "medium" | "high";
+      title?: string;
+      description?: string;
+      dueDate?: number;
+      endDate?: number | undefined;
+      odometerKm?: number | undefined;
+      updatedAt: number;
+    } = {
+      updatedAt: now,
+    };
+    if (args.status !== undefined) patch.status = args.status;
+    if (args.priority !== undefined) patch.priority = args.priority;
+    if (args.title !== undefined) patch.title = args.title.trim();
+    if (args.description !== undefined) patch.description = args.description.trim() || undefined;
+    if (args.dueDate !== undefined) patch.dueDate = args.dueDate;
+    if (args.endDate !== undefined) patch.endDate = args.endDate ?? undefined;
+    if (args.odometerKm !== undefined) patch.odometerKm = args.odometerKm ?? undefined;
+    await ctx.db.patch(args.taskId, patch);
+    if (typeof args.odometerKm === "number") {
+      const vehicle = await ctx.db.get(task.vehicleId);
+      if (vehicle && (vehicle.odometerKm === undefined || args.odometerKm > vehicle.odometerKm)) {
+        await ctx.db.patch(task.vehicleId, {
+          odometerKm: args.odometerKm,
+          odometerUpdatedAt: new Date(now).toISOString(),
+        });
+      }
+    }
   },
 });
 
