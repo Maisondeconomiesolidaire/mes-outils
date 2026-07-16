@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 #
-# sync-convex.sh — Propage le backend Convex CANONIQUE (Mes Outils) vers toutes
-# les apps de l'écosystème (Recyclerie/Recycapp, Klyde, Cycle en Bray).
+# sync-convex.sh — Propage le backend Convex CANONIQUE (Mes Outils) et les
+# instructions IA (CLAUDE.md/AGENTS.md) vers toutes les apps de l'écosystème
+# (Recycapp, Klyde, Cycle en Bray, Bennes Pro, Pointeuse).
 #
-# Pourquoi : les 4 apps partagent UN seul déploiement Convex. Le dossier
+# Pourquoi : les 6 apps partagent UN seul déploiement Convex. Le dossier
 # `convex/` de Mes Outils (`~/mesoutils`) est la SEULE source de vérité ; c'est
-# un sur-ensemble qui contient les fonctions des 4 apps. Les copies dans les
+# un sur-ensemble qui contient les fonctions des 6 apps. Les copies dans les
 # autres dépôts servent uniquement au typecheck local de leur frontend.
 #
 # 👉 À lancer AVANT et APRÈS toute intervention sur N'IMPORTE QUELLE app, pour
-#    garder les 4 dossiers `convex/` identiques au canonique.
+#    garder les dossiers `convex/` et les instructions identiques au canonique.
 #
 # Règles : on n'édite le backend QUE dans ~/mesoutils/convex, et on déploie
 # UNIQUEMENT depuis Mes Outils (`cd ~/mesoutils && npx convex deploy`).
@@ -18,7 +19,7 @@
 set -uo pipefail
 
 CANON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # = ~/mesoutils
-SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" )
+SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" )
 
 echo "Backend canonique : $CANON/convex"
 
@@ -38,6 +39,17 @@ for sib in "${SIBLINGS[@]}"; do
     echo "✓ $sib/convex synchronisé"
   else
     echo "⚠ $sib introuvable — ignoré"
+  fi
+done
+
+# 3) Propage les instructions IA canoniques (CLAUDE.md → CLAUDE.md + AGENTS.md
+#    partout, y compris dans Mes Outils).
+cp "$CANON/CLAUDE.md" "$CANON/AGENTS.md"
+for sib in "${SIBLINGS[@]}"; do
+  if [ -d "$sib" ]; then
+    cp "$CANON/CLAUDE.md" "$sib/CLAUDE.md"
+    cp "$CANON/CLAUDE.md" "$sib/AGENTS.md"
+    echo "✓ $sib instructions IA synchronisées"
   fi
 done
 
