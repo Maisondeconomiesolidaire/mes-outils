@@ -29,12 +29,15 @@ export const feedbackType = v.union(
   v.literal("question"),
 );
 
-/** App « Feedback » — colonne du kanban. */
+/**
+ * App « Feedback » — colonne du kanban : « En attente », « En cours »,
+ * « Terminée ». Les valeurs stockées restent celles d'origine (aucune
+ * migration de données) ; seuls les libellés changent côté frontend.
+ */
 export const feedbackStatus = v.union(
   v.literal("nouveau"),
   v.literal("en_cours"),
   v.literal("termine"),
-  v.literal("refuse"),
 );
 
 /** App « Bennes & Pro » — matériaux déposables. */
@@ -1802,15 +1805,33 @@ export default defineSchema(
     authorEmail: v.string(),
     authorName: v.optional(v.string()),
     authorImageUrl: v.optional(v.string()),
-    /** Réponse de l'équipe, visible par l'auteur sur sa page « Mes retours ». */
-    adminNote: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    /** Dernier message de la conversation — tri et pastille « non lu ». */
+    lastCommentAt: v.optional(v.number()),
   })
     .index("by_author_and_createdAt", ["authorClerkId", "createdAt"])
     .index("by_status", ["status"])
     .index("by_app", ["app"])
     .index("by_createdAt", ["createdAt"]),
+
+  /**
+   * Conversation attachée à un retour : l'auteur et l'équipe produit échangent
+   * ici. Table dédiée plutôt qu'un champ unique : un retour appelle plusieurs
+   * allers-retours, et on veut savoir qui a dit quoi et quand.
+   */
+  feedbackComments: defineTable({
+    feedbackId: v.id("feedback"),
+    body: v.string(),
+    /** Auteur du message : identité Clerk figée à l'écriture. */
+    authorClerkId: v.string(),
+    authorEmail: v.string(),
+    authorName: v.optional(v.string()),
+    authorImageUrl: v.optional(v.string()),
+    /** Vrai si le message vient de l'équipe produit (affichage distinct). */
+    fromTeam: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_feedback_and_createdAt", ["feedbackId", "createdAt"]),
   },
   { schemaValidation: false },
 );
