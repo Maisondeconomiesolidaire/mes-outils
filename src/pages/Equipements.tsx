@@ -183,14 +183,19 @@ function BookEquipment() {
   const bookEquipment = useMutation(api.equipements.bookEquipment);
   const listDirectory = useAction(api.equipements.listEquipmentDirectory);
   const [directory, setDirectory] = useState<Person[]>([]);
+  const [directoryError, setDirectoryError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     listDirectory({})
       .then((result) => {
-        if (!cancelled) setDirectory(result as Person[]);
+        if (!cancelled) { setDirectory(result as Person[]); setDirectoryError(null); }
       })
-      .catch(() => {
-        if (!cancelled) setDirectory([]);
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setDirectory([]);
+          setDirectoryError("Annuaire indisponible : impossible de charger les collègues.");
+          console.error("listEquipmentDirectory", error);
+        }
       });
     return () => {
       cancelled = true;
@@ -368,6 +373,9 @@ function BookEquipment() {
           <Field label="Réserver pour">
             <PersonSelect people={directory} value={forUser} onChange={setForUser} />
           </Field>
+          {directoryError ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">{directoryError}</p>
+          ) : null}
           <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
             Le créneau étant libre, la réservation est confirmée immédiatement.
           </p>
