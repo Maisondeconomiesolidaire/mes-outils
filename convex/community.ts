@@ -527,7 +527,7 @@ export const searchStaff = query({
 export const listStaffDirectory = query({
   args: {},
   handler: async (ctx): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> => {
-    await requireStaff(ctx);
+    const identity = await requireStaff(ctx);
 
     const perms = await ctx.db.query("crmPermissions").collect();
     const results: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
@@ -543,6 +543,7 @@ export const listStaffDirectory = query({
         .withIndex("by_email", (q) => q.eq("email", email))
         .first();
       if (!user) continue; // jamais connecté → pas de clerkId, injoignable
+      if (user.clerkId === identity.subject) continue;
       if (seen.has(user.clerkId)) continue;
       seen.add(user.clerkId);
       const name =

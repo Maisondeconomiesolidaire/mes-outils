@@ -409,6 +409,7 @@ export const listRequests = query({
 export const updateRequest = mutation({
   args: {
     id: v.id("cycleRequests"),
+    actorName: v.optional(v.string()),
     customer: v.optional(v.object(customerPayload)),
     reebike: v.optional(v.object(reebikePayload)),
     management: v.optional(v.object({
@@ -439,6 +440,12 @@ export const updateRequest = mutation({
         phone: args.customer.phone.trim(),
         updatedAt: Date.now(),
       });
+      patch.fieldEdits = {
+        ...(request.fieldEdits ?? {}),
+        customer: args.actorName
+          ? { by: args.actorName.trim(), at: Date.now() }
+          : request.fieldEdits?.customer,
+      };
     }
 
     if (args.reebike) {
@@ -451,6 +458,12 @@ export const updateRequest = mutation({
         wheelSize: args.reebike.wheelSize,
         compatibilityPhotos: args.reebike.compatibilityPhotos ?? [],
       };
+      patch.fieldEdits = {
+        ...(patch.fieldEdits ?? request.fieldEdits ?? {}),
+        reebike: args.actorName
+          ? { by: args.actorName.trim(), at: Date.now() }
+          : request.fieldEdits?.reebike,
+      };
     }
 
     if (args.management) {
@@ -458,6 +471,12 @@ export const updateRequest = mutation({
         site: args.management.site,
         assignedTo: cleanText(args.management.assignedTo),
         notes: cleanText(args.management.notes),
+      };
+      patch.fieldEdits = {
+        ...(patch.fieldEdits ?? request.fieldEdits ?? {}),
+        management: args.actorName
+          ? { by: args.actorName.trim(), at: Date.now() }
+          : request.fieldEdits?.management,
       };
     }
 
