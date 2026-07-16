@@ -110,19 +110,131 @@ export const listMine = query({
       .order("desc")
       .collect();
 
-    if (email === "") return mine;
-
-    // Retours d'un ancien clerkId : rattrapés par email.
+    // Retours d'un ancien clerkId : rattrapés par email. Sans email (rare :
+    // compte Clerk sans adresse), on s'en tient au clerkId courant — mais on
+    // enrichit quand même, sinon la page reçoit des objets sans compteurs.
     const seen = new Set(mine.map((item) => item._id));
-    const byEmail = (
-      await ctx.db
-        .query("feedback")
-        .withIndex("by_createdAt")
-        .order("desc")
-        .collect()
-    ).filter((item) => item.authorEmail === email && !seen.has(item._id));
+    const byEmail =
+      email === ""
+        ? []
+        : (
+            await ctx.db
+              .query("feedback")
+              .withIndex("by_createdAt")
+              .order("desc")
+              .collect()
+          ).filter((item) => item.authorEmail === email && !seen.has(item._id));
 
-    return [...mine, ...byEmail].sort((a, b) => b.createdAt - a.createdAt);
+    const items = [...mine, ...byEmail].sort((a, b) => b.createdAt - a.createdAt);
+
+    // Compteurs de conversation : l'utilisateur doit voir depuis la liste
+    // qu'on lui a répondu, sans ouvrir chaque fiche.
+    const ids = new Set(items.map((item) => String(item._id)));
+    const comments = (await ctx.db.query("feedbackComments").collect()).filter((comment) =>
+      ids.has(String(comment.feedbackId)),
+    );
+    const stats = new Map<string, { count: number; teamReplies: number }>();
+    for (const comment of comments) {
+      const key = String(comment.feedbackId);
+      const current = stats.get(key) ?? { count: 0, teamReplies: 0 };
+      current.count += 1;
+      if (comment.fromTeam) current.teamReplies += 1;
+      stats.set(key, current);
+    }
+
+    return items.map((item) => {
+      const stat = stats.get(String(item._id)) ?? { count: 0, teamReplies: 0 };
+      return { ...item, commentCount: stat.count, teamReplyCount: stat.teamReplies };
+    });
+  },
+});
+
+/** Vrai si `clerkId`/`email` est l'auteur du retour (repli email : cf. listMine). */
+function isAuthor(
+  item: { authorClerkId: string; authorEmail: string },
+  clerkId: string,
+  email: string,
+) {
+  return item.authorClerkId === clerkId || (email !== "" && item.authorEmail === email);
+}
+
+/**
+ * Un retour et sa conversation. Accessible à **l'auteur** (sa fiche) et à
+ * l'équipe produit (le kanban) — personne d'autre : les retours peuvent
+ * contenir des captures de situations internes.
+ */
+export const thread = query({
+  args: { id: v.id("feedback") },
+  handler: async (ctx, args) => {
+    const identity = await requireUser(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) return null;
+
+    const email = normalizeEmail(identity.email);
+    const admin = isFeedbackAdminEmail(identity.email);
+    if (!admin && !isAuthor(item, identity.subject, email)) {
+      throw new Error("Ce retour ne vous appartient pas.");
+    }
+
+    const comments = await ctx.db
+      .query("feedbackComments")
+      .withIndex("by_feedback_and_createdAt", (q) => q.eq("feedbackId", args.id))
+      .order("asc")
+      .collect();
+
+    return { item, comments, canModerate: admin };
+  },
+});
+
+/**
+ * Ajout d'un message. Ouvert à l'auteur **et** à l'équipe produit : c'est ce
+ * qui fait la conversation. `fromTeam` fige le rôle au moment de l'écriture,
+ * pour que l'affichage reste juste même si les droits changent plus tard.
+ */
+export const addComment = mutation({
+  args: { id: v.id("feedback"), body: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await requireUser(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Retour introuvable.");
+
+    const email = normalizeEmail(identity.email);
+    const admin = isFeedbackAdminEmail(identity.email);
+    if (!admin && !isAuthor(item, identity.subject, email)) {
+      throw new Error("Ce retour ne vous appartient pas.");
+    }
+
+    const body = args.body.trim();
+    if (body === "") throw new Error("Le message est vide.");
+
+    const now = Date.now();
+    const commentId = await ctx.db.insert("feedbackComments", {
+      feedbackId: args.id,
+      body,
+      authorClerkId: identity.subject,
+      authorEmail: email,
+      authorName: identity.name ?? undefined,
+      authorImageUrl: identity.pictureUrl ?? undefined,
+      fromTeam: admin,
+      createdAt: now,
+    });
+    await ctx.db.patch(args.id, { lastCommentAt: now, updatedAt: now });
+    return commentId;
+  },
+});
+
+/** Suppression de son propre message (ou de n'importe lequel pour l'équipe). */
+export const removeComment = mutation({
+  args: { commentId: v.id("feedbackComments") },
+  handler: async (ctx, args) => {
+    const identity = await requireUser(ctx);
+    const comment = await ctx.db.get(args.commentId);
+    if (!comment) return;
+    const admin = isFeedbackAdminEmail(identity.email);
+    if (!admin && comment.authorClerkId !== identity.subject) {
+      throw new Error("Ce message n'est pas le vôtre.");
+    }
+    await ctx.db.delete(args.commentId);
   },
 });
 
@@ -131,11 +243,20 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     await requireFeedbackAdmin(ctx);
-    return await ctx.db
+    const items = await ctx.db
       .query("feedback")
       .withIndex("by_createdAt")
       .order("desc")
       .collect();
+    const comments = await ctx.db.query("feedbackComments").collect();
+    const countById = new Map<string, number>();
+    for (const comment of comments) {
+      countById.set(comment.feedbackId, (countById.get(comment.feedbackId) ?? 0) + 1);
+    }
+    return items.map((item) => ({
+      ...item,
+      commentCount: countById.get(item._id) ?? 0,
+    }));
   },
 });
 
@@ -153,29 +274,22 @@ export const setStatus = mutation({
   },
 });
 
-/** Réponse de l'équipe à un retour — réservé à l'équipe produit. */
-export const setAdminNote = mutation({
-  args: {
-    id: v.id("feedback"),
-    adminNote: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await requireFeedbackAdmin(ctx);
-    const existing = await ctx.db.get(args.id);
-    if (!existing) throw new Error("Retour introuvable.");
-    const note = args.adminNote.trim();
-    await ctx.db.patch(args.id, {
-      adminNote: note === "" ? undefined : note,
-      updatedAt: Date.now(),
-    });
-  },
-});
-
-/** Suppression d'un retour — réservé à l'équipe produit. */
+/**
+ * Suppression d'un retour — réservé à l'équipe produit. La conversation part
+ * avec : sans ça les messages resteraient en base, rattachés à un retour
+ * inexistant.
+ */
 export const remove = mutation({
   args: { id: v.id("feedback") },
   handler: async (ctx, args) => {
     await requireFeedbackAdmin(ctx);
+    const comments = await ctx.db
+      .query("feedbackComments")
+      .withIndex("by_feedback_and_createdAt", (q) => q.eq("feedbackId", args.id))
+      .collect();
+    for (const comment of comments) {
+      await ctx.db.delete(comment._id);
+    }
     await ctx.db.delete(args.id);
   },
 });
