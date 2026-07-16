@@ -9,6 +9,7 @@ import {
   emailForClerkId,
   fetchInternalClerkDirectory,
   hasCrmPermission,
+  isReservationParticipant,
   photoForClerkId,
   requireCrmPermission,
   requireUser,
@@ -393,7 +394,7 @@ export const cancelRoomReservation = mutation({
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
     const isManager = await hasCrmPermission(ctx, PAGE_KEY, "manage");
-    if (reservation.clerkId !== identity.subject && !isManager) {
+    if (!isReservationParticipant(reservation, identity.subject) && !isManager) {
       throw new Error("Annulation non autorisée.");
     }
     const room = await ctx.db.get(reservation.roomId);
@@ -686,8 +687,7 @@ export const submitVehicleFeedback = mutation({
     const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) throw new Error("Réservation introuvable.");
-    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
-    if (recipientClerkId !== identity.subject && reservation.clerkId !== identity.subject) {
+    if (!isReservationParticipant(reservation, identity.subject)) {
       throw new Error("Retour non autorisé.");
     }
     if (reservation.status !== "approved") {
@@ -775,8 +775,7 @@ export const submitRoomFeedback = mutation({
     const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) throw new Error("Réservation introuvable.");
-    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
-    if (recipientClerkId !== identity.subject && reservation.clerkId !== identity.subject) {
+    if (!isReservationParticipant(reservation, identity.subject)) {
       throw new Error("Retour non autorisé.");
     }
     if (reservation.end > Date.now()) {
@@ -1382,7 +1381,7 @@ export const cancelVehicleReservation = mutation({
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
     const canManage = await hasCrmPermission(ctx, PAGE_KEY, "manage");
-    if (reservation.clerkId !== identity.subject && !canManage) {
+    if (!isReservationParticipant(reservation, identity.subject) && !canManage) {
       throw new Error("Annulation non autorisée.");
     }
     const vehicle = await ctx.db.get(reservation.vehicleId);
