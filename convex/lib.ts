@@ -214,6 +214,19 @@ export async function requireCrmPermission(
 }
 
 /**
+ * Une réservation « pour un collègue » concerne deux personnes : `clerkId`, qui
+ * l'a créée, et `bookedForClerkId`, le bénéficiaire. Les deux doivent pouvoir
+ * l'annuler et faire son retour — celui qui réserve reste responsable du
+ * créneau qu'il a posé.
+ */
+export function isReservationParticipant(
+  reservation: { clerkId: string; bookedForClerkId?: string },
+  clerkId: string,
+): boolean {
+  return reservation.clerkId === clerkId || reservation.bookedForClerkId === clerkId;
+}
+
+/**
  * Vérification pure (sans ctx) à partir d'un objet d'accès — utile dans les
  * actions, qui n'ont pas accès à la base et passent par `permissions.myAccess`.
  */

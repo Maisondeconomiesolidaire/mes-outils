@@ -8,6 +8,7 @@ import {
   emailForClerkId,
   fetchInternalClerkDirectory,
   hasCrmPermission,
+  isReservationParticipant,
   photoForClerkId,
   requireCrmPermission,
   requireUser,
@@ -414,7 +415,7 @@ export const cancelEquipmentReservation = mutation({
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
     const isManager = await hasCrmPermission(ctx, PAGE_KEY, "manage");
-    if (reservation.clerkId !== identity.subject && !isManager) {
+    if (!isReservationParticipant(reservation, identity.subject) && !isManager) {
       throw new Error("Annulation non autorisée.");
     }
     const equipment = await ctx.db.get(reservation.equipmentId);
