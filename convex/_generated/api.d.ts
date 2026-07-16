@@ -23,6 +23,7 @@ import type * as dashboard from "../dashboard.js";
 import type * as documents from "../documents.js";
 import type * as emails from "../emails.js";
 import type * as equipements from "../equipements.js";
+import type * as feedback from "../feedback.js";
 import type * as files from "../files.js";
 import type * as fleet from "../fleet.js";
 import type * as gotravaux from "../gotravaux.js";
@@ -73,6 +74,7 @@ declare const fullApi: ApiFromModules<{
   documents: typeof documents;
   emails: typeof emails;
   equipements: typeof equipements;
+  feedback: typeof feedback;
   files: typeof files;
   fleet: typeof fleet;
   gotravaux: typeof gotravaux;

@@ -2,12 +2,15 @@
 #
 # sync-convex.sh — Propage le backend Convex CANONIQUE (Mes Outils) et les
 # instructions IA (CLAUDE.md/AGENTS.md) vers toutes les apps de l'écosystème
-# (Recycapp, Klyde, Cycle en Bray, Bennes Pro, Pointeuse).
+# (Recycapp, Klyde, Cycle en Bray, Bennes Pro, Pointeuse, Feedback).
 #
-# Pourquoi : les 6 apps partagent UN seul déploiement Convex. Le dossier
+# Pourquoi : les 7 apps partagent UN seul déploiement Convex. Le dossier
 # `convex/` de Mes Outils (`~/mesoutils`) est la SEULE source de vérité ; c'est
-# un sur-ensemble qui contient les fonctions des 6 apps. Les copies dans les
+# un sur-ensemble qui contient les fonctions des 7 apps. Les copies dans les
 # autres dépôts servent uniquement au typecheck local de leur frontend.
+#
+# ⚠️ Toute NOUVELLE app de l'écosystème doit être ajoutée à SIBLINGS ci-dessous,
+#    sinon sa copie `convex/` dérive en silence du canonique.
 #
 # 👉 À lancer AVANT et APRÈS toute intervention sur N'IMPORTE QUELLE app, pour
 #    garder les dossiers `convex/` et les instructions identiques au canonique.
@@ -19,7 +22,7 @@
 set -uo pipefail
 
 CANON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # = ~/mesoutils
-SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" )
+SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" "$HOME/feedback" )
 
 echo "Backend canonique : $CANON/convex"
 

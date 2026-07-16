@@ -10,6 +10,33 @@ export const requestType = v.union(
   v.literal("livraison"),
 );
 
+/** App « Feedback » — application visée par un retour utilisateur. */
+export const feedbackApp = v.union(
+  v.literal("mesoutils"),
+  v.literal("recycapp"),
+  v.literal("klyde"),
+  v.literal("cycleenbray"),
+  v.literal("bennespro"),
+  v.literal("pointeuse"),
+  v.literal("feedback"),
+);
+
+/** App « Feedback » — nature du retour. */
+export const feedbackType = v.union(
+  v.literal("fonctionnalite"),
+  v.literal("probleme"),
+  v.literal("amelioration"),
+  v.literal("question"),
+);
+
+/** App « Feedback » — colonne du kanban. */
+export const feedbackStatus = v.union(
+  v.literal("nouveau"),
+  v.literal("en_cours"),
+  v.literal("termine"),
+  v.literal("refuse"),
+);
+
 /** App « Bennes & Pro » — matériaux déposables. */
 export const bpMaterial = v.union(
   v.literal("Réemploi"),
@@ -1758,6 +1785,32 @@ export default defineSchema(
   })
     .index("by_employee_and_requestedAt", ["employeeId", "requestedAt"])
     .index("by_requestedAt", ["requestedAt"]),
+
+  /**
+   * App « Feedback » (feedback.groupemes.fr) — retours utilisateurs sur
+   * n'importe quelle app de l'écosystème. Table dédiée : aucun lien avec les
+   * `requests` de la recyclerie (autre métier, autres droits).
+   */
+  feedback: defineTable({
+    /** App concernée par le retour (clé de tuile du portail Mes Outils). */
+    app: feedbackApp,
+    type: feedbackType,
+    description: v.string(),
+    status: feedbackStatus,
+    /** Auteur : identité Clerk figée à la création. */
+    authorClerkId: v.string(),
+    authorEmail: v.string(),
+    authorName: v.optional(v.string()),
+    authorImageUrl: v.optional(v.string()),
+    /** Réponse de l'équipe, visible par l'auteur sur sa page « Mes retours ». */
+    adminNote: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_author_and_createdAt", ["authorClerkId", "createdAt"])
+    .index("by_status", ["status"])
+    .index("by_app", ["app"])
+    .index("by_createdAt", ["createdAt"]),
   },
   { schemaValidation: false },
 );
