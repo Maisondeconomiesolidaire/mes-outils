@@ -70,7 +70,7 @@ export type AppDefinition = {
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse";
+  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse" | "feedback";
   key: string;
   label: string;
   description: string;
@@ -417,7 +417,31 @@ export const POINTEUSE_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES];
+/**
+ * App « Feedback ». `feedback:retours` est la porte d'entrée : sans elle, ni
+ * l'app ni le bouton d'aide des autres apps n'apparaissent. `feedback:kanban`
+ * est la sous-fonctionnalité de traitement (déplacer, répondre, supprimer).
+ */
+export const FEEDBACK_PAGES: PermissionPage[] = [
+  {
+    app: "feedback",
+    key: "feedback:retours",
+    label: "Mes retours",
+    description:
+      "Envoyer un retour et suivre les siens. Donne aussi accès au bouton d'aide dans les autres applications.",
+    actions: ["read", "create"],
+  },
+  {
+    app: "feedback",
+    key: "feedback:kanban",
+    label: "Tableau de bord",
+    description:
+      "Traiter les retours de tout le monde : statuts, réponses, suppression.",
+    actions: ["read", "manage"],
+  },
+];
+
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES, ...FEEDBACK_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
@@ -577,5 +601,6 @@ export function groupPagesByApp() {
     { key: "cycleenbray", label: "Cycle en Bray", pages: CYCLEENBRAY_PAGES },
     { key: "bennespro", label: "Bennes & Pro", pages: BENNESPRO_PAGES },
     { key: "pointeuse", label: "Pointeuse", pages: POINTEUSE_PAGES },
+    { key: "feedback", label: "Feedback", pages: FEEDBACK_PAGES },
   ] as const;
 }

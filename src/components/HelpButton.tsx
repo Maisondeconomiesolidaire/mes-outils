@@ -1,10 +1,16 @@
+import { useQuery } from "convex/react";
 import { HelpCircle } from "lucide-react";
+import { api } from "../../convex/_generated/api";
 
 const env = import.meta.env as Record<string, string | undefined>;
 
 /**
- * Bouton d'aide flottant, présent dans les 7 apps : renvoie vers l'app Feedback
- * pour signaler un problème ou demander de l'aide depuis n'importe quel écran.
+ * Bouton d'aide flottant : renvoie vers l'app Feedback pour signaler un
+ * problème ou demander de l'aide depuis n'importe quel écran.
+ *
+ * Feedback est une fonctionnalité attribuable : sans le droit
+ * `feedback:retours`, le bouton n'apparaît pas — inutile d'envoyer quelqu'un
+ * vers une app qui le refusera.
  *
  * Fixe en haut à droite. En mobile il descend sous la barre supérieure
  * (`h-14`), sinon il recouvrirait le sélecteur d'applications et l'avatar ; en
@@ -15,7 +21,9 @@ const env = import.meta.env as Record<string, string | undefined>;
  * d'`--accent`), donc le bouton s'intègre partout sans être retouché.
  */
 export function HelpButton() {
+  const access = useQuery(api.feedback.myFeedbackAccess, {});
   const href = env.VITE_FEEDBACK_URL?.trim() || "https://feedback.groupemes.fr";
+  if (!access?.canOpen) return null;
   return (
     <a
       href={href}

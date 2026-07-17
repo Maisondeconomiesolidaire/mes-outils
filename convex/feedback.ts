@@ -2,69 +2,93 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { feedbackApp, feedbackStatus, feedbackType } from "./schema";
-import { livePhoto, livePhotosByClerkId, normalizeEmail, requireUser } from "./lib";
+import {
+  hasCrmPermission,
+  livePhoto,
+  livePhotosByClerkId,
+  normalizeEmail,
+  requireCrmPermission,
+  requireUser,
+} from "./lib";
 
 /**
  * App « Feedback » (feedback.groupemes.fr) — retours des utilisateurs sur les
  * apps de l'écosystème.
  *
- * Deux niveaux d'accès seulement, volontairement **hors** `crmPermissions` :
+ * Droits gérés comme partout ailleurs, dans `crmPermissions`, avec des
+ * `pageKey` namespacés (administrés depuis la page Admin de Mes Outils) :
  *
- * - tout utilisateur Clerk connecté peut déposer un retour et relire *les
- *   siens* (`submit`, `listMine`) ;
- * - le kanban et l'écriture du statut sont réservés aux adresses de
- *   `FEEDBACK_ADMIN_EMAILS`.
+ * - `feedback:retours` — porte d'entrée : déposer un retour et suivre les
+ *   siens. Sans elle, ni l'app ni le bouton d'aide des autres apps n'ont de
+ *   raison d'apparaître.
+ * - `feedback:kanban` — sous-fonctionnalité : traiter les retours de tout le
+ *   monde (statut, réponse, suppression).
  *
- * On n'utilise pas `crmPermissions` ici : le but est justement que **tous** les
- * utilisateurs des 6 apps puissent remonter un problème, y compris ceux qui
- * n'ont aucun droit CRM (clients boutique, comptes sans grants). Un `pageKey`
- * n'apporterait rien et il faudrait l'attribuer à tout le monde à la main.
- * Même approche que `PERMANENT_DELETE_EMAIL` dans `equipements.ts`.
+ * Les admins passent partout (`hasCrmPermission` le gère), donc aucune liste
+ * d'emails en dur à maintenir ici.
  */
-const FEEDBACK_ADMIN_EMAILS = [
-  "lahmerselim@gmail.com",
-  "s.lahmer@eco-solidaire.fr",
-];
+const FEEDBACK_PAGE_KEY = "feedback:retours";
+const FEEDBACK_KANBAN_PAGE_KEY = "feedback:kanban";
 
-function isFeedbackAdminEmail(email: string | null | undefined): boolean {
-  const normalized = normalizeEmail(email);
-  return normalized !== "" && FEEDBACK_ADMIN_EMAILS.includes(normalized);
+/** Peut traiter les retours (kanban) : statut, réponse d'équipe, suppression. */
+async function canModerateFeedback(ctx: QueryCtx | MutationCtx) {
+  return await hasCrmPermission(ctx, FEEDBACK_KANBAN_PAGE_KEY, "manage");
 }
 
 /** Identité + garde-fou kanban. Lève si l'utilisateur n'est pas autorisé. */
 async function requireFeedbackAdmin(ctx: QueryCtx | MutationCtx) {
   const identity = await requireUser(ctx);
-  if (!isFeedbackAdminEmail(identity.email)) {
+  if (!(await canModerateFeedback(ctx))) {
     throw new Error("Accès réservé à l'équipe produit.");
   }
   return identity;
 }
 
 /**
- * Le frontend s'en sert pour n'afficher le kanban qu'aux ayants droit. La
- * sécurité réelle reste côté serveur : `list` et `setStatus` re-vérifient.
+ * Droits Feedback de l'utilisateur courant.
+ *
+ * `canOpen` pilote le bouton d'aide des 7 apps et l'accès à l'app ;
+ * `canModerate` n'affiche le tableau de bord qu'aux ayants droit. La sécurité
+ * réelle reste côté serveur : chaque fonction re-vérifie.
+ */
+export const myFeedbackAccess = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return { canOpen: false, canModerate: false };
+    return {
+      canOpen: await hasCrmPermission(ctx, FEEDBACK_PAGE_KEY, "read"),
+      canModerate: await canModerateFeedback(ctx),
+    };
+  },
+});
+
+/**
+ * @deprecated Remplacée par `myFeedbackAccess`. Conservée le temps que le
+ * frontend déployé bascule : le supprimer avant le rebuild casserait l'app en
+ * production, qui l'appelle encore.
  */
 export const amIFeedbackAdmin = query({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) return false;
-    return isFeedbackAdminEmail(identity.email);
+    return await canModerateFeedback(ctx);
   },
 });
 
 /**
  * Nombre de retours encore à traiter, **tous auteurs et toutes apps
- * confondus** : c'est la charge de travail de l'équipe, affichée à chacun sur
- * « Mes retours » pour situer l'attente.
+ * confondus** : c'est la charge de travail de l'équipe, affichée sur « Mes
+ * retours » pour situer l'attente.
  *
- * Ouvert à tout compte connecté : on ne renvoie qu'un entier, aucun contenu ni
- * auteur — contrairement à `list`, qui reste réservé à l'équipe produit.
+ * Ne renvoie qu'un entier — aucun contenu ni auteur — mais reste derrière
+ * `feedback:retours` : qui n'a pas l'app n'a pas à connaître sa file.
  */
 export const pendingCount = query({
   args: {},
   handler: async (ctx) => {
-    await requireUser(ctx);
+    await requireCrmPermission(ctx, FEEDBACK_PAGE_KEY, "read");
     const [waiting, inProgress] = await Promise.all([
       ctx.db
         .query("feedback")
@@ -79,7 +103,7 @@ export const pendingCount = query({
   },
 });
 
-/** Dépôt d'un retour — ouvert à tout utilisateur connecté. */
+/** Dépôt d'un retour — réservé aux comptes ayant `feedback:retours`. */
 export const submit = mutation({
   args: {
     app: feedbackApp,
@@ -87,6 +111,7 @@ export const submit = mutation({
     description: v.string(),
   },
   handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FEEDBACK_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
     const description = args.description.trim();
     if (description.length === 0) {
@@ -125,6 +150,7 @@ export const submit = mutation({
 export const listMine = query({
   args: {},
   handler: async (ctx) => {
+    await requireCrmPermission(ctx, FEEDBACK_PAGE_KEY, "read");
     const identity = await requireUser(ctx);
     const email = normalizeEmail(identity.email);
 
@@ -198,12 +224,13 @@ function isAuthor(
 export const thread = query({
   args: { id: v.id("feedback") },
   handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FEEDBACK_PAGE_KEY, "read");
     const identity = await requireUser(ctx);
     const item = await ctx.db.get(args.id);
     if (!item) return null;
 
     const email = normalizeEmail(identity.email);
-    const admin = isFeedbackAdminEmail(identity.email);
+    const admin = await canModerateFeedback(ctx);
     if (!admin && !isAuthor(item, identity.subject, email)) {
       throw new Error("Ce retour ne vous appartient pas.");
     }
@@ -240,12 +267,13 @@ export const thread = query({
 export const addComment = mutation({
   args: { id: v.id("feedback"), body: v.string() },
   handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FEEDBACK_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
     const item = await ctx.db.get(args.id);
     if (!item) throw new Error("Retour introuvable.");
 
     const email = normalizeEmail(identity.email);
-    const admin = isFeedbackAdminEmail(identity.email);
+    const admin = await canModerateFeedback(ctx);
     if (!admin && !isAuthor(item, identity.subject, email)) {
       throw new Error("Ce retour ne vous appartient pas.");
     }
@@ -276,7 +304,7 @@ export const removeComment = mutation({
     const identity = await requireUser(ctx);
     const comment = await ctx.db.get(args.commentId);
     if (!comment) return;
-    const admin = isFeedbackAdminEmail(identity.email);
+    const admin = await canModerateFeedback(ctx);
     if (!admin && comment.authorClerkId !== identity.subject) {
       throw new Error("Ce message n'est pas le vôtre.");
     }
