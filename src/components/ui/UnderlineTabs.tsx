@@ -44,7 +44,7 @@ export function UnderlineTabs<T extends string>({
               key={item.key}
               type="button"
               onClick={() => onChange(item.key)}
-              style={{ animationDelay: `${index * 55}ms` }}
+              style={{ animationDelay: `${index * 95}ms` }}
               className={cn(
                 "animate-tab-slide-in relative flex items-center gap-2 whitespace-nowrap pb-3 font-semibold transition-colors",
                 size === "sm" ? "text-sm" : "text-[15px]",
@@ -66,7 +66,7 @@ export function UnderlineTabs<T extends string>({
                   "absolute inset-x-0 -bottom-px h-0.5 rounded-full",
                   active ? "animate-tab-underline bg-brand-500" : "bg-transparent",
                 )}
-                style={active ? { animationDelay: `${items.length * 55}ms` } : undefined}
+                style={active ? { animationDelay: `${items.length * 95}ms` } : undefined}
               />
             </button>
           );
