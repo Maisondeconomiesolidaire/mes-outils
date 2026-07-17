@@ -27,6 +27,7 @@ import { DateRangePicker, type DateRange } from "../components/ui/DateRangePicke
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
+import { MediaUpload } from "../components/ui/MediaUpload";
 import { SinglePhotoUpload } from "../components/ui/SinglePhotoUpload";
 import { VehicleSearchSelect } from "../components/ui/VehicleSearchSelect";
 import { DatePicker } from "../components/ui/DatePicker";
@@ -79,6 +80,9 @@ type VehicleTask = {
   dueDate?: number;
   endDate?: number;
   odometerKm?: number;
+  attachments?: Id<"_storage">[];
+  /** URLs signées, résolues par `listVehicleTasks` (les storageId seuls ne s'affichent pas). */
+  attachmentUrls?: string[];
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -653,6 +657,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
   const [odometerKm, setOdometerKm] = useState("");
+  const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -667,8 +672,9 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
         dueDate: range.start,
         endDate: range.end ?? undefined,
         odometerKm: odometerKm ? Number(odometerKm) : undefined,
+        attachments: attachments.length ? attachments : undefined,
       });
-      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm("");
+      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm(""); setAttachments([]);
       onClose();
     } finally {
       setSaving(false);
@@ -696,6 +702,9 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
             <Input type="number" inputMode="numeric" value={odometerKm} onChange={(e) => setOdometerKm(e.target.value)} placeholder="Ex: 125000" />
           </Field>
         </div>
+        <Field label="Photos">
+          <MediaUpload images={attachments} onChange={setAttachments} />
+        </Field>
         <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={onClose}>Annuler</Button>
           <Button onClick={save} disabled={saving || !vehicleId || !title.trim() || !range.start}>{saving ? "Ajout..." : "Ajouter"}</Button>
@@ -1332,6 +1341,7 @@ function MaintenanceDetailsModal({
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
   const [odometerKm, setOdometerKm] = useState("");
+  const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -1343,6 +1353,7 @@ function MaintenanceDetailsModal({
     setStatus(task.status);
     setRange({ start: task.dueDate ?? null, end: task.endDate ?? null });
     setOdometerKm(task.odometerKm !== undefined ? String(task.odometerKm) : "");
+    setAttachments(task.attachments ?? []);
     setEditing(false);
   }, [task]);
 
@@ -1373,6 +1384,7 @@ function MaintenanceDetailsModal({
         dueDate: range.start,
         endDate: range.end ?? null,
         odometerKm: odometerKm ? Number(odometerKm) : null,
+        attachments,
       });
       setEditing(false);
     } finally {
@@ -1434,6 +1446,25 @@ function MaintenanceDetailsModal({
             <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{displayDescription}</p>
           </div>
 
+          {!editing && (currentTask.attachmentUrls?.length ?? 0) > 0 ? (
+            <div className="rounded-xl border border-[var(--border)] p-3">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
+                Photos ({currentTask.attachmentUrls?.length})
+              </p>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {currentTask.attachmentUrls?.map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer" title="Ouvrir en grand">
+                    <img
+                      src={url}
+                      alt=""
+                      className="h-24 w-full rounded-lg object-cover transition hover:opacity-90"
+                    />
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {canEdit && editing ? (
             <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4">
               <Field label="Intitulé" required><Input value={title} onChange={(event) => setTitle(event.target.value)} /></Field>
@@ -1459,6 +1490,19 @@ function MaintenanceDetailsModal({
               </div>
               <Field label="Kilométrage">
                 <Input type="number" inputMode="numeric" value={odometerKm} onChange={(event) => setOdometerKm(event.target.value)} placeholder="Ex: 125000" />
+              </Field>
+              <Field label="Photos">
+                {/* `initialMedia` réaffiche les photos déjà enregistrées : sans
+                    lui, l'édition repartirait d'une galerie vide et un
+                    enregistrement les effacerait. */}
+                <MediaUpload
+                  images={attachments}
+                  initialMedia={(currentTask.attachments ?? []).map((storageId, index) => ({
+                    storageId,
+                    previewUrl: currentTask.attachmentUrls?.[index] ?? "",
+                  }))}
+                  onChange={setAttachments}
+                />
               </Field>
             </div>
           ) : null}

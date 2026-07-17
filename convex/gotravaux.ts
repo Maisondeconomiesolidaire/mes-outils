@@ -168,6 +168,13 @@ export const listVehicleTasks = query({
         const vehicle = vehicleById.get(String(task.vehicleId)) ?? null;
         return {
           ...task,
+          // URLs signées des pièces jointes, résolues à la lecture : les
+          // storageId seuls ne sont pas affichables.
+          attachmentUrls: (
+            await Promise.all(
+              (task.attachments ?? []).map((id) => ctx.storage.getUrl(id)),
+            )
+          ).filter((url): url is string => Boolean(url)),
           vehicle: vehicle
             ? {
                 ...vehicle,
@@ -191,6 +198,7 @@ export const createVehicleTask = mutation({
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
     odometerKm: v.optional(v.number()),
+    attachments: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "create");
@@ -205,6 +213,7 @@ export const createVehicleTask = mutation({
       dueDate: args.dueDate,
       endDate: args.endDate,
       odometerKm: args.odometerKm,
+      attachments: args.attachments?.length ? args.attachments : undefined,
       createdBy: displayName(identity),
       createdAt: now,
       updatedAt: now,
@@ -288,6 +297,7 @@ export const updateVehicleTask = mutation({
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.union(v.number(), v.null())),
     odometerKm: v.optional(v.union(v.number(), v.null())),
+    attachments: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
@@ -302,6 +312,7 @@ export const updateVehicleTask = mutation({
       dueDate?: number;
       endDate?: number | undefined;
       odometerKm?: number | undefined;
+      attachments?: Id<"_storage">[] | undefined;
       updatedAt: number;
     } = {
       updatedAt: now,
@@ -313,6 +324,9 @@ export const updateVehicleTask = mutation({
     if (args.dueDate !== undefined) patch.dueDate = args.dueDate;
     if (args.endDate !== undefined) patch.endDate = args.endDate ?? undefined;
     if (args.odometerKm !== undefined) patch.odometerKm = args.odometerKm ?? undefined;
+    if (args.attachments !== undefined) {
+      patch.attachments = args.attachments.length ? args.attachments : undefined;
+    }
     await ctx.db.patch(args.taskId, patch);
     if (typeof args.odometerKm === "number") {
       const vehicle = await ctx.db.get(task.vehicleId);
