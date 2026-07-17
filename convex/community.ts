@@ -6,6 +6,8 @@ import { internal } from "./_generated/api";
 import {
   emailForClerkId,
   hasCrmPermission,
+  livePhoto,
+  livePhotosByClerkId,
   requireCrmPermission,
   requireStaff,
   requireUser,
@@ -71,6 +73,7 @@ async function notifyDealInterest(
     title: `${interestedName} est intéressé·e par votre annonce`,
     body: deal.title,
     actorName: interestedName,
+    actorClerkId: identity.subject,
     actorImageUrl: pictureUrl(identity),
     href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(interestedName)}`,
   });
@@ -96,9 +99,11 @@ export const listEvents = query({
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
     const events = await ctx.db.query("events").withIndex("by_start").order("desc").take(100);
+    const photos = await livePhotosByClerkId(ctx, events.map((e) => e.authorClerkId));
     return await Promise.all(
       events.map(async (event) => ({
         ...event,
+        authorImageUrl: livePhoto(photos, event.authorClerkId, event.authorImageUrl),
         imageUrls: await resolveImages(ctx, event.images),
         canManage: event.authorClerkId === identity.subject,
       })),
@@ -248,9 +253,11 @@ export const listDeals = query({
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
     const deals = await ctx.db.query("dealPosts").withIndex("by_createdAt").order("desc").take(100);
+    const photos = await livePhotosByClerkId(ctx, deals.map((d) => d.authorClerkId));
     return await Promise.all(
       deals.map(async (deal) => ({
         ...deal,
+        authorImageUrl: livePhoto(photos, deal.authorClerkId, deal.authorImageUrl),
         adKind: deal.adKind ?? "offre",
         imageUrls: await resolveImages(ctx, deal.images),
         canManage: deal.authorClerkId === identity.subject,
@@ -378,7 +385,13 @@ export const listConversations = query({
       }
     }
 
-    return Array.from(byCounterpart.values()).sort((a, b) => b.lastAt - a.lastAt);
+    // Avatar du correspondant résolu à la lecture : il doit refléter sa photo
+    // actuelle, pas celle figée sur le dernier message reçu.
+    const conversations = Array.from(byCounterpart.values());
+    const photos = await livePhotosByClerkId(ctx, conversations.map((c) => c.clerkId));
+    return conversations
+      .map((c) => ({ ...c, imageUrl: livePhoto(photos, c.clerkId, c.imageUrl) }))
+      .sort((a, b) => b.lastAt - a.lastAt);
   },
 });
 
@@ -391,9 +404,14 @@ export const listThread = query({
       .query("directMessages")
       .withIndex("by_pair", (q) => q.eq("pairKey", key))
       .collect();
+    const photos = await livePhotosByClerkId(ctx, messages.map((m) => m.fromClerkId));
     return messages
       .sort((a, b) => a.createdAt - b.createdAt)
-      .map((message) => ({ ...message, mine: message.fromClerkId === identity.subject }));
+      .map((message) => ({
+        ...message,
+        fromImageUrl: livePhoto(photos, message.fromClerkId, message.fromImageUrl),
+        mine: message.fromClerkId === identity.subject,
+      }));
   },
 });
 
@@ -430,7 +448,8 @@ export const sendMessage = mutation({
       title: `Nouveau message de ${displayName(identity)}`,
       body,
       actorName: displayName(identity),
-      actorImageUrl: pictureUrl(identity),
+      actorClerkId: identity.subject,
+    actorImageUrl: pictureUrl(identity),
       href: `/messagerie?to=${encodeURIComponent(identity.subject)}&name=${encodeURIComponent(displayName(identity))}`,
     });
     if (args.dealId) {

@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { requireCrmPermission, requireUser } from "./lib";
+import { livePhoto, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const POSTS_PAGE_KEY = "mesoutils:actualites";
@@ -92,10 +92,19 @@ async function enrichPost(
       .collect(),
   ]);
 
+  // Photos résolues à la lecture : un changement de photo de profil doit se
+  // voir sur tout l'historique, pas seulement sur les nouvelles publications.
+  const photos = await livePhotosByClerkId(ctx, [
+    post.authorClerkId,
+    ...comments.map((comment) => comment.authorClerkId),
+    ...likes.map((like) => like.clerkId),
+  ]);
+
   const commentsWithMeta = comments
     .sort((a, b) => a.createdAt - b.createdAt)
     .map((comment) => ({
       ...comment,
+      authorImageUrl: livePhoto(photos, comment.authorClerkId, comment.authorImageUrl),
       canRemove:
         comment.authorClerkId === currentClerkId || post.authorClerkId === currentClerkId,
     }));
@@ -107,6 +116,7 @@ async function enrichPost(
 
   return {
     ...post,
+    authorImageUrl: livePhoto(photos, post.authorClerkId, post.authorImageUrl),
     imageUrls,
     videoUrls,
     comments: commentsWithMeta,
@@ -154,10 +164,11 @@ export const listLikes = query({
       .order("desc")
       .take(200);
 
+    const photos = await livePhotosByClerkId(ctx, likes.map((like) => like.clerkId));
     return likes.map((like) => ({
       _id: like._id,
       name: like.actorName ?? "Utilisateur",
-      imageUrl: like.actorImageUrl,
+      imageUrl: livePhoto(photos, like.clerkId, like.actorImageUrl),
       createdAt: like.createdAt,
     }));
   },
@@ -365,6 +376,7 @@ export const addComment = mutation({
         title: `${displayName(identity)} a commenté votre post`,
         body,
         actorName: displayName(identity),
+        actorClerkId: identity.subject,
         actorImageUrl: (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
         href: "/actualites?v=publications",
       });
@@ -437,6 +449,7 @@ export const toggleLike = mutation({
             ? "Publication avec vidéo"
             : "Publication avec photo",
         actorName: displayName(identity),
+        actorClerkId: identity.subject,
         actorImageUrl: (identity as { pictureUrl?: string | null }).pictureUrl ?? undefined,
         href: "/actualites?v=publications",
       });

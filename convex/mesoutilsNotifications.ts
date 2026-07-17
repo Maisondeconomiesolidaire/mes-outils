@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
-import { requireUser } from "./lib";
+import { livePhoto, livePhotosByClerkId, requireUser } from "./lib";
 
 export async function createMesoutilsNotification(
   ctx: MutationCtx,
@@ -11,6 +11,7 @@ export async function createMesoutilsNotification(
     title: string;
     body?: string;
     actorName?: string;
+    actorClerkId?: string;
     actorImageUrl?: string;
     assetImageUrl?: string;
     href?: string;
@@ -24,6 +25,7 @@ export async function createMesoutilsNotification(
     title: args.title.trim(),
     body: args.body?.trim() || undefined,
     actorName: args.actorName?.trim() || undefined,
+    actorClerkId: args.actorClerkId?.trim() || undefined,
     actorImageUrl: args.actorImageUrl?.trim() || undefined,
     assetImageUrl: args.assetImageUrl?.trim() || undefined,
     href: args.href,
@@ -36,11 +38,19 @@ export const list = query({
   args: {},
   handler: async (ctx) => {
     const identity = await requireUser(ctx);
-    return await ctx.db
+    const notifications = await ctx.db
       .query("mesoutilsNotifications")
       .withIndex("by_recipient_createdAt", (q) => q.eq("recipientClerkId", identity.subject))
       .order("desc")
       .take(100);
+    const photos = await livePhotosByClerkId(
+      ctx,
+      notifications.map((notification) => notification.actorClerkId),
+    );
+    return notifications.map((notification) => ({
+      ...notification,
+      actorImageUrl: livePhoto(photos, notification.actorClerkId, notification.actorImageUrl),
+    }));
   },
 });
 

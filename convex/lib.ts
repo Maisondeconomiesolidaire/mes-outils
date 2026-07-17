@@ -304,6 +304,50 @@ export async function photoForClerkId(
   return user?.imageUrl ?? null;
 }
 
+/**
+ * Photos de profil **vivantes** pour un lot de comptes, par `clerkId`.
+ *
+ * Les tables (posts, commentaires, likes, retours…) figent `authorImageUrl` au
+ * moment de l'écriture. Sans résolution à la lecture, changer sa photo de
+ * profil laisse l'ancienne sur tout l'historique. `users.imageUrl` est, lui,
+ * remis à jour à chaque connexion (`users.syncProfile`) : c'est la source de
+ * vérité.
+ *
+ * Une seule lecture par compte distinct, quel que soit le nombre de lignes à
+ * décorer — d'où le lot plutôt qu'un appel par ligne.
+ */
+export async function livePhotosByClerkId(
+  ctx: QueryCtx | MutationCtx,
+  clerkIds: Array<string | null | undefined>,
+): Promise<Map<string, string>> {
+  const unique = Array.from(
+    new Set(clerkIds.filter((id): id is string => Boolean(id))),
+  );
+  const photos = new Map<string, string>();
+  await Promise.all(
+    unique.map(async (clerkId) => {
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+        .unique();
+      if (user?.imageUrl) photos.set(clerkId, user.imageUrl);
+    }),
+  );
+  return photos;
+}
+
+/**
+ * Photo à afficher : celle du profil si le compte existe encore, sinon le
+ * snapshot figé à l'écriture (auteurs jamais connectés, imports historiques).
+ */
+export function livePhoto(
+  photos: Map<string, string>,
+  clerkId: string | null | undefined,
+  fallback: string | undefined,
+): string | undefined {
+  return (clerkId ? photos.get(clerkId) : undefined) ?? fallback;
+}
+
 /** Compte Clerk associé à une adresse email (renseignée à la connexion). */
 export async function clerkIdForEmail(
   ctx: QueryCtx | MutationCtx,

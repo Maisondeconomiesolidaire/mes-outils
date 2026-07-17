@@ -1004,7 +1004,9 @@ export default defineSchema(
     title: v.string(),
     body: v.optional(v.string()),
     actorName: v.optional(v.string()),
-    // Photo de profil de l'acteur (message, like, commentaire, intérêt).
+    /** Auteur de l'action : permet de retrouver sa photo ACTUELLE à la lecture. */
+    actorClerkId: v.optional(v.string()),
+    // Photo figée à l'écriture — repli pour les notifications sans actorClerkId.
     actorImageUrl: v.optional(v.string()),
     // Photo de la salle / du véhicule concerné (notifications de réservation).
     assetImageUrl: v.optional(v.string()),
