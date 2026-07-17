@@ -27,6 +27,7 @@ import { DateRangePicker, type DateRange } from "../components/ui/DateRangePicke
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
+import { MediaUpload } from "../components/ui/MediaUpload";
 import { SinglePhotoUpload } from "../components/ui/SinglePhotoUpload";
 import { VehicleSearchSelect } from "../components/ui/VehicleSearchSelect";
 import { DatePicker } from "../components/ui/DatePicker";
@@ -79,6 +80,9 @@ type VehicleTask = {
   dueDate?: number;
   endDate?: number;
   odometerKm?: number;
+  attachments?: Id<"_storage">[];
+  /** URLs signées, résolues par `listVehicleTasks` (les storageId seuls ne s'affichent pas). */
+  attachmentUrls?: string[];
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -653,6 +657,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
   const [odometerKm, setOdometerKm] = useState("");
+  const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -667,8 +672,9 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
         dueDate: range.start,
         endDate: range.end ?? undefined,
         odometerKm: odometerKm ? Number(odometerKm) : undefined,
+        attachments: attachments.length ? attachments : undefined,
       });
-      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm("");
+      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm(""); setAttachments([]);
       onClose();
     } finally {
       setSaving(false);
@@ -696,6 +702,9 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
             <Input type="number" inputMode="numeric" value={odometerKm} onChange={(e) => setOdometerKm(e.target.value)} placeholder="Ex: 125000" />
           </Field>
         </div>
+        <Field label="Photos">
+          <MediaUpload images={attachments} onChange={setAttachments} />
+        </Field>
         <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={onClose}>Annuler</Button>
           <Button onClick={save} disabled={saving || !vehicleId || !title.trim() || !range.start}>{saving ? "Ajout..." : "Ajouter"}</Button>
@@ -709,25 +718,21 @@ const TASK_STATUS_COLUMNS = [
   {
     key: "todo" as const,
     label: "A faire",
-    description: "À planifier ou lancer",
     tone: "border-amber-400 bg-amber-50/70 dark:bg-amber-500/10",
   },
   {
     key: "in_progress" as const,
     label: "En cours",
-    description: "Interventions en traitement",
     tone: "border-sky-400 bg-sky-50/70 dark:bg-sky-500/10",
   },
   {
     key: "done" as const,
     label: "Terminée",
-    description: "Historique clos",
     tone: "border-emerald-400 bg-emerald-50/70 dark:bg-emerald-500/10",
   },
 ] satisfies Array<{
   key: TaskStatus;
   label: string;
-  description: string;
   tone: string;
 }>;
 
@@ -812,7 +817,6 @@ function TaskKanban({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-base font-bold text-[var(--foreground)]">{column.label}</h3>
-                <p className="mt-1 text-sm text-[var(--muted-foreground)]">{column.description}</p>
               </div>
               <span className="rounded-full bg-[var(--card)] px-2.5 py-1 text-xs font-bold text-[var(--foreground)]">
                 {columnTasks.length}
@@ -1179,9 +1183,9 @@ function FleetCalendar({
                         <Info className="h-4 w-4" />Détails
                       </Button>
                     ) : entry.kind === "control" ? (
-                      <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.vehicle._id)}>
-                        <Info className="h-4 w-4" />Véhicule
-                      </Button>
+                        <Button size="sm" variant="secondary" onClick={() => onOpenVehicle(entry.vehicle._id)}>
+                          <Info className="h-4 w-4" />Véhicule
+                        </Button>
                     ) : (
                       <div className="ml-auto flex flex-wrap items-center gap-2">
                         <Button size="sm" variant="secondary" onClick={() => openTaskDetailsFromPanel(entry.task._id)}>
@@ -1337,7 +1341,9 @@ function MaintenanceDetailsModal({
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
   const [odometerKm, setOdometerKm] = useState("");
+  const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     if (!task) return;
@@ -1347,10 +1353,23 @@ function MaintenanceDetailsModal({
     setStatus(task.status);
     setRange({ start: task.dueDate ?? null, end: task.endDate ?? null });
     setOdometerKm(task.odometerKm !== undefined ? String(task.odometerKm) : "");
+    setAttachments(task.attachments ?? []);
+    setEditing(false);
   }, [task]);
 
   if (!task) return null;
   const currentTask = task;
+  const displayTitle = title.trim() || currentTask.title;
+  const displayDescription = description.trim() || "Aucune précision renseignée.";
+  const displayVehicleName = currentTask.vehicle?.name ?? "Véhicule";
+  const displayVehicleDetails = [currentTask.vehicle?.brand, currentTask.vehicle?.model, currentTask.vehicle?.plate]
+    .filter(Boolean)
+    .join(" · ");
+  const displayStart = range.start ? formatDateTimeWithDay(range.start) : "Non renseigné";
+  const displayEnd = range.end ? formatDateTimeWithDay(range.end) : "Non renseignée";
+  const displayOdometer = odometerKm.trim()
+    ? `${Number(odometerKm).toLocaleString("fr-FR")} km`
+    : "Non renseigné";
 
   async function save() {
     if (!title.trim() || !range.start) return;
@@ -1365,8 +1384,9 @@ function MaintenanceDetailsModal({
         dueDate: range.start,
         endDate: range.end ?? null,
         odometerKm: odometerKm ? Number(odometerKm) : null,
+        attachments,
       });
-      onClose();
+      setEditing(false);
     } finally {
       setSaving(false);
     }
@@ -1387,37 +1407,65 @@ function MaintenanceDetailsModal({
 
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center gap-2">
-            <TaskStatusBadge status={currentTask.status} />
-            <PriorityBadge priority={currentTask.priority} />
+            <TaskStatusBadge status={status} />
+            <PriorityBadge priority={priority} />
+            {canEdit ? (
+              <Button
+                size="sm"
+                variant={editing ? "secondary" : "outline"}
+                onClick={() => setEditing((value) => !value)}
+              >
+                {editing ? "Annuler la modification" : "Modifier"}
+              </Button>
+            ) : null}
           </div>
 
           <div>
-            <h2 className="text-2xl font-bold text-[var(--foreground)]">{currentTask.title}</h2>
+            <h2 className="text-2xl font-bold text-[var(--foreground)]">{displayTitle}</h2>
             <p className="mt-1 text-sm font-semibold text-[var(--muted-foreground)]">
-              {currentTask.vehicle?.name ?? "Véhicule"}
-              {currentTask.vehicle?.brand || currentTask.vehicle?.model || currentTask.vehicle?.plate
-                ? ` · ${[currentTask.vehicle?.brand, currentTask.vehicle?.model, currentTask.vehicle?.plate].filter(Boolean).join(" · ")}`
+              {displayVehicleName}
+              {displayVehicleDetails
+                ? ` · ${displayVehicleDetails}`
                 : ""}
             </p>
           </div>
 
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
-            <DetailItem label="Véhicule" value={currentTask.vehicle?.name ?? "Véhicule"} />
+            <DetailItem label="Véhicule" value={displayVehicleName} />
             <DetailItem label="Créée par" value={currentTask.createdBy} />
-            <DetailItem label="Début" value={currentTask.dueDate ? formatDateTimeWithDay(currentTask.dueDate) : "Non renseigné"} />
-            <DetailItem label="Fin" value={currentTask.endDate ? formatDateTimeWithDay(currentTask.endDate) : "Non renseignée"} />
+            <DetailItem label="Début" value={displayStart} />
+            <DetailItem label="Fin" value={displayEnd} />
             <DetailItem label="Créée le" value={formatDateTimeWithDay(currentTask.createdAt)} />
             <DetailItem label="Mise à jour" value={formatDateTimeWithDay(currentTask.updatedAt)} />
-            <DetailItem label="Statut" value={TASK_STATUS_LABELS[currentTask.status]} />
-            <DetailItem label="Kilométrage" value={currentTask.odometerKm !== undefined ? `${currentTask.odometerKm.toLocaleString("fr-FR")} km` : "Non renseigné"} />
+            <DetailItem label="Statut" value={TASK_STATUS_LABELS[status]} />
+            <DetailItem label="Kilométrage" value={displayOdometer} />
           </dl>
 
           <div className="rounded-xl border border-[var(--border)] p-3">
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Description</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{currentTask.description || "Aucune précision renseignée."}</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{displayDescription}</p>
           </div>
 
-          {canEdit ? (
+          {!editing && (currentTask.attachmentUrls?.length ?? 0) > 0 ? (
+            <div className="rounded-xl border border-[var(--border)] p-3">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
+                Photos ({currentTask.attachmentUrls?.length})
+              </p>
+              <div className="mt-2 grid grid-cols-3 gap-2">
+                {currentTask.attachmentUrls?.map((url) => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer" title="Ouvrir en grand">
+                    <img
+                      src={url}
+                      alt=""
+                      className="h-24 w-full rounded-lg object-cover transition hover:opacity-90"
+                    />
+                  </a>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {canEdit && editing ? (
             <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4">
               <Field label="Intitulé" required><Input value={title} onChange={(event) => setTitle(event.target.value)} /></Field>
               <Field label="Description"><Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></Field>
@@ -1443,12 +1491,25 @@ function MaintenanceDetailsModal({
               <Field label="Kilométrage">
                 <Input type="number" inputMode="numeric" value={odometerKm} onChange={(event) => setOdometerKm(event.target.value)} placeholder="Ex: 125000" />
               </Field>
+              <Field label="Photos">
+                {/* `initialMedia` réaffiche les photos déjà enregistrées : sans
+                    lui, l'édition repartirait d'une galerie vide et un
+                    enregistrement les effacerait. */}
+                <MediaUpload
+                  images={attachments}
+                  initialMedia={(currentTask.attachments ?? []).map((storageId, index) => ({
+                    storageId,
+                    previewUrl: currentTask.attachmentUrls?.[index] ?? "",
+                  }))}
+                  onChange={setAttachments}
+                />
+              </Field>
             </div>
           ) : null}
 
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
             <Button variant="ghost" onClick={onClose}>Fermer</Button>
-            {canEdit ? (
+            {canEdit && editing ? (
               <Button onClick={() => void save()} disabled={saving || !title.trim() || !range.start}>
                 {saving ? "Enregistrement..." : "Enregistrer"}
               </Button>

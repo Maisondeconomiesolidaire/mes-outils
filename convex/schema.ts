@@ -1111,6 +1111,8 @@ export default defineSchema(
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
     odometerKm: v.optional(v.number()),
+    /** Pièces jointes : photos de la panne, de la réparation, factures… */
+    attachments: v.optional(v.array(v.id("_storage"))),
     createdBy: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
