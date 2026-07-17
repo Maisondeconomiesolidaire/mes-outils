@@ -10,6 +10,13 @@ export type UnderlineTabItem<T extends string> = {
 /**
  * Onglets soulignés (même style que les sous-pages de recycapp) : barre
  * inférieure fine, onglet actif souligné en vert de marque.
+ *
+ * À l'ouverture de la page, les onglets glissent depuis la gauche en cascade.
+ * Ce n'est pas décoratif : sans mouvement, une rangée d'onglets discrets passe
+ * inaperçue et l'utilisateur ne devine pas qu'il existe d'autres vues. Le
+ * soulignement de l'onglet actif s'étire une fois la cascade passée.
+ * L'animation se coupe si le système demande moins de mouvement
+ * (`prefers-reduced-motion`).
  */
 export function UnderlineTabs<T extends string>({
   items,
@@ -29,7 +36,7 @@ export function UnderlineTabs<T extends string>({
   return (
     <div className={cn("border-b border-[var(--border)]", className)}>
       <div className="flex flex-wrap items-end gap-6 overflow-x-auto">
-        {items.map((item) => {
+        {items.map((item, index) => {
           const active = item.key === value;
           const Icon = item.icon;
           return (
@@ -37,12 +44,13 @@ export function UnderlineTabs<T extends string>({
               key={item.key}
               type="button"
               onClick={() => onChange(item.key)}
+              style={{ animationDelay: `${index * 55}ms` }}
               className={cn(
-                "flex items-center gap-2 whitespace-nowrap border-b-2 pb-3 font-semibold transition-colors",
+                "animate-tab-slide-in relative flex items-center gap-2 whitespace-nowrap pb-3 font-semibold transition-colors",
                 size === "sm" ? "text-sm" : "text-[15px]",
                 active
-                  ? "border-brand-500 text-[var(--foreground)]"
-                  : "border-transparent text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                  ? "text-[var(--foreground)]"
+                  : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
               )}
             >
               {Icon ? <Icon className="h-[18px] w-[18px]" /> : null}
@@ -50,6 +58,16 @@ export function UnderlineTabs<T extends string>({
               {counts?.[item.key] !== undefined && (
                 <span className="text-xs text-[var(--muted-foreground)]">{counts[item.key]}</span>
               )}
+              {/* Soulignement porté par un élément dédié : il peut s'étirer sans
+                  décaler le texte, contrairement à une bordure. */}
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute inset-x-0 -bottom-px h-0.5 rounded-full",
+                  active ? "animate-tab-underline bg-brand-500" : "bg-transparent",
+                )}
+                style={active ? { animationDelay: `${items.length * 55}ms` } : undefined}
+              />
             </button>
           );
         })}

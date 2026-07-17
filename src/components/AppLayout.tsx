@@ -8,6 +8,7 @@ import { PORTAL_NAV, canAccess } from "../lib/permissions";
 import { cn } from "../lib/cn";
 import { usePermissionsAccess } from "./RequirePermission";
 import { AppSwitcher } from "./AppSwitcher";
+import { HelpButton } from "./HelpButton";
 import { Button } from "./ui/Button";
 import { Field, Input } from "./ui/Field";
 import { FullSpinner } from "./ui/Spinner";
@@ -354,6 +355,8 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
           <Outlet />
         </main>
       )}
+
+      <HelpButton />
     </div>
   );
 }

@@ -114,6 +114,10 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [showMedia, setShowMedia] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // Composeur replié : on ne montre que le titre tant que l'utilisateur n'a pas
+  // manifesté l'intention d'écrire. Trois champs vides d'emblée donnaient
+  // l'impression d'un formulaire à remplir.
+  const [composerOpen, setComposerOpen] = useState(false);
 
   async function submit() {
     if (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0) return;
@@ -125,6 +129,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
       setExternalLink("");
       setImages([]);
       setShowMedia(false);
+      setComposerOpen(false);
     } finally {
       setSubmitting(false);
     }
@@ -152,39 +157,58 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
               <Input
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
-                placeholder="Titre"
+                onFocus={() => setComposerOpen(true)}
+                placeholder={composerOpen ? "Titre" : "Quoi de neuf ?"}
                 className="rounded-2xl bg-[var(--accent)]"
               />
-              <textarea
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                placeholder="Quoi de neuf ?"
-                className="min-h-[52px] w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] focus:ring-2 focus:ring-brand-500/30"
-                rows={body ? 3 : 1}
-              />
-              <Input
-                value={externalLink}
-                onChange={(event) => setExternalLink(event.target.value)}
-                placeholder="Lien externe (optionnel)"
-                className="rounded-2xl bg-[var(--accent)]"
-              />
+              {composerOpen ? (
+                <div className="animate-enter space-y-2">
+                  <textarea
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                    placeholder="Quoi de neuf ?"
+                    className="min-h-[52px] w-full resize-none rounded-2xl bg-[var(--accent)] px-4 py-3 text-[15px] text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)] focus:ring-2 focus:ring-brand-500/30"
+                    rows={body ? 3 : 2}
+                  />
+                  <Input
+                    value={externalLink}
+                    onChange={(event) => setExternalLink(event.target.value)}
+                    placeholder="Lien externe (optionnel)"
+                    className="rounded-2xl bg-[var(--accent)]"
+                  />
+                </div>
+              ) : null}
             </div>
           </div>
-          {showMedia ? (
+          {composerOpen && showMedia ? (
             <MediaUpload images={images} onChange={setImages} className="mt-3 pl-[60px]" />
           ) : null}
-          <div className="mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3">
-            <button
-              type="button"
-              onClick={() => setShowMedia((current) => !current)}
-              className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition", showMedia ? "bg-brand-50 text-brand-700" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]")}
-            >
-              <ImageIcon className="h-4 w-4" /> Photo
-            </button>
-            <Button onClick={submit} disabled={submitting || (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0)}>
-              <Send className="h-4 w-4" /> {submitting ? "Publication..." : "Publier"}
-            </Button>
-          </div>
+          {composerOpen ? (
+            <div className="animate-enter mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3">
+              <button
+                type="button"
+                onClick={() => setShowMedia((current) => !current)}
+                className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition", showMedia ? "bg-brand-50 text-brand-700" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]")}
+              >
+                <ImageIcon className="h-4 w-4" /> Photo
+              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setComposerOpen(false);
+                    setShowMedia(false);
+                  }}
+                  disabled={submitting}
+                >
+                  Annuler
+                </Button>
+                <Button onClick={submit} disabled={submitting || (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0)}>
+                  <Send className="h-4 w-4" /> {submitting ? "Publication..." : "Publier"}
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
