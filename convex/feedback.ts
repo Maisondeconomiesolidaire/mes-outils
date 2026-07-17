@@ -53,6 +53,32 @@ export const amIFeedbackAdmin = query({
   },
 });
 
+/**
+ * Nombre de retours encore à traiter, **tous auteurs et toutes apps
+ * confondus** : c'est la charge de travail de l'équipe, affichée à chacun sur
+ * « Mes retours » pour situer l'attente.
+ *
+ * Ouvert à tout compte connecté : on ne renvoie qu'un entier, aucun contenu ni
+ * auteur — contrairement à `list`, qui reste réservé à l'équipe produit.
+ */
+export const pendingCount = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireUser(ctx);
+    const [waiting, inProgress] = await Promise.all([
+      ctx.db
+        .query("feedback")
+        .withIndex("by_status", (q) => q.eq("status", "nouveau"))
+        .collect(),
+      ctx.db
+        .query("feedback")
+        .withIndex("by_status", (q) => q.eq("status", "en_cours"))
+        .collect(),
+    ]);
+    return waiting.length + inProgress.length;
+  },
+});
+
 /** Dépôt d'un retour — ouvert à tout utilisateur connecté. */
 export const submit = mutation({
   args: {
