@@ -64,20 +64,6 @@ export const myFeedbackAccess = query({
 });
 
 /**
- * @deprecated Remplacée par `myFeedbackAccess`. Conservée le temps que le
- * frontend déployé bascule : le supprimer avant le rebuild casserait l'app en
- * production, qui l'appelle encore.
- */
-export const amIFeedbackAdmin = query({
-  args: {},
-  handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) return false;
-    return await canModerateFeedback(ctx);
-  },
-});
-
-/**
  * Nombre de retours encore à traiter, **tous auteurs et toutes apps
  * confondus** : c'est la charge de travail de l'équipe, affichée sur « Mes
  * retours » pour situer l'attente.
