@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { feedbackApp, feedbackStatus, feedbackType } from "./schema";
-import { normalizeEmail, requireUser } from "./lib";
+import { livePhoto, livePhotosByClerkId, normalizeEmail, requireUser } from "./lib";
 
 /**
  * App « Feedback » (feedback.groupemes.fr) — retours des utilisateurs sur les
@@ -142,9 +142,15 @@ export const listMine = query({
       stats.set(key, current);
     }
 
+    const photos = await livePhotosByClerkId(ctx, items.map((item) => item.authorClerkId));
     return items.map((item) => {
       const stat = stats.get(String(item._id)) ?? { count: 0, teamReplies: 0 };
-      return { ...item, commentCount: stat.count, teamReplyCount: stat.teamReplies };
+      return {
+        ...item,
+        authorImageUrl: livePhoto(photos, item.authorClerkId, item.authorImageUrl),
+        commentCount: stat.count,
+        teamReplyCount: stat.teamReplies,
+      };
     });
   },
 });
@@ -182,7 +188,21 @@ export const thread = query({
       .order("asc")
       .collect();
 
-    return { item, comments, canModerate: admin };
+    const photos = await livePhotosByClerkId(ctx, [
+      item.authorClerkId,
+      ...comments.map((comment) => comment.authorClerkId),
+    ]);
+    return {
+      item: {
+        ...item,
+        authorImageUrl: livePhoto(photos, item.authorClerkId, item.authorImageUrl),
+      },
+      comments: comments.map((comment) => ({
+        ...comment,
+        authorImageUrl: livePhoto(photos, comment.authorClerkId, comment.authorImageUrl),
+      })),
+      canModerate: admin,
+    };
   },
 });
 
@@ -253,8 +273,10 @@ export const list = query({
     for (const comment of comments) {
       countById.set(comment.feedbackId, (countById.get(comment.feedbackId) ?? 0) + 1);
     }
+    const photos = await livePhotosByClerkId(ctx, items.map((item) => item.authorClerkId));
     return items.map((item) => ({
       ...item,
+      authorImageUrl: livePhoto(photos, item.authorClerkId, item.authorImageUrl),
       commentCount: countById.get(item._id) ?? 0,
     }));
   },
