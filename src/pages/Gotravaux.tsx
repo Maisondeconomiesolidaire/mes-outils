@@ -6,6 +6,8 @@ import {
   CalendarDays,
   CarFront,
   Check,
+  Clock,
+  Euro,
   FileText,
   Info,
   MapPin,
@@ -80,6 +82,8 @@ type VehicleTask = {
   dueDate?: number;
   endDate?: number;
   odometerKm?: number;
+  laborMinutes?: number;
+  partsCost?: number;
   attachments?: Id<"_storage">[];
   /** URLs signées, résolues par `listVehicleTasks` (les storageId seuls ne s'affichent pas). */
   attachmentUrls?: string[];
@@ -500,14 +504,22 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
   const updateTask = useMutation(api.gotravaux.updateVehicleTask);
   const [adding, setAdding] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
+  const [closingTaskId, setClosingTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const [title, setTitle] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
   const [odometerKm, setOdometerKm] = useState("");
+  const [laborHours, setLaborHours] = useState("");
+  const [laborMins, setLaborMins] = useState("");
+  const [partsCost, setPartsCost] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function add() {
     if (!title.trim() || !range.start) return;
+    const laborMinutesValue =
+      laborHours.trim() || laborMins.trim()
+        ? (Number(laborHours) || 0) * 60 + (Number(laborMins) || 0)
+        : undefined;
     setSaving(true);
     try {
       await createTask({
@@ -517,11 +529,16 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
         dueDate: range.start,
         endDate: range.end ?? undefined,
         odometerKm: odometerKm ? Number(odometerKm) : undefined,
+        laborMinutes: laborMinutesValue,
+        partsCost: partsCost.trim() ? Number(partsCost) : undefined,
       });
       setTitle("");
       setPriority("medium");
       setRange({ start: null, end: null });
       setOdometerKm("");
+      setLaborHours("");
+      setLaborMins("");
+      setPartsCost("");
       setAdding(false);
     } finally {
       setSaving(false);
@@ -545,6 +562,19 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
               <Input type="number" inputMode="numeric" value={odometerKm} onChange={(e) => setOdometerKm(e.target.value)} placeholder="Ex: 125000" />
             </Field>
           </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Temps passé" hint="Requis pour clôturer">
+              <div className="flex items-center gap-2">
+                <Input type="number" inputMode="numeric" min="0" value={laborHours} onChange={(e) => setLaborHours(e.target.value)} placeholder="h" />
+                <span className="text-sm text-[var(--muted-foreground)]">h</span>
+                <Input type="number" inputMode="numeric" min="0" max="59" value={laborMins} onChange={(e) => setLaborMins(e.target.value)} placeholder="min" />
+                <span className="text-sm text-[var(--muted-foreground)]">min</span>
+              </div>
+            </Field>
+            <Field label="Prix des pièces (€)" hint="Requis pour clôturer">
+              <Input type="number" inputMode="decimal" min="0" step="0.01" value={partsCost} onChange={(e) => setPartsCost(e.target.value)} placeholder="Ex: 45,00" />
+            </Field>
+          </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>Annuler</Button>
             <Button size="sm" onClick={add} disabled={saving || !title.trim() || !range.start}>{saving ? "Ajout..." : "Ajouter"}</Button>
@@ -559,10 +589,28 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
       ) : tasks.length === 0 ? (
         <p className="py-6 text-center text-sm text-[var(--muted-foreground)]">Aucune maintenance pour ce véhicule.</p>
       ) : (
-        <TaskKanban tasks={tasks} onUpdate={updateTask} canEdit={canEdit} onOpenTask={setSelectedTaskId} />
+        <TaskKanban
+          tasks={tasks}
+          onUpdate={updateTask}
+          canEdit={canEdit}
+          onOpenTask={setSelectedTaskId}
+          onRequestClose={(task) => {
+            setClosingTaskId(task._id);
+            setSelectedTaskId(task._id);
+          }}
+        />
       )}
       </div>
-      <MaintenanceDetailsModal task={selectedTask} canEdit={canEdit} onClose={() => setSelectedTaskId(null)} onUpdate={updateTask} />
+      <MaintenanceDetailsModal
+        task={selectedTask}
+        canEdit={canEdit}
+        initialEditing={selectedTaskId !== null && selectedTaskId === closingTaskId}
+        onClose={() => {
+          setSelectedTaskId(null);
+          setClosingTaskId(null);
+        }}
+        onUpdate={updateTask}
+      />
     </>
   );
 }
@@ -657,11 +705,18 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
   const [odometerKm, setOdometerKm] = useState("");
+  const [laborHours, setLaborHours] = useState("");
+  const [laborMins, setLaborMins] = useState("");
+  const [partsCost, setPartsCost] = useState("");
   const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
 
   async function save() {
     if (!vehicleId || !title.trim() || !range.start) return;
+    const laborMinutesValue =
+      laborHours.trim() || laborMins.trim()
+        ? (Number(laborHours) || 0) * 60 + (Number(laborMins) || 0)
+        : undefined;
     setSaving(true);
     try {
       await createTask({
@@ -672,9 +727,11 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
         dueDate: range.start,
         endDate: range.end ?? undefined,
         odometerKm: odometerKm ? Number(odometerKm) : undefined,
+        laborMinutes: laborMinutesValue,
+        partsCost: partsCost.trim() ? Number(partsCost) : undefined,
         attachments: attachments.length ? attachments : undefined,
       });
-      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm(""); setAttachments([]);
+      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm(""); setLaborHours(""); setLaborMins(""); setPartsCost(""); setAttachments([]);
       onClose();
     } finally {
       setSaving(false);
@@ -700,6 +757,19 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
           </Field>
           <Field label="Kilométrage">
             <Input type="number" inputMode="numeric" value={odometerKm} onChange={(e) => setOdometerKm(e.target.value)} placeholder="Ex: 125000" />
+          </Field>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Temps passé" hint="Requis pour clôturer">
+            <div className="flex items-center gap-2">
+              <Input type="number" inputMode="numeric" min="0" value={laborHours} onChange={(e) => setLaborHours(e.target.value)} placeholder="h" />
+              <span className="text-sm text-[var(--muted-foreground)]">h</span>
+              <Input type="number" inputMode="numeric" min="0" max="59" value={laborMins} onChange={(e) => setLaborMins(e.target.value)} placeholder="min" />
+              <span className="text-sm text-[var(--muted-foreground)]">min</span>
+            </div>
+          </Field>
+          <Field label="Prix des pièces (€)" hint="Requis pour clôturer">
+            <Input type="number" inputMode="decimal" min="0" step="0.01" value={partsCost} onChange={(e) => setPartsCost(e.target.value)} placeholder="Ex: 45,00" />
           </Field>
         </div>
         <Field label="Photos">
@@ -738,12 +808,31 @@ const TASK_STATUS_COLUMNS = [
 
 function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate: ReturnType<typeof useMutation>; canEdit: boolean }) {
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
+  const [closingTaskId, setClosingTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   if (tasks.length === 0) return <EmptyState icon={<Wrench className="h-8 w-8" />} title="Aucune maintenance" description="Les maintenances apparaîtront ici." />;
   const selectedTask = tasks.find((task) => task._id === selectedTaskId) ?? null;
   return (
     <>
-      <TaskKanban tasks={tasks} onUpdate={onUpdate} canEdit={canEdit} onOpenTask={setSelectedTaskId} />
-      <MaintenanceDetailsModal task={selectedTask} canEdit={canEdit} onClose={() => setSelectedTaskId(null)} onUpdate={onUpdate} />
+      <TaskKanban
+        tasks={tasks}
+        onUpdate={onUpdate}
+        canEdit={canEdit}
+        onOpenTask={setSelectedTaskId}
+        onRequestClose={(task) => {
+          setClosingTaskId(task._id);
+          setSelectedTaskId(task._id);
+        }}
+      />
+      <MaintenanceDetailsModal
+        task={selectedTask}
+        canEdit={canEdit}
+        initialEditing={selectedTaskId !== null && selectedTaskId === closingTaskId}
+        onClose={() => {
+          setSelectedTaskId(null);
+          setClosingTaskId(null);
+        }}
+        onUpdate={onUpdate}
+      />
     </>
   );
 }
@@ -753,11 +842,15 @@ function TaskKanban({
   onUpdate,
   canEdit,
   onOpenTask,
+  onRequestClose,
 }: {
   tasks: VehicleTask[];
   onUpdate: ReturnType<typeof useMutation>;
   canEdit: boolean;
   onOpenTask: (taskId: Id<"vehicleMaintenanceTasks">) => void;
+  /** Tentative de clôture d'une tâche sans coût : le parent ouvre la fiche en
+   *  édition pour le saisir. À défaut, on ouvre simplement le détail. */
+  onRequestClose?: (task: VehicleTask) => void;
 }) {
   const [draggedTaskId, setDraggedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
 
@@ -782,6 +875,13 @@ function TaskKanban({
 
   async function moveTask(task: VehicleTask, nextStatus: TaskStatus) {
     if (!canEdit || task.status === nextStatus) return;
+    // Clôturer impose le coût : sans lui, on ouvre la fiche en édition plutôt
+    // que de laisser le serveur refuser silencieusement.
+    if (nextStatus === "done" && !taskHasCost(task)) {
+      if (onRequestClose) onRequestClose(task);
+      else onOpenTask(task._id);
+      return;
+    }
     await onUpdate({
       taskId: task._id,
       status: nextStatus,
@@ -886,6 +986,7 @@ function TaskKanban({
                             Kilométrage: <span className="font-semibold text-[var(--foreground)]">{task.odometerKm.toLocaleString("fr-FR")} km</span>
                           </div>
                         ) : null}
+                        <MaintenanceCostBadges task={task} className="mt-2" />
                       </div>
                     </div>
 
@@ -995,6 +1096,7 @@ function FleetCalendar({
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"vehicleReservations"> | null>(null);
   const [selectedServiceId, setSelectedServiceId] = useState<Id<"requests"> | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
+  const [closingTaskId, setClosingTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const entries: AgendaEntry[] = [];
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
@@ -1172,6 +1274,7 @@ function FleetCalendar({
                       <p className="truncate text-sm font-semibold text-[var(--foreground)]">{entry.label}</p>
                       <p className="truncate text-xs text-[var(--muted-foreground)]">{entry.sublabel}</p>
                       {entry.endDate ? <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(entry.date)} → {formatDateTime(entry.endDate)}</p> : null}
+                      {entry.kind === "task" ? <MaintenanceCostBadges task={entry.task} className="mt-1.5" /> : null}
                     </div>
                     {entry.tone === "pending" ? <span className="ml-auto rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente</span> : null}
                     {entry.kind === "reservation" ? (
@@ -1194,13 +1297,22 @@ function FleetCalendar({
                         <Select
                           value={entry.task.status}
                           disabled={!canEdit}
-                          onChange={(event) =>
-                            onUpdateTask({
+                          onChange={(event) => {
+                            const nextStatus = event.target.value as TaskStatus;
+                            // Clôturer impose le coût : on ouvre la fiche en
+                            // édition plutôt que de laisser le serveur refuser.
+                            if (nextStatus === "done" && !taskHasCost(entry.task)) {
+                              setDayPanelOpen(false);
+                              setClosingTaskId(entry.task._id);
+                              setSelectedTaskId(entry.task._id);
+                              return;
+                            }
+                            void onUpdateTask({
                               taskId: entry.task._id,
-                              status: event.target.value as TaskStatus,
+                              status: nextStatus,
                               priority: entry.task.priority,
-                            })
-                          }
+                            });
+                          }}
                           className="h-9 w-auto"
                         >
                           <option value="todo">À faire</option>
@@ -1226,7 +1338,16 @@ function FleetCalendar({
         onCancel={cancelReservationWithConfirmation}
       />
       <ServiceDetailsModal service={selectedService} onClose={() => setSelectedServiceId(null)} />
-      <MaintenanceDetailsModal task={selectedTask} canEdit={canEdit} onClose={() => setSelectedTaskId(null)} onUpdate={onUpdateTask} />
+      <MaintenanceDetailsModal
+        task={selectedTask}
+        canEdit={canEdit}
+        initialEditing={selectedTaskId !== null && selectedTaskId === closingTaskId}
+        onClose={() => {
+          setSelectedTaskId(null);
+          setClosingTaskId(null);
+        }}
+        onUpdate={onUpdateTask}
+      />
     </div>
   );
 }
@@ -1324,16 +1445,29 @@ function ServiceDetailsModal({ service, onClose }: { service: ServiceItem | null
   );
 }
 
+/** Temps + prix des pièces renseignés : conditions pour clôturer une tâche. */
+function taskHasCost(task: Pick<VehicleTask, "laborMinutes" | "partsCost">) {
+  return (
+    typeof task.laborMinutes === "number" &&
+    task.laborMinutes > 0 &&
+    typeof task.partsCost === "number"
+  );
+}
+
 function MaintenanceDetailsModal({
   task,
   canEdit,
   onClose,
   onUpdate,
+  initialEditing = false,
 }: {
   task: VehicleTask | null;
   canEdit: boolean;
   onClose: () => void;
   onUpdate: ReturnType<typeof useMutation>;
+  /** Ouvre directement en édition, statut « Terminée » présélectionné : utilisé
+   *  quand on tente de clôturer une tâche sans en avoir saisi le coût. */
+  initialEditing?: boolean;
 }) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -1341,8 +1475,12 @@ function MaintenanceDetailsModal({
   const [status, setStatus] = useState<TaskStatus>("todo");
   const [range, setRange] = useState<DateRange>({ start: null, end: null });
   const [odometerKm, setOdometerKm] = useState("");
+  const [laborHours, setLaborHours] = useState("");
+  const [laborMins, setLaborMins] = useState("");
+  const [partsCost, setPartsCost] = useState("");
   const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
 
   useEffect(() => {
@@ -1350,12 +1488,19 @@ function MaintenanceDetailsModal({
     setTitle(task.title);
     setDescription(task.description ?? "");
     setPriority(task.priority);
-    setStatus(task.status);
+    setStatus(initialEditing ? "done" : task.status);
     setRange({ start: task.dueDate ?? null, end: task.endDate ?? null });
     setOdometerKm(task.odometerKm !== undefined ? String(task.odometerKm) : "");
+    setLaborHours(task.laborMinutes ? String(Math.floor(task.laborMinutes / 60)) : "");
+    setLaborMins(task.laborMinutes ? String(task.laborMinutes % 60) : "");
+    setPartsCost(typeof task.partsCost === "number" ? String(task.partsCost) : "");
     setAttachments(task.attachments ?? []);
-    setEditing(false);
-  }, [task]);
+    setError(null);
+    // Ouvert depuis une tentative de clôture sans coût : on démarre en édition,
+    // statut « Terminée » présélectionné, pour que l'utilisateur saisisse le
+    // temps et le prix puis enregistre.
+    setEditing(initialEditing);
+  }, [task, initialEditing]);
 
   if (!task) return null;
   const currentTask = task;
@@ -1371,9 +1516,27 @@ function MaintenanceDetailsModal({
     ? `${Number(odometerKm).toLocaleString("fr-FR")} km`
     : "Non renseigné";
 
+  const laborMinutesValue =
+    laborHours.trim() || laborMins.trim()
+      ? (Number(laborHours) || 0) * 60 + (Number(laborMins) || 0)
+      : null;
+  const partsCostValue = partsCost.trim() ? Number(partsCost) : null;
+
   async function save() {
     if (!title.trim() || !range.start) return;
+    // Même règle que le serveur : clôturer impose temps passé et prix des pièces.
+    if (status === "done") {
+      if (!laborMinutesValue || laborMinutesValue <= 0) {
+        setError("Renseignez le temps passé pour terminer la maintenance.");
+        return;
+      }
+      if (partsCostValue === null || partsCostValue < 0) {
+        setError("Renseignez le prix des pièces pour terminer la maintenance.");
+        return;
+      }
+    }
     setSaving(true);
+    setError(null);
     try {
       await onUpdate({
         taskId: currentTask._id,
@@ -1384,9 +1547,13 @@ function MaintenanceDetailsModal({
         dueDate: range.start,
         endDate: range.end ?? null,
         odometerKm: odometerKm ? Number(odometerKm) : null,
+        laborMinutes: laborMinutesValue,
+        partsCost: partsCostValue,
         attachments,
       });
       setEditing(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Enregistrement impossible.");
     } finally {
       setSaving(false);
     }
@@ -1409,6 +1576,7 @@ function MaintenanceDetailsModal({
           <div className="flex flex-wrap items-center gap-2">
             <TaskStatusBadge status={status} />
             <PriorityBadge priority={priority} />
+            <MaintenanceCostBadges task={currentTask} />
             {canEdit ? (
               <Button
                 size="sm"
@@ -1439,6 +1607,14 @@ function MaintenanceDetailsModal({
             <DetailItem label="Mise à jour" value={formatDateTimeWithDay(currentTask.updatedAt)} />
             <DetailItem label="Statut" value={TASK_STATUS_LABELS[status]} />
             <DetailItem label="Kilométrage" value={displayOdometer} />
+            <DetailItem
+              label="Temps passé"
+              value={currentTask.laborMinutes ? formatLabor(currentTask.laborMinutes) : "Non renseigné"}
+            />
+            <DetailItem
+              label="Prix des pièces"
+              value={typeof currentTask.partsCost === "number" ? formatEuros(currentTask.partsCost) : "Non renseigné"}
+            />
           </dl>
 
           <div className="rounded-xl border border-[var(--border)] p-3">
@@ -1491,6 +1667,19 @@ function MaintenanceDetailsModal({
               <Field label="Kilométrage">
                 <Input type="number" inputMode="numeric" value={odometerKm} onChange={(event) => setOdometerKm(event.target.value)} placeholder="Ex: 125000" />
               </Field>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Temps passé" hint="Obligatoire pour terminer">
+                  <div className="flex items-center gap-2">
+                    <Input type="number" inputMode="numeric" min="0" value={laborHours} onChange={(event) => setLaborHours(event.target.value)} placeholder="h" />
+                    <span className="text-sm text-[var(--muted-foreground)]">h</span>
+                    <Input type="number" inputMode="numeric" min="0" max="59" value={laborMins} onChange={(event) => setLaborMins(event.target.value)} placeholder="min" />
+                    <span className="text-sm text-[var(--muted-foreground)]">min</span>
+                  </div>
+                </Field>
+                <Field label="Prix des pièces (€)" hint="Obligatoire pour terminer">
+                  <Input type="number" inputMode="decimal" min="0" step="0.01" value={partsCost} onChange={(event) => setPartsCost(event.target.value)} placeholder="Ex: 45,00" />
+                </Field>
+              </div>
               <Field label="Photos">
                 {/* `initialMedia` réaffiche les photos déjà enregistrées : sans
                     lui, l'édition repartirait d'une galerie vide et un
@@ -1505,6 +1694,10 @@ function MaintenanceDetailsModal({
                 />
               </Field>
             </div>
+          ) : null}
+
+          {error ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p>
           ) : null}
 
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
@@ -1791,6 +1984,55 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: "En cours",
   done: "Terminée",
 };
+
+/** « 2 h 30 », « 45 min », « 3 h ». */
+function formatLabor(minutes: number): string {
+  const total = Math.max(0, Math.round(minutes));
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} h`;
+  return `${h} h ${String(m).padStart(2, "0")}`;
+}
+
+/** Montant en euros, format français. */
+function formatEuros(amount: number): string {
+  return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(amount);
+}
+
+/**
+ * Coût d'une intervention en petits badges — temps passé et prix des pièces —
+ * repris du style des badges du CRM recyclerie. Affichés partout où une
+ * maintenance apparaît (card kanban, miniature d'agenda, fiche). On n'affiche
+ * un badge que si la valeur existe.
+ */
+function MaintenanceCostBadges({
+  task,
+  className,
+}: {
+  task: Pick<VehicleTask, "laborMinutes" | "partsCost">;
+  className?: string;
+}) {
+  const hasLabor = typeof task.laborMinutes === "number" && task.laborMinutes > 0;
+  const hasParts = typeof task.partsCost === "number";
+  if (!hasLabor && !hasParts) return null;
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
+      {hasLabor ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-800 dark:bg-sky-500/20 dark:text-sky-200">
+          <Clock className="h-3 w-3" />
+          {formatLabor(task.laborMinutes as number)}
+        </span>
+      ) : null}
+      {hasParts ? (
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+          <Euro className="h-3 w-3" />
+          {formatEuros(task.partsCost as number)}
+        </span>
+      ) : null}
+    </div>
+  );
+}
 
 function TaskStatusBadge({ status }: { status: TaskStatus }) {
   const styles = {
