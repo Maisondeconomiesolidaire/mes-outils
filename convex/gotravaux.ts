@@ -189,6 +189,25 @@ export const listVehicleTasks = query({
   },
 });
 
+/**
+ * Clôturer une maintenance impose de renseigner le temps passé et le prix des
+ * pièces : sans ces deux valeurs, le coût de l'intervention n'existe pas et le
+ * suivi budgétaire de la flotte serait faux. On accepte 0 € de pièces (rien à
+ * remplacer), mais pas un temps nul — une intervention terminée a forcément
+ * pris du temps.
+ */
+function ensureClosingCost(
+  laborMinutes: number | undefined,
+  partsCost: number | undefined,
+) {
+  if (typeof laborMinutes !== "number" || !Number.isFinite(laborMinutes) || laborMinutes <= 0) {
+    throw new Error("Renseignez le temps passé pour terminer la maintenance.");
+  }
+  if (typeof partsCost !== "number" || !Number.isFinite(partsCost) || partsCost < 0) {
+    throw new Error("Renseignez le prix des pièces pour terminer la maintenance.");
+  }
+}
+
 export const createVehicleTask = mutation({
   args: {
     vehicleId: v.id("vehicles"),
@@ -198,6 +217,8 @@ export const createVehicleTask = mutation({
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
     odometerKm: v.optional(v.number()),
+    laborMinutes: v.optional(v.number()),
+    partsCost: v.optional(v.number()),
     attachments: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
@@ -213,6 +234,8 @@ export const createVehicleTask = mutation({
       dueDate: args.dueDate,
       endDate: args.endDate,
       odometerKm: args.odometerKm,
+      laborMinutes: args.laborMinutes,
+      partsCost: args.partsCost,
       attachments: args.attachments?.length ? args.attachments : undefined,
       createdBy: displayName(identity),
       createdAt: now,
@@ -297,6 +320,8 @@ export const updateVehicleTask = mutation({
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.union(v.number(), v.null())),
     odometerKm: v.optional(v.union(v.number(), v.null())),
+    laborMinutes: v.optional(v.union(v.number(), v.null())),
+    partsCost: v.optional(v.union(v.number(), v.null())),
     attachments: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args) => {
@@ -304,6 +329,17 @@ export const updateVehicleTask = mutation({
     const task = await ctx.db.get(args.taskId);
     if (!task) throw new Error("Maintenance introuvable.");
     const now = Date.now();
+
+    // Valeurs résultantes (args si fournis, sinon celles déjà en base) pour le
+    // garde-fou de clôture.
+    const nextLaborMinutes =
+      args.laborMinutes !== undefined ? args.laborMinutes ?? undefined : task.laborMinutes;
+    const nextPartsCost =
+      args.partsCost !== undefined ? args.partsCost ?? undefined : task.partsCost;
+    if (args.status === "done") {
+      ensureClosingCost(nextLaborMinutes, nextPartsCost);
+    }
+
     const patch: {
       status?: "todo" | "in_progress" | "done";
       priority?: "low" | "medium" | "high";
@@ -312,6 +348,8 @@ export const updateVehicleTask = mutation({
       dueDate?: number;
       endDate?: number | undefined;
       odometerKm?: number | undefined;
+      laborMinutes?: number | undefined;
+      partsCost?: number | undefined;
       attachments?: Id<"_storage">[] | undefined;
       updatedAt: number;
     } = {
@@ -324,6 +362,8 @@ export const updateVehicleTask = mutation({
     if (args.dueDate !== undefined) patch.dueDate = args.dueDate;
     if (args.endDate !== undefined) patch.endDate = args.endDate ?? undefined;
     if (args.odometerKm !== undefined) patch.odometerKm = args.odometerKm ?? undefined;
+    if (args.laborMinutes !== undefined) patch.laborMinutes = args.laborMinutes ?? undefined;
+    if (args.partsCost !== undefined) patch.partsCost = args.partsCost ?? undefined;
     if (args.attachments !== undefined) {
       patch.attachments = args.attachments.length ? args.attachments : undefined;
     }
@@ -566,3 +606,4 @@ export const adminDeleteMaintenanceByCreator = internalMutation({
     };
   },
 });
+

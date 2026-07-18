@@ -1153,6 +1153,10 @@ export default defineSchema(
     dueDate: v.optional(v.number()),
     endDate: v.optional(v.number()),
     odometerKm: v.optional(v.number()),
+    /** Temps passé sur l'intervention, en minutes. Obligatoire pour clôturer. */
+    laborMinutes: v.optional(v.number()),
+    /** Prix des pièces (€). Obligatoire pour clôturer (0 accepté si aucune pièce). */
+    partsCost: v.optional(v.number()),
     /** Pièces jointes : photos de la panne, de la réparation, factures… */
     attachments: v.optional(v.array(v.id("_storage"))),
     createdBy: v.string(),
