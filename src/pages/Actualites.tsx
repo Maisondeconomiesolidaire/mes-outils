@@ -58,18 +58,17 @@ const RENTAL_PERIODS = [
   { key: "jour", label: "À la journée", suffix: "/jour" },
   { key: "semaine", label: "À la semaine", suffix: "/semaine" },
   { key: "mois", label: "Au mois", suffix: "/mois" },
-  { key: "annee", label: "À l'année", suffix: "/an" },
+  { key: "annee", label: "À l'année", suffix: "/année" },
 ] as const;
 type RentalPeriod = (typeof RENTAL_PERIODS)[number]["key"];
 
-/** Prix affiché : « 9 €/jour » pour une location, « 9 € » sinon. */
+/** Prix affiché : « 9€/jour » pour une location, « 9 € » sinon. */
 function dealPriceLabel(deal: { price?: number | null; dealType: DealType; rentalPeriod?: RentalPeriod | null }) {
   if (deal.price == null) return null;
-  const suffix =
-    deal.dealType === "location"
-      ? RENTAL_PERIODS.find((p) => p.key === deal.rentalPeriod)?.suffix ?? ""
-      : "";
-  return `${deal.price} €${suffix}`;
+  if (deal.dealType !== "location") return `${deal.price} €`;
+  // Location : format collé « 9€/jour », la périodicité fait corps avec le prix.
+  const suffix = RENTAL_PERIODS.find((p) => p.key === deal.rentalPeriod)?.suffix ?? "";
+  return `${deal.price}€${suffix}`;
 }
 
 export function Actualites() {
