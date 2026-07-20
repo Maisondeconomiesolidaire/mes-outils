@@ -801,6 +801,12 @@ const TASK_STATUS_COLUMNS = [
   tone: string;
 }>;
 
+/** « a, b et c » — énumération lisible dans les messages de blocage. */
+function formatList(items: string[]) {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} et ${items[items.length - 1]}`;
+}
+
 const MAINTENANCE_STEPS: Array<{ status: TaskStatus; label: string }> = [
   { status: "todo", label: "À faire" },
   { status: "in_progress", label: "En cours" },
@@ -831,10 +837,10 @@ function MaintenanceSteps({
   onFixMissing: () => void;
 }) {
   const currentIndex = MAINTENANCE_STEPS.findIndex((step) => step.status === task.status);
-  const missingCost = !taskHasCost(task);
+  const missing = missingClosingFields(task);
   const blockers: Partial<Record<TaskStatus, string>> = {};
-  if (missingCost) {
-    blockers.done = "Renseignez le temps passé et le prix des pièces avant de terminer.";
+  if (missing.length > 0) {
+    blockers.done = `Renseignez ${formatList(missing)} avant de terminer.`;
   }
   const completionPercent = Math.round(((currentIndex + 1) / MAINTENANCE_STEPS.length) * 100);
 
@@ -1547,12 +1553,26 @@ function ServiceDetailsModal({ service, onClose }: { service: ServiceItem | null
 }
 
 /** Temps + prix des pièces renseignés : conditions pour clôturer une tâche. */
-function taskHasCost(task: Pick<VehicleTask, "laborMinutes" | "partsCost">) {
-  return (
-    typeof task.laborMinutes === "number" &&
-    task.laborMinutes > 0 &&
-    typeof task.partsCost === "number"
-  );
+/**
+ * Ce qui manque à une maintenance pour pouvoir être clôturée. Miroir exact de
+ * `ensureClosingRequirements` côté serveur : on nomme les champs manquants
+ * avant le clic, le serveur reste seul juge.
+ */
+function missingClosingFields(
+  task: Pick<VehicleTask, "laborMinutes" | "partsCost" | "dueDate" | "odometerKm">,
+) {
+  const missing: string[] = [];
+  if (typeof task.laborMinutes !== "number" || task.laborMinutes <= 0) missing.push("le temps passé");
+  if (typeof task.dueDate !== "number") missing.push("la date d'intervention");
+  if (typeof task.odometerKm !== "number") missing.push("le kilométrage du véhicule");
+  if (typeof task.partsCost !== "number") missing.push("le prix des pièces");
+  return missing;
+}
+
+function taskHasCost(
+  task: Pick<VehicleTask, "laborMinutes" | "partsCost" | "dueDate" | "odometerKm">,
+) {
+  return missingClosingFields(task).length === 0;
 }
 
 function MaintenanceDetailsModal({
@@ -1625,14 +1645,17 @@ function MaintenanceDetailsModal({
 
   async function save() {
     if (!title.trim()) return;
-    // Même règle que le serveur : clôturer impose temps passé et prix des pièces.
+    // Même règle que le serveur : clôturer impose temps passé, date
+    // d'intervention, kilométrage et prix des pièces.
     if (status === "done") {
-      if (!laborMinutesValue || laborMinutesValue <= 0) {
-        setError("Renseignez le temps passé pour terminer la maintenance.");
-        return;
-      }
-      if (partsCostValue === null || partsCostValue < 0) {
-        setError("Renseignez le prix des pièces pour terminer la maintenance.");
+      const missing = missingClosingFields({
+        laborMinutes: laborMinutesValue ?? undefined,
+        partsCost: partsCostValue ?? undefined,
+        dueDate: range.start ?? undefined,
+        odometerKm: odometerKm.trim() ? Number(odometerKm) : undefined,
+      });
+      if (missing.length > 0) {
+        setError(`Renseignez ${formatList(missing)} pour terminer la maintenance.`);
         return;
       }
     }
@@ -1717,7 +1740,9 @@ function MaintenanceDetailsModal({
             onFixMissing={() => {
               setStatus("done");
               setEditing(true);
-              setError("Renseignez le temps passé et le prix des pièces pour terminer la maintenance.");
+              setError(
+                `Renseignez ${formatList(missingClosingFields(currentTask))} pour terminer la maintenance.`,
+              );
             }}
           />
 
