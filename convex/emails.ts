@@ -126,14 +126,46 @@ function articleCard(article: ArticlePreview) {
   </table>`;
 }
 
+/**
+ * Encart « ne pas répondre » affiché en bas des emails clients.
+ * Volontairement large et contrasté : l'adresse d'envoi ne reçoit rien, tout
+ * doit passer par l'espace client (photos, réponses, documents).
+ */
+function noReplyNotice() {
+  const base = appUrl();
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:26px 0 0;border:2px solid ${BRAND};border-radius:16px;background:#fff5f7;">
+    <tr>
+      <td class="px" style="padding:22px 24px;">
+        <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;line-height:1.35;color:${BRAND};">
+          ⚠️ Merci de ne pas répondre à cet email
+        </p>
+        <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:15px;font-weight:600;line-height:1.6;color:#3f3f46;">
+          Cette adresse d'envoi ne reçoit aucun message : une réponse ici ne sera
+          jamais lue par notre équipe.
+        </p>
+        <p style="margin:0 0 16px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">
+          <strong>Tout se passe depuis votre espace client</strong> : répondre à
+          nos messages, ajouter des photos ou des documents, suivre l'avancement
+          de votre demande. Vous y retrouvez l'historique complet de vos échanges
+          avec la Recyclerie, au même endroit.
+        </p>
+        ${button(`${base}/compte/messagerie`, "Accéder à mon espace client")}
+      </td>
+    </tr>
+  </table>`;
+}
+
 /** Gabarit complet : préheader, en-tête (logo), contenu, pied de page. */
 function shell(opts: {
   preheader: string;
   heading: string;
   intro: string;
   contentHtml?: string;
+  /** "staff" retire l'encart « ne pas répondre » (interne, pas d'espace client). */
+  audience?: "client" | "staff";
 }) {
   const base = appUrl();
+  const notice = opts.audience === "staff" ? "" : noReplyNotice();
   return `<!DOCTYPE html>
 <html lang="fr">
   <head>
@@ -166,6 +198,7 @@ function shell(opts: {
               <h1 style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:22px;line-height:1.25;color:#18181b;">${esc(opts.heading)}</h1>
               <p style="margin:0 0 18px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.65;color:#3f3f46;">${opts.intro}</p>
               ${opts.contentHtml ?? ""}
+              ${notice}
             </td>
           </tr>
           <!-- Pied de page -->
@@ -177,7 +210,7 @@ function shell(opts: {
                 Réemploi, collecte, aérogommage &amp; atelier vélo
               </p>
               <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;color:#c4c0b8;">
-                Message automatique — merci de ne pas répondre à cet email. Pour nous écrire, utilisez votre <a href="${base}/compte/messagerie" style="color:${BRAND};text-decoration:none;">messagerie</a>.
+                Message automatique envoyé par la Recyclerie.
               </p>
             </td>
           </tr>
@@ -326,6 +359,7 @@ export const sendNewRequestToStaff = internalAction({
     const label = typeLabel(type);
     const html = shell({
       preheader: `Nouvelle demande ${label} de ${customerName} (#${reference}).`,
+      audience: "staff",
       heading: "Nouvelle demande reçue",
       intro: `Une nouvelle demande <strong>${esc(label)}</strong> vient d'être créée par <strong>${esc(customerName)}</strong> (référence <strong>#${esc(reference)}</strong>).`,
       contentHtml: `
