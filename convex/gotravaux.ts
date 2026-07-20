@@ -317,7 +317,7 @@ export const updateVehicleTask = mutation({
     priority: v.optional(taskPriority),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
-    dueDate: v.optional(v.number()),
+    dueDate: v.optional(v.union(v.number(), v.null())),
     endDate: v.optional(v.union(v.number(), v.null())),
     odometerKm: v.optional(v.union(v.number(), v.null())),
     laborMinutes: v.optional(v.union(v.number(), v.null())),
@@ -345,7 +345,7 @@ export const updateVehicleTask = mutation({
       priority?: "low" | "medium" | "high";
       title?: string;
       description?: string;
-      dueDate?: number;
+      dueDate?: number | undefined;
       endDate?: number | undefined;
       odometerKm?: number | undefined;
       laborMinutes?: number | undefined;
@@ -359,7 +359,7 @@ export const updateVehicleTask = mutation({
     if (args.priority !== undefined) patch.priority = args.priority;
     if (args.title !== undefined) patch.title = args.title.trim();
     if (args.description !== undefined) patch.description = args.description.trim() || undefined;
-    if (args.dueDate !== undefined) patch.dueDate = args.dueDate;
+    if (args.dueDate !== undefined) patch.dueDate = args.dueDate ?? undefined;
     if (args.endDate !== undefined) patch.endDate = args.endDate ?? undefined;
     if (args.odometerKm !== undefined) patch.odometerKm = args.odometerKm ?? undefined;
     if (args.laborMinutes !== undefined) patch.laborMinutes = args.laborMinutes ?? undefined;
