@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { accessAllows, customerFullName, requireCrmPermission, requireUser } from "./lib";
 import { buildAddressString, drivingDistanceKm, geocode } from "./livraison";
 import type { Id } from "./_generated/dataModel";
@@ -253,8 +253,8 @@ export const createVehicleTask = mutation({
       createdAt: now,
       updatedAt: now,
     });
+    const vehicle = await ctx.db.get(args.vehicleId);
     if (typeof args.odometerKm === "number") {
-      const vehicle = await ctx.db.get(args.vehicleId);
       if (vehicle && (vehicle.odometerKm === undefined || args.odometerKm > vehicle.odometerKm)) {
         await ctx.db.patch(args.vehicleId, {
           odometerKm: args.odometerKm,
@@ -262,6 +262,21 @@ export const createVehicleTask = mutation({
         });
       }
     }
+
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendMaintenanceCreatedEmail, {
+      vehicleName: vehicle?.name ?? "Véhicule",
+      vehiclePlate: vehicle?.plate,
+      title: args.title.trim(),
+      description: args.description?.trim() || undefined,
+      priority: args.priority,
+      dueDate: args.dueDate,
+      endDate: args.endDate,
+      odometerKm: args.odometerKm,
+      createdByName: displayName(identity),
+      vehicleImageUrl: vehicle?.photoUrl,
+      vehicleImageStorageId: vehicle?.photo ? String(vehicle.photo) : undefined,
+    });
+
     return taskId;
   },
 });

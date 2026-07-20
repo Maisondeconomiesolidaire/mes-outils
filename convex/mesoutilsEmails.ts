@@ -728,3 +728,85 @@ export const sendFeedbackResolvedEmail = internalAction({
     await resendSend(args.email, "Votre retour a été traité", html, FROM);
   },
 });
+
+/** Destinataire des créations de maintenance (responsable de la flotte). */
+export const MAINTENANCE_NOTICE_EMAILS = ["f.henry@eco-solidaire.fr"];
+
+const MAINTENANCE_PRIORITY_LABELS: Record<string, string> = {
+  low: "Basse",
+  medium: "Moyenne",
+  high: "Haute",
+};
+
+/**
+ * Prévient le responsable de la flotte qu'une maintenance vient d'être créée.
+ *
+ * Une maintenance planifiée immobilise le véhicule pour les 3 apps qui gèrent
+ * la flotte : sans notification, l'information n'existe que pour qui pense à
+ * ouvrir Gotravaux.
+ */
+export const sendMaintenanceCreatedEmail = internalAction({
+  args: {
+    vehicleName: v.string(),
+    vehiclePlate: v.optional(v.string()),
+    title: v.string(),
+    description: v.optional(v.string()),
+    priority: v.string(),
+    dueDate: v.optional(v.number()),
+    endDate: v.optional(v.number()),
+    odometerKm: v.optional(v.number()),
+    createdByName: v.string(),
+    vehicleImageUrl: v.optional(v.string()),
+    vehicleImageStorageId: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const rows: Array<[string, string]> = [
+      ["Véhicule", [args.vehicleName, args.vehiclePlate].filter(Boolean).join(" · ")],
+      ["Intervention", args.title],
+      ["Priorité", MAINTENANCE_PRIORITY_LABELS[args.priority] ?? args.priority],
+    ];
+    // La date est facultative sur une maintenance : on ne montre la ligne que
+    // si elle existe, plutôt qu'un « — » qui laisse croire à un oubli.
+    if (typeof args.dueDate === "number") {
+      rows.push([
+        "Période",
+        typeof args.endDate === "number" && args.endDate !== args.dueDate
+          ? formatRange(args.dueDate, args.endDate)
+          : new Date(args.dueDate).toLocaleDateString("fr-FR", {
+              weekday: "long",
+              day: "numeric",
+              month: "long",
+              year: "numeric",
+            }),
+      ]);
+    }
+    if (typeof args.odometerKm === "number") {
+      rows.push(["Kilométrage", `${args.odometerKm.toLocaleString("fr-FR")} km`]);
+    }
+    if (args.description) rows.push(["Détail", args.description]);
+
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.vehicleImageUrl,
+      imageStorageId: args.vehicleImageStorageId,
+    });
+
+    const html = shell({
+      preheader: `${args.createdByName} a créé une maintenance sur « ${args.vehicleName} ».`,
+      heading: "Nouvelle maintenance planifiée",
+      heroUrl,
+      intro: `Une maintenance vient d'être créée sur <strong>${esc(args.vehicleName)}</strong>. Le véhicule sera indisponible sur la période concernée.`,
+      contentHtml: `
+        ${userChip(args.createdByName, undefined, "A créé la maintenance")}
+        ${detailCard(rows)}
+        ${button(appLink("/gotravaux?v=tasks"), "Ouvrir la maintenance")}
+      `,
+    });
+
+    await resendSend(
+      MAINTENANCE_NOTICE_EMAILS,
+      `Nouvelle maintenance · ${args.vehicleName}`,
+      html,
+      FROM,
+    );
+  },
+});
