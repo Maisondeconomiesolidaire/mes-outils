@@ -40,6 +40,18 @@ export const feedbackStatus = v.union(
   v.literal("termine"),
 );
 
+/**
+ * App « Feedback » — urgence déclarée par l'auteur du retour. Optionnelle en
+ * base : les retours déposés avant cette fonctionnalité n'en ont pas, et le
+ * frontend les affiche alors en « Normale ».
+ */
+export const feedbackPriority = v.union(
+  v.literal("basse"),
+  v.literal("normale"),
+  v.literal("haute"),
+  v.literal("urgente"),
+);
+
 /** App « Bennes & Pro » — matériaux déposables. */
 export const bpMaterial = v.union(
   v.literal("Réemploi"),
@@ -1818,6 +1830,8 @@ export default defineSchema(
     type: feedbackType,
     description: v.string(),
     status: feedbackStatus,
+    /** Urgence choisie par l'auteur, modifiable par lui après coup. */
+    priority: v.optional(feedbackPriority),
     /** Auteur : identité Clerk figée à la création. */
     authorClerkId: v.string(),
     authorEmail: v.string(),

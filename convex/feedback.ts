@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
-import { feedbackApp, feedbackStatus, feedbackType } from "./schema";
+import { feedbackApp, feedbackPriority, feedbackStatus, feedbackType } from "./schema";
 import {
   hasCrmPermission,
   livePhoto,
@@ -107,6 +107,7 @@ export const submit = mutation({
     app: feedbackApp,
     type: feedbackType,
     description: v.string(),
+    priority: v.optional(feedbackPriority),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FEEDBACK_PAGE_KEY, "create");
@@ -127,6 +128,7 @@ export const submit = mutation({
       type: args.type,
       description,
       status: "nouveau",
+      priority: args.priority ?? "normale",
       authorClerkId: identity.subject,
       authorEmail: email,
       authorName: identity.name ?? undefined,
@@ -358,6 +360,35 @@ export const list = query({
       authorImageUrl: livePhoto(photos, item.authorClerkId, item.authorImageUrl),
       commentCount: countById.get(item._id) ?? 0,
     }));
+  },
+});
+
+/**
+ * Changement d'urgence d'un retour.
+ *
+ * Contrairement au statut (qui appartient à l'équipe produit), l'urgence est
+ * la parole de **l'auteur** : c'est lui qui sait si sa situation s'est
+ * aggravée. Il peut donc la revoir depuis « Mes retours » à tout moment.
+ * L'équipe produit y a aussi accès, pour arbitrer depuis le kanban.
+ */
+export const setPriority = mutation({
+  args: {
+    id: v.id("feedback"),
+    priority: feedbackPriority,
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FEEDBACK_PAGE_KEY, "read");
+    const identity = await requireUser(ctx);
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Retour introuvable.");
+
+    const email = normalizeEmail(identity.email);
+    const admin = await canModerateFeedback(ctx);
+    if (!admin && !isAuthor(item, identity.subject, email)) {
+      throw new Error("Ce retour ne vous appartient pas.");
+    }
+
+    await ctx.db.patch(args.id, { priority: args.priority, updatedAt: Date.now() });
   },
 });
 
