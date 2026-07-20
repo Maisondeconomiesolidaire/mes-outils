@@ -122,7 +122,7 @@ export const submit = mutation({
     }
 
     const now = Date.now();
-    return await ctx.db.insert("feedback", {
+    const feedbackId = await ctx.db.insert("feedback", {
       app: args.app,
       type: args.type,
       description,
@@ -134,6 +134,17 @@ export const submit = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendFeedbackCreatedEmail, {
+      app: args.app,
+      feedbackType: args.type,
+      description,
+      authorName: identity.name ?? undefined,
+      authorEmail: email,
+      authorPhotoUrl: typeof identity.pictureUrl === "string" ? identity.pictureUrl : undefined,
+    });
+
+    return feedbackId;
   },
 });
 
@@ -291,6 +302,22 @@ export const addComment = mutation({
       createdAt: now,
     });
     await ctx.db.patch(args.id, { lastCommentAt: now, updatedAt: now });
+
+    // On prévient l'auteur qu'on lui a répondu — pas quand c'est lui qui
+    // écrit, il n'a pas besoin d'un email de son propre message.
+    const answeringSomeoneElse = !isAuthor(item, identity.subject, email);
+    if (answeringSomeoneElse && item.authorEmail) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendFeedbackCommentEmail, {
+        email: item.authorEmail,
+        authorName: item.authorName,
+        commenterName: feedbackDisplayName(identity),
+        commenterPhotoUrl: typeof identity.pictureUrl === "string" ? identity.pictureUrl : undefined,
+        body,
+        feedbackType: item.type,
+        description: item.description,
+      });
+    }
+
     return commentId;
   },
 });
