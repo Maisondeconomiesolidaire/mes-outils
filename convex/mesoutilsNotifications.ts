@@ -68,6 +68,34 @@ export const unreadCount = query({
   },
 });
 
+/**
+ * Notifications non lues regroupées par destination (`href`).
+ *
+ * Le badge de la sidebar dit « il se passe quelque chose dans Gotravaux » ;
+ * celui-ci sert à dire *où*, une fois la page ouverte. Les `href` pointent déjà
+ * le sous-onglet concerné (`/gotravaux?v=reservations`), il suffit de les
+ * compter — pas besoin d'un compteur dédié par onglet, qui divergerait du
+ * contenu réel des notifications.
+ */
+export const unreadCountsByHref = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await requireUser(ctx);
+    const unread = await ctx.db
+      .query("mesoutilsNotifications")
+      .withIndex("by_recipient_read_createdAt", (q) =>
+        q.eq("recipientClerkId", identity.subject).eq("read", false),
+      )
+      .collect();
+    const counts: Record<string, number> = {};
+    for (const notification of unread) {
+      if (!notification.href) continue;
+      counts[notification.href] = (counts[notification.href] ?? 0) + 1;
+    }
+    return counts;
+  },
+});
+
 export const markRead = mutation({
   args: { notificationId: v.id("mesoutilsNotifications") },
   handler: async (ctx, args) => {

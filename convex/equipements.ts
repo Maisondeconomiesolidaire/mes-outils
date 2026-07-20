@@ -359,7 +359,9 @@ export const bookEquipment = mutation({
       title: "Votre réservation d'équipement est confirmée",
       body: `${equipment.name} · ${args.title.trim()}`,
       assetImageUrl: equipmentImageUrl,
-      href: "/equipements?v=mine",
+      // « Mes réservations » vit désormais dans /reservations : /equipements
+      // ne sert plus qu'à gérer le parc.
+      href: "/reservations?v=mine",
     });
 
     const requesterName = target.name;

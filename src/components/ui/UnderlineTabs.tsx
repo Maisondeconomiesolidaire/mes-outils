@@ -23,6 +23,7 @@ export function UnderlineTabs<T extends string>({
   value,
   onChange,
   counts,
+  badges,
   className,
   size = "md",
 }: {
@@ -30,6 +31,12 @@ export function UnderlineTabs<T extends string>({
   value: T;
   onChange: (value: T) => void;
   counts?: Partial<Record<T, number>>;
+  /**
+   * Pastille colorée signalant qu'il y a quelque chose à voir sur cet onglet
+   * (notifications non lues). Distincte de `counts`, qui affiche un simple
+   * volume en gris : ici on demande l'attention.
+   */
+  badges?: Partial<Record<T, number>>;
   className?: string;
   size?: "sm" | "md";
 }) {
@@ -58,6 +65,14 @@ export function UnderlineTabs<T extends string>({
               {counts?.[item.key] !== undefined && (
                 <span className="text-xs text-[var(--muted-foreground)]">{counts[item.key]}</span>
               )}
+              {(badges?.[item.key] ?? 0) > 0 ? (
+                <span
+                  className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-brand-500 px-1.5 text-[11px] font-bold text-white"
+                  title="Notifications non lues sur cet onglet"
+                >
+                  {badges?.[item.key]}
+                </span>
+              ) : null}
               {/* Soulignement porté par un élément dédié : il peut s'étirer sans
                   décaler le texte, contrairement à une bordure. */}
               <span
