@@ -65,6 +65,15 @@ export const bpMaterial = v.union(
   v.literal("Tout venant/DIB non triés"),
 );
 
+/** App « Bennes & Pro » — profil d'entreprise cliente. */
+export const bpCompanyType = v.union(
+  v.literal("artisan"),
+  v.literal("btp"),
+  v.literal("distributeur"),
+  v.literal("industrie"),
+  v.literal("autre"),
+);
+
 /** App « Bennes & Pro » — unités de mesure. */
 export const bpUnit = v.union(
   v.literal("kg"),
@@ -984,6 +993,7 @@ export default defineSchema(
     recipientClerkId: v.string(),
     kind: v.union(
       v.literal("room_reservation_confirmed"),
+      v.literal("equipment_reservation_confirmed"),
       v.literal("vehicle_reservation_decided"),
       v.literal("new_direct_message"),
       v.literal("post_liked"),
@@ -1052,6 +1062,38 @@ export default defineSchema(
     feedbackNotes: v.optional(v.string()),
   })
     .index("by_roomId", ["roomId"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_bookedForClerkId", ["bookedForClerkId"])
+    .index("by_start", ["start"]),
+
+  /** Équipements réservables (mêmes règles que les salles : créneau libre = confirmé). */
+  equipments: defineTable({
+    name: v.string(),
+    category: v.optional(v.string()),
+    reference: v.optional(v.string()),
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    photo: v.optional(v.id("_storage")),
+    photoUrl: v.optional(v.string()),
+    buildingLabel: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    active: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_active", ["active"]),
+
+  equipmentReservations: defineTable({
+    equipmentId: v.id("equipments"),
+    clerkId: v.string(),
+    userName: v.string(),
+    bookedByName: v.optional(v.string()),
+    bookedForClerkId: v.optional(v.string()),
+    title: v.string(),
+    start: v.number(),
+    end: v.number(),
+    status: v.optional(v.union(v.literal("confirmed"), v.literal("cancelled"))),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_equipmentId", ["equipmentId"])
     .index("by_clerkId", ["clerkId"])
     .index("by_bookedForClerkId", ["bookedForClerkId"])
     .index("by_start", ["start"]),
@@ -1321,6 +1363,13 @@ export default defineSchema(
       assignedTo: v.optional(v.string()),
       notes: v.optional(v.string()),
     })),
+    fieldEdits: v.optional(
+      v.object({
+        customer: v.optional(v.object({ by: v.string(), at: v.number() })),
+        reebike: v.optional(v.object({ by: v.string(), at: v.number() })),
+        management: v.optional(v.object({ by: v.string(), at: v.number() })),
+      }),
+    ),
     pipelineStatus: v.union(
       v.literal("nouveau"),
       v.literal("validation"),
@@ -1431,10 +1480,61 @@ export default defineSchema(
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
     contactEmail: v.optional(v.string()),
+    /** Email dédié à la facturation (peut différer de l'email de contact). */
+    billingEmail: v.optional(v.string()),
+    /** Profil de l'entreprise (artisan, BTP, distributeur…). */
+    companyType: v.optional(bpCompanyType),
+    /** Précision libre quand `companyType === "autre"`. */
+    companyTypeOther: v.optional(v.string()),
+    /** Sujet Clerk du client propriétaire (compte espace client). */
+    ownerUserId: v.optional(v.string()),
+    /** Documents obligatoires marqués « Signé » par le staff. */
+    conventionSignedAt: v.optional(v.number()),
+    protocoleSignedAt: v.optional(v.number()),
     /** Client Stripe associé (facturation du DIB). */
     stripeCustomerId: v.optional(v.string()),
     createdAt: v.number(),
-  }).index("by_name", ["name"]),
+  })
+    .index("by_name", ["name"])
+    .index("by_owner", ["ownerUserId"]),
+
+  /** Documents rattachés à une entreprise (KBIS, RIB… ; client ↔ staff). */
+  bpCompanyDocuments: defineTable({
+    companyId: v.id("bpCompanies"),
+    storageId: v.id("_storage"),
+    name: v.string(),
+    docType: v.union(
+      v.literal("kbis"),
+      v.literal("rib"),
+      v.literal("assurance"),
+      v.literal("convention"),
+      v.literal("protocole"),
+      v.literal("autre"),
+    ),
+    mimeType: v.optional(v.string()),
+    /** Message de contexte optionnel joint au document. */
+    note: v.optional(v.string()),
+    /** Qui a déposé le document (portail client ou CRM). */
+    uploadedByRole: v.union(v.literal("client"), v.literal("staff")),
+    /** Horodatage de partage au client (docs staff visibles côté client). */
+    sharedWithClientAt: v.optional(v.number()),
+    /** Validation par le staff d'un document signé (convention, protocole…). */
+    validatedAt: v.optional(v.number()),
+    validatedBy: v.optional(v.string()),
+    createdBy: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_company", ["companyId"]),
+
+  /** Messagerie entre une entreprise cliente et le staff. */
+  bpCompanyMessages: defineTable({
+    companyId: v.id("bpCompanies"),
+    senderRole: v.union(v.literal("client"), v.literal("staff")),
+    senderName: v.string(),
+    body: v.string(),
+    readByClientAt: v.optional(v.number()),
+    readByStaffAt: v.optional(v.number()),
+    createdAt: v.number(),
+  }).index("by_company", ["companyId"]),
 
   /** Réglages Bennes & Pro (doc unique, key = "bennespro"). */
   bpSettings: defineTable({
@@ -1506,6 +1606,8 @@ export default defineSchema(
   /** Clients (donneurs d'ordre des chantiers). */
   ptClients: defineTable({
     name: v.string(),
+    /** Interne (structures du groupe) ou externe — filtre principal de l'UI. */
+    clientType: v.optional(v.union(v.literal("interne"), v.literal("externe"))),
     contactName: v.optional(v.string()),
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
@@ -1645,6 +1747,8 @@ export default defineSchema(
       ),
     ),
     projectId: v.id("ptProjects"),
+    /** Fournisseur rattaché (justificatifs de dépenses). */
+    supplierId: v.optional(v.id("ptSuppliers")),
     timeEntryId: v.optional(v.id("ptTimeEntries")),
     expenseId: v.optional(v.id("ptExpenses")),
     invoiceId: v.optional(v.id("ptInvoices")),

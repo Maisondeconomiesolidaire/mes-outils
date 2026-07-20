@@ -515,7 +515,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
   const [saving, setSaving] = useState(false);
 
   async function add() {
-    if (!title.trim() || !range.start) return;
+    if (!title.trim()) return;
     const laborMinutesValue =
       laborHours.trim() || laborMins.trim()
         ? (Number(laborHours) || 0) * 60 + (Number(laborMins) || 0)
@@ -526,7 +526,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
         vehicleId,
         title,
         priority,
-        dueDate: range.start,
+        dueDate: range.start ?? undefined,
         endDate: range.end ?? undefined,
         odometerKm: odometerKm ? Number(odometerKm) : undefined,
         laborMinutes: laborMinutesValue,
@@ -554,7 +554,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
         <div className="grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4">
           <Field label="Intitulé" required><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Vidange, pneu, contrôle..." /></Field>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Période" required><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
+            <Field label="Période"><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
             <Field label="Priorité">
               <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}><option value="low">Basse</option><option value="medium">Moyenne</option><option value="high">Haute</option></Select>
             </Field>
@@ -577,7 +577,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>Annuler</Button>
-            <Button size="sm" onClick={add} disabled={saving || !title.trim() || !range.start}>{saving ? "Ajout..." : "Ajouter"}</Button>
+            <Button size="sm" onClick={add} disabled={saving || !title.trim()}>{saving ? "Ajout..." : "Ajouter"}</Button>
           </div>
         </div>
       ) : canCreate ? (
@@ -712,7 +712,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   const [saving, setSaving] = useState(false);
 
   async function save() {
-    if (!vehicleId || !title.trim() || !range.start) return;
+    if (!vehicleId || !title.trim()) return;
     const laborMinutesValue =
       laborHours.trim() || laborMins.trim()
         ? (Number(laborHours) || 0) * 60 + (Number(laborMins) || 0)
@@ -724,7 +724,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
         title,
         description: description || undefined,
         priority,
-        dueDate: range.start,
+        dueDate: range.start ?? undefined,
         endDate: range.end ?? undefined,
         odometerKm: odometerKm ? Number(odometerKm) : undefined,
         laborMinutes: laborMinutesValue,
@@ -751,7 +751,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
         <Field label="Intitulé" required><Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Vidange, pneu, contrôle..." /></Field>
         <Field label="Description"><Textarea value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Période" required><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
+          <Field label="Période"><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
           <Field label="Priorité">
             <Select value={priority} onChange={(e) => setPriority(e.target.value as TaskPriority)}><option value="low">Basse</option><option value="medium">Moyenne</option><option value="high">Haute</option></Select>
           </Field>
@@ -777,7 +777,7 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
         </Field>
         <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={onClose}>Annuler</Button>
-          <Button onClick={save} disabled={saving || !vehicleId || !title.trim() || !range.start}>{saving ? "Ajout..." : "Ajouter"}</Button>
+          <Button onClick={save} disabled={saving || !vehicleId || !title.trim()}>{saving ? "Ajout..." : "Ajouter"}</Button>
         </div>
       </div>
     </Modal>
@@ -1069,6 +1069,16 @@ type AgendaEntry =
       tone: "control";
     };
 
+type AgendaKind = AgendaEntry["kind"];
+
+/** Filtres du calendrier flotte : chaque puce fait aussi office de légende. */
+const AGENDA_FILTERS: Array<{ key: AgendaKind; label: string; dot: string }> = [
+  { key: "task", label: "Maintenances", dot: "bg-amber-500" },
+  { key: "reservation", label: "Réservations", dot: "bg-brand-500" },
+  { key: "service", label: "Prestations", dot: "bg-violet-500" },
+  { key: "control", label: "Contrôles", dot: "bg-rose-500" },
+];
+
 function FleetCalendar({
   vehicles,
   tasks,
@@ -1097,6 +1107,7 @@ function FleetCalendar({
   const [selectedServiceId, setSelectedServiceId] = useState<Id<"requests"> | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const [closingTaskId, setClosingTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
+  const [hiddenKinds, setHiddenKinds] = useState<AgendaKind[]>([]);
   const entries: AgendaEntry[] = [];
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
@@ -1168,7 +1179,8 @@ function FleetCalendar({
     service: "border-l-violet-500",
     control: "border-l-rose-500",
   };
-  const calendarEvents: CalendarEvent[] = entries.map((entry) => ({
+  const visibleEntries = entries.filter((entry) => !hiddenKinds.includes(entry.kind));
+  const calendarEvents: CalendarEvent[] = visibleEntries.map((entry) => ({
     id: entry.id,
     start: entry.date,
     end: entry.endDate,
@@ -1185,7 +1197,7 @@ function FleetCalendar({
               ? "rose"
             : "brand",
   }));
-  const selectedDayEntries = entries
+  const selectedDayEntries = visibleEntries
     .filter((entry) => overlapsDay(entry.date, entry.endDate, selectedDay))
     .sort((a, b) => a.date - b.date);
   const selectedReservation = reservations?.find((reservation) => reservation._id === selectedReservationId) ?? null;
@@ -1233,8 +1245,38 @@ function FleetCalendar({
     setSelectedTaskId(taskId);
   }
 
+  function toggleKind(kind: AgendaKind) {
+    setHiddenKinds((current) =>
+      current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind],
+    );
+  }
+
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2">
+        {AGENDA_FILTERS.filter((filter) => filter.key !== "reservation" || canSeeReservations).map((filter) => {
+          const count = entries.filter((entry) => entry.kind === filter.key).length;
+          const shown = !hiddenKinds.includes(filter.key);
+          return (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => toggleKind(filter.key)}
+              aria-pressed={shown}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                shown
+                  ? "border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--accent)]"
+                  : "border-dashed border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+              )}
+            >
+              <span className={cn("h-2.5 w-2.5 rounded-full", filter.dot, !shown && "opacity-30")} />
+              {filter.label}
+              <span className="text-[var(--muted-foreground)]">{count}</span>
+            </button>
+          );
+        })}
+      </div>
       <CalendarBoard
         events={calendarEvents}
         selected={selectedDay}
@@ -1523,7 +1565,7 @@ function MaintenanceDetailsModal({
   const partsCostValue = partsCost.trim() ? Number(partsCost) : null;
 
   async function save() {
-    if (!title.trim() || !range.start) return;
+    if (!title.trim()) return;
     // Même règle que le serveur : clôturer impose temps passé et prix des pièces.
     if (status === "done") {
       if (!laborMinutesValue || laborMinutesValue <= 0) {
@@ -1544,7 +1586,7 @@ function MaintenanceDetailsModal({
         description,
         priority,
         status,
-        dueDate: range.start,
+        dueDate: range.start ?? null,
         endDate: range.end ?? null,
         odometerKm: odometerKm ? Number(odometerKm) : null,
         laborMinutes: laborMinutesValue,
@@ -1646,7 +1688,7 @@ function MaintenanceDetailsModal({
               <Field label="Intitulé" required><Input value={title} onChange={(event) => setTitle(event.target.value)} /></Field>
               <Field label="Description"><Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></Field>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Période" required><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
+                <Field label="Période"><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Statut">
                     <Select value={status} onChange={(event) => setStatus(event.target.value as TaskStatus)}>
@@ -1703,7 +1745,7 @@ function MaintenanceDetailsModal({
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
             <Button variant="ghost" onClick={onClose}>Fermer</Button>
             {canEdit && editing ? (
-              <Button onClick={() => void save()} disabled={saving || !title.trim() || !range.start}>
+              <Button onClick={() => void save()} disabled={saving || !title.trim()}>
                 {saving ? "Enregistrement..." : "Enregistrer"}
               </Button>
             ) : null}

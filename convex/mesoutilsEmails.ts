@@ -218,7 +218,7 @@ export const sendReservationEmail = internalAction({
   args: {
     email: v.string(),
     name: v.string(),
-    assetKind: v.union(v.literal("room"), v.literal("vehicle")),
+    assetKind: v.union(v.literal("room"), v.literal("vehicle"), v.literal("equipment")),
     assetName: v.string(),
     label: v.string(),
     start: v.number(),
@@ -237,11 +237,14 @@ export const sendReservationEmail = internalAction({
     assetImageStorageId: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
-    const assetWord = args.assetKind === "room" ? "salle" : "véhicule";
+    const assetWord =
+      args.assetKind === "room" ? "salle" : args.assetKind === "equipment" ? "équipement" : "véhicule";
+    const assetLabel =
+      args.assetKind === "room" ? "Salle" : args.assetKind === "equipment" ? "Équipement" : "Véhicule";
     const copy = STATE_COPY[args.state];
     const rows: Array<[string, string]> = [
-      [args.assetKind === "room" ? "Salle" : "Véhicule", args.assetName],
-      [args.assetKind === "room" ? "Objet" : "Motif", args.label],
+      [assetLabel, args.assetName],
+      [args.assetKind === "vehicle" ? "Motif" : "Objet", args.label],
       ["Créneau", formatRange(args.start, args.end)],
     ];
     if (args.note) rows.push(["Note", args.note]);
@@ -251,6 +254,8 @@ export const sendReservationEmail = internalAction({
       imageStorageId: args.assetImageStorageId,
     });
 
+    const myReservationsPath =
+      args.assetKind === "equipment" ? "/equipements?v=mine" : "/reservations?v=mine";
     const html = shell({
       preheader: copy.intro(`${assetWord} « ${args.assetName} »`),
       heading: copy.heading,
@@ -259,7 +264,7 @@ export const sendReservationEmail = internalAction({
       contentHtml: `
         ${userChip(args.name, args.photoUrl, "Demandeur")}
         ${detailCard(rows)}
-        ${button(appLink("/reservations?v=mine"), "Voir mes réservations")}
+        ${button(appLink(myReservationsPath), "Voir mes réservations")}
       `,
     });
     await resendSend(
@@ -575,6 +580,58 @@ export const sendRoomReservationToManagers = internalAction({
     await sendToEachRecipient(
       ROOM_RESERVATION_MANAGER_EMAILS,
       `Réservation de salle · ${args.roomName} (${args.requesterName})`,
+      html,
+    );
+  },
+});
+
+/**
+ * Notifie les responsables « gestion » d'une nouvelle réservation d'équipement.
+ * Les destinataires sont fournis par l'appelant (comptes autorisés à gérer les
+ * équipements), et non une liste fixe.
+ */
+export const sendEquipmentReservationToManagers = internalAction({
+  args: {
+    recipients: v.array(v.string()),
+    requesterName: v.string(),
+    equipmentName: v.string(),
+    label: v.string(),
+    start: v.number(),
+    end: v.number(),
+    note: v.optional(v.string()),
+    requesterPhotoUrl: v.optional(v.string()),
+    equipmentImageUrl: v.optional(v.string()),
+    equipmentImageStorageId: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    if (args.recipients.length === 0) return;
+    const rows: Array<[string, string]> = [
+      ["Équipement", args.equipmentName],
+      ["Objet", args.label],
+      ["Créneau", formatRange(args.start, args.end)],
+    ];
+    if (args.note) rows.push(["Note", args.note]);
+
+    const heroUrl = resolveImageUrl({
+      imageUrl: args.equipmentImageUrl,
+      imageStorageId: args.equipmentImageStorageId,
+    });
+
+    const html = shell({
+      preheader: `${args.requesterName} a réservé l'équipement « ${args.equipmentName} ».`,
+      heading: "Nouvelle réservation d'équipement",
+      heroUrl,
+      intro: `Une nouvelle réservation d'équipement vient d'être enregistrée.`,
+      contentHtml: `
+        ${userChip(args.requesterName, args.requesterPhotoUrl, "Demandeur")}
+        ${detailCard(rows)}
+        ${button(appLink("/equipements"), "Voir les réservations")}
+      `,
+    });
+
+    await sendToEachRecipient(
+      args.recipients,
+      `Réservation d'équipement · ${args.equipmentName} (${args.requesterName})`,
       html,
     );
   },

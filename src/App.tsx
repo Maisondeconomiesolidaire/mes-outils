@@ -11,6 +11,7 @@ import { Portail } from "./pages/Portail";
 import { Conges } from "./pages/Conges";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
+import { Equipements } from "./pages/Equipements";
 import { ConfirmRoot } from "./lib/confirm";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 
@@ -54,6 +55,14 @@ export default function App() {
           element={
             <RequirePermission pageKey="mesoutils:salles">
               <Salles />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/equipements"
+          element={
+            <RequirePermission pageKey="mesoutils:equipements">
+              <Equipements />
             </RequirePermission>
           }
         />

@@ -115,6 +115,7 @@ export const deleteEmployee = mutation({
 
 const clientFields = {
   name: v.string(),
+  clientType: v.optional(v.union(v.literal("interne"), v.literal("externe"))),
   contactName: v.optional(v.string()),
   email: v.optional(v.string()),
   phone: v.optional(v.string()),
@@ -214,7 +215,7 @@ export const listProjects = query({
       ctx.db.query("ptTimeEntries").collect(),
       ctx.db.query("ptExpenses").collect(),
     ]);
-    const nameById = new Map(clients.map((c) => [c._id, c.name]));
+    const clientById = new Map(clients.map((c) => [c._id, c]));
     const totalsByProject = new Map<
       string,
       {
@@ -265,7 +266,8 @@ export const listProjects = query({
         const projectExpenses = expensesByProject.get(p._id) ?? { count: 0, total: 0 };
         return {
           ...p,
-          clientName: nameById.get(p.clientId) ?? "—",
+          clientName: clientById.get(p.clientId)?.name ?? "—",
+          clientType: clientById.get(p.clientId)?.clientType,
           travelRatePerKm: p.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM,
           entriesCount: totals.entriesCount,
           laborCost: round2(totals.laborCost),
@@ -787,6 +789,7 @@ export const registerDocument = mutation({
       ),
     ),
     projectId: v.id("ptProjects"),
+    supplierId: v.optional(v.id("ptSuppliers")),
   },
   handler: async (ctx, args) => {
     await requireAnyCrmPermission(ctx, [
@@ -804,6 +807,7 @@ export const registerDocument = mutation({
       mimeType: args.mimeType,
       kind: args.kind ?? "other",
       projectId: args.projectId,
+      supplierId: args.supplierId,
       uploadedAt: Date.now(),
       uploadedBy: identity.email ?? undefined,
     });
@@ -913,6 +917,16 @@ export const clientSummary = query({
         entriesCount: projectEntries.length,
         totalPointed: round2(
           projectEntries.reduce((sum, entry) => sum + entry.totalCost, 0),
+        ),
+        billedPointed: round2(
+          projectEntries
+            .filter((entry) => (entry.billingStatus ?? "a_facturer") === "facture")
+            .reduce((sum, entry) => sum + entry.totalCost, 0),
+        ),
+        toBillPointed: round2(
+          projectEntries
+            .filter((entry) => (entry.billingStatus ?? "a_facturer") !== "facture")
+            .reduce((sum, entry) => sum + entry.totalCost, 0),
         ),
         invoiced: round2(
           projectInvoices.reduce((sum, invoice) => sum + invoice.amount, 0),
