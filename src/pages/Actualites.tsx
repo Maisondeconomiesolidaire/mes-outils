@@ -523,7 +523,7 @@ function LikesModal({
   onClose: () => void;
 }) {
   return (
-    <Modal open={open} onClose={onClose} title="Mentions J'aime" className="sm:h-auto sm:max-h-[80vh] sm:w-[520px] sm:max-w-[520px]">
+    <Modal open={open} onClose={onClose} title="Mentions J'aime">
       {likes === undefined ? (
         <FullSpinner label="Chargement des likes..." />
       ) : likes.length === 0 ? (
@@ -875,7 +875,7 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
 function EventDetail({ event, onClose }: { event: EventItem; onClose: () => void }) {
   const [active, setActive] = useState(0);
   return (
-    <Modal open onClose={onClose} title={event.title} className="sm:max-w-4xl">
+    <Modal open onClose={onClose} title={event.title}>
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
           {event.imageUrls.length > 0 ? (
@@ -1228,7 +1228,7 @@ function DealDetail({ deal, onClose, onContact }: { deal: Deal; onClose: () => v
   const images = deal.imageUrls;
   const typeLabel = DEAL_TYPES.find((t) => t.key === deal.dealType)?.label;
   return (
-    <Modal open onClose={onClose} title={deal.title} className="sm:max-w-4xl">
+    <Modal open onClose={onClose} title={deal.title}>
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
           {images.length > 0 ? (

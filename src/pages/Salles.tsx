@@ -507,7 +507,7 @@ function RoomReservationDetailsModal({
   if (!reservation) return null;
 
   return (
-    <Modal open onClose={onClose} title="Détail de la réservation salle" className="sm:max-w-4xl">
+    <Modal open onClose={onClose} title="Détail de la réservation salle">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
           {room?.photoUrl ? (

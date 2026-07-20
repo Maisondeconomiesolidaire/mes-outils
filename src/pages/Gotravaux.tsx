@@ -1684,7 +1684,7 @@ function MaintenanceDetailsModal({
   }
 
   return (
-    <Modal open onClose={onClose} title="Détail de la maintenance" className="sm:max-w-4xl">
+    <Modal open onClose={onClose} title="Détail de la maintenance">
       {/* Onglet unique, comme la fiche demande du CRM recycapp : une seule vue
           « Maintenance » qui porte le détail et l'avancement. */}
       <UnderlineTabs
@@ -1694,11 +1694,22 @@ function MaintenanceDetailsModal({
         onChange={() => {}}
       />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-        <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
+        {/* Photo masquée en édition sur petit écran : dans une modale à 80vh
+            elle repousserait les champs hors de vue. */}
+        <div
+          className={cn(
+            "overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]",
+            editing && "hidden lg:block",
+          )}
+        >
           {currentTask.vehicle?.photoUrl ? (
-            <img src={currentTask.vehicle.photoUrl} alt={currentTask.vehicle?.name ?? "Véhicule"} className="h-full max-h-[60vh] min-h-64 w-full object-cover" />
+            <img
+              src={currentTask.vehicle.photoUrl}
+              alt={currentTask.vehicle?.name ?? "Véhicule"}
+              className="h-40 w-full object-cover sm:h-56 lg:h-full lg:max-h-[60vh] lg:min-h-64"
+            />
           ) : (
-            <div className="flex min-h-64 items-center justify-center text-[var(--muted-foreground)]">
+            <div className="flex h-40 items-center justify-center text-[var(--muted-foreground)] sm:h-56 lg:h-full lg:min-h-64">
               <CarFront className="h-14 w-14" />
             </div>
           )}
@@ -1746,6 +1757,10 @@ function MaintenanceDetailsModal({
             }}
           />
 
+          {/* En édition, le formulaire prend la place du détail plutôt que de
+              s'ajouter dessous : sinon cliquer « Modifier » ne change rien à
+              l'écran et il faut deviner qu'il faut faire défiler. */}
+          {!editing ? (
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <DetailItem label="Véhicule" value={displayVehicleName} />
             <DetailItem label="Créée par" value={currentTask.createdBy} />
@@ -1764,11 +1779,14 @@ function MaintenanceDetailsModal({
               value={typeof currentTask.partsCost === "number" ? formatEuros(currentTask.partsCost) : "Non renseigné"}
             />
           </dl>
+          ) : null}
 
-          <div className="rounded-xl border border-[var(--border)] p-3">
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Description</p>
-            <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{displayDescription}</p>
-          </div>
+          {!editing ? (
+            <div className="rounded-xl border border-[var(--border)] p-3">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">Description</p>
+              <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{displayDescription}</p>
+            </div>
+          ) : null}
 
           {!editing && (currentTask.attachmentUrls?.length ?? 0) > 0 ? (
             <div className="rounded-xl border border-[var(--border)] p-3">
