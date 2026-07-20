@@ -1069,6 +1069,16 @@ type AgendaEntry =
       tone: "control";
     };
 
+type AgendaKind = AgendaEntry["kind"];
+
+/** Filtres du calendrier flotte : chaque puce fait aussi office de légende. */
+const AGENDA_FILTERS: Array<{ key: AgendaKind; label: string; dot: string }> = [
+  { key: "task", label: "Maintenances", dot: "bg-amber-500" },
+  { key: "reservation", label: "Réservations", dot: "bg-brand-500" },
+  { key: "service", label: "Prestations", dot: "bg-violet-500" },
+  { key: "control", label: "Contrôles", dot: "bg-rose-500" },
+];
+
 function FleetCalendar({
   vehicles,
   tasks,
@@ -1097,6 +1107,7 @@ function FleetCalendar({
   const [selectedServiceId, setSelectedServiceId] = useState<Id<"requests"> | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const [closingTaskId, setClosingTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
+  const [hiddenKinds, setHiddenKinds] = useState<AgendaKind[]>([]);
   const entries: AgendaEntry[] = [];
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
@@ -1168,7 +1179,8 @@ function FleetCalendar({
     service: "border-l-violet-500",
     control: "border-l-rose-500",
   };
-  const calendarEvents: CalendarEvent[] = entries.map((entry) => ({
+  const visibleEntries = entries.filter((entry) => !hiddenKinds.includes(entry.kind));
+  const calendarEvents: CalendarEvent[] = visibleEntries.map((entry) => ({
     id: entry.id,
     start: entry.date,
     end: entry.endDate,
@@ -1185,7 +1197,7 @@ function FleetCalendar({
               ? "rose"
             : "brand",
   }));
-  const selectedDayEntries = entries
+  const selectedDayEntries = visibleEntries
     .filter((entry) => overlapsDay(entry.date, entry.endDate, selectedDay))
     .sort((a, b) => a.date - b.date);
   const selectedReservation = reservations?.find((reservation) => reservation._id === selectedReservationId) ?? null;
@@ -1233,8 +1245,38 @@ function FleetCalendar({
     setSelectedTaskId(taskId);
   }
 
+  function toggleKind(kind: AgendaKind) {
+    setHiddenKinds((current) =>
+      current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind],
+    );
+  }
+
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-2">
+        {AGENDA_FILTERS.filter((filter) => filter.key !== "reservation" || canSeeReservations).map((filter) => {
+          const count = entries.filter((entry) => entry.kind === filter.key).length;
+          const shown = !hiddenKinds.includes(filter.key);
+          return (
+            <button
+              key={filter.key}
+              type="button"
+              onClick={() => toggleKind(filter.key)}
+              aria-pressed={shown}
+              className={cn(
+                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
+                shown
+                  ? "border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--accent)]"
+                  : "border-dashed border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+              )}
+            >
+              <span className={cn("h-2.5 w-2.5 rounded-full", filter.dot, !shown && "opacity-30")} />
+              {filter.label}
+              <span className="text-[var(--muted-foreground)]">{count}</span>
+            </button>
+          );
+        })}
+      </div>
       <CalendarBoard
         events={calendarEvents}
         selected={selectedDay}

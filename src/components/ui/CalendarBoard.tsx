@@ -117,6 +117,7 @@ export function CalendarBoard({
           const dayEvents = eventsByDay.get(dayKey) ?? [];
           const outside = !isSameMonth(day, viewMonth);
           const isSelected = selected ? isSameDay(day, new Date(selected)) : false;
+          const isToday = isSameDay(day, new Date());
           const disabled =
             disabledBefore !== undefined && disabledBefore !== null
               ? day.getTime() < startOfDay(new Date(disabledBefore)).getTime()
@@ -167,11 +168,20 @@ export function CalendarBoard({
                 !disabled && isRangeEdge && "ring-2 ring-inset ring-brand-500",
               )}
             >
+              {/* Le jour courant reste repérable en vert même quand un autre
+                  jour est sélectionné : sans lui, on ouvre le calendrier sans
+                  savoir où l'on se situe. La sélection (brand) reste
+                  prioritaire sur la pastille du jour. */}
               <span
                 className={cn(
                   "inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold",
-                  isSelected || isRangeEdge ? "bg-brand-500 text-white" : "text-[var(--foreground)]",
+                  isSelected || isRangeEdge
+                    ? "bg-brand-500 text-white"
+                    : isToday
+                      ? "bg-emerald-500 text-white"
+                      : "text-[var(--foreground)]",
                 )}
+                title={isToday ? "Aujourd'hui" : undefined}
               >
                 {format(day, "d")}
               </span>
