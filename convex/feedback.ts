@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { feedbackApp, feedbackStatus, feedbackType } from "./schema";
 import {
@@ -29,6 +30,17 @@ import {
  */
 const FEEDBACK_PAGE_KEY = "feedback:retours";
 const FEEDBACK_KANBAN_PAGE_KEY = "feedback:kanban";
+
+/** Nom affichable de l'auteur d'une action (email « traité par … »). */
+function feedbackDisplayName(identity: {
+  name?: string | null;
+  givenName?: string | null;
+  familyName?: string | null;
+  email?: string | null;
+}) {
+  const fullName = [identity.givenName, identity.familyName].filter(Boolean).join(" ").trim();
+  return identity.name?.trim() || fullName || identity.email?.trim() || "L'équipe produit";
+}
 
 /** Peut traiter les retours (kanban) : statut, réponse d'équipe, suppression. */
 async function canModerateFeedback(ctx: QueryCtx | MutationCtx) {
@@ -329,10 +341,25 @@ export const setStatus = mutation({
     status: feedbackStatus,
   },
   handler: async (ctx, args) => {
-    await requireFeedbackAdmin(ctx);
+    const identity = await requireFeedbackAdmin(ctx);
     const existing = await ctx.db.get(args.id);
     if (!existing) throw new Error("Retour introuvable.");
     await ctx.db.patch(args.id, { status: args.status, updatedAt: Date.now() });
+
+    // Prévenir l'auteur au passage en « Terminée », et seulement au passage :
+    // re-déposer une carte déjà terminée dans la même colonne ne doit pas
+    // renvoyer un email. On ne s'envoie pas de mail à soi-même non plus.
+    const becameResolved = args.status === "termine" && existing.status !== "termine";
+    if (becameResolved && existing.authorEmail && existing.authorClerkId !== identity.subject) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendFeedbackResolvedEmail, {
+        email: existing.authorEmail,
+        authorName: existing.authorName,
+        resolvedByName: feedbackDisplayName(identity),
+        resolvedByPhotoUrl: typeof identity.pictureUrl === "string" ? identity.pictureUrl : undefined,
+        feedbackType: existing.type,
+        description: existing.description,
+      });
+    }
   },
 });
 

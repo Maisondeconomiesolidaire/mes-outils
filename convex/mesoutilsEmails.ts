@@ -673,3 +673,58 @@ export const sendDealInterestEmail = internalAction({
     );
   },
 });
+
+/** URL publique de l'app Feedback (les retours ne vivent pas dans Mes Outils). */
+function feedbackAppUrl() {
+  return (process.env.FEEDBACK_APP_URL ?? "https://feedback.groupemes.fr").replace(/\/$/, "");
+}
+
+const FEEDBACK_TYPE_LABELS: Record<string, string> = {
+  fonctionnalite: "Nouvelle fonctionnalité",
+  probleme: "Problème",
+  amelioration: "Amélioration",
+  question: "Question",
+};
+
+/**
+ * Prévient l'auteur d'un retour que sa demande vient d'être traitée.
+ *
+ * Le retour est marqué « Terminée » depuis le kanban : sans email, l'auteur n'a
+ * aucune raison de retourner voir, et les demandes traitées passent inaperçues.
+ * On rappelle sa demande dans le message — plusieurs jours peuvent s'écouler
+ * entre le dépôt et la clôture.
+ */
+export const sendFeedbackResolvedEmail = internalAction({
+  args: {
+    email: v.string(),
+    authorName: v.optional(v.string()),
+    resolvedByName: v.string(),
+    resolvedByPhotoUrl: v.optional(v.string()),
+    feedbackType: v.string(),
+    description: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const greeting = args.authorName?.trim() ? `Bonjour ${esc(args.authorName.trim())},` : "Bonjour,";
+    const typeLabel = FEEDBACK_TYPE_LABELS[args.feedbackType] ?? "Retour";
+    // Extrait borné : la description peut être longue, l'email n'est qu'un
+    // rappel, le détail complet reste dans l'app.
+    const excerpt =
+      args.description.length > 240 ? `${args.description.slice(0, 240).trimEnd()}…` : args.description;
+
+    const html = shell({
+      preheader: `${args.resolvedByName} a traité votre retour — venez vérifier que tout est bon.`,
+      heading: "Votre retour a été traité",
+      intro: `${greeting}<br/><br/><strong>${esc(args.resolvedByName)}</strong> vient de marquer votre retour comme terminé. Prenez un instant pour vérifier que le résultat correspond bien à ce que vous attendiez — si ce n'est pas le cas, répondez directement dans la conversation, nous rouvrirons la demande.`,
+      contentHtml: `
+        ${userChip(args.resolvedByName, args.resolvedByPhotoUrl, "A traité votre retour")}
+        ${detailCard([
+          ["Type", typeLabel],
+          ["Votre demande", excerpt],
+        ])}
+        ${button(feedbackAppUrl(), "Voir mon retour")}
+      `,
+    });
+
+    await resendSend(args.email, "Votre retour a été traité", html, FROM);
+  },
+});

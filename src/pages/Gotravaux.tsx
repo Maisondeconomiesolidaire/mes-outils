@@ -1107,7 +1107,7 @@ function FleetCalendar({
   const [selectedServiceId, setSelectedServiceId] = useState<Id<"requests"> | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const [closingTaskId, setClosingTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
-  const [hiddenKinds, setHiddenKinds] = useState<AgendaKind[]>([]);
+  const [kindFilter, setKindFilter] = useState<AgendaKind | "all">("all");
   const entries: AgendaEntry[] = [];
   const vehicleName = new Map(vehicles.map((v) => [String(v._id), v.name]));
 
@@ -1179,7 +1179,7 @@ function FleetCalendar({
     service: "border-l-violet-500",
     control: "border-l-rose-500",
   };
-  const visibleEntries = entries.filter((entry) => !hiddenKinds.includes(entry.kind));
+  const visibleEntries = entries.filter((entry) => kindFilter === "all" || entry.kind === kindFilter);
   const calendarEvents: CalendarEvent[] = visibleEntries.map((entry) => ({
     id: entry.id,
     start: entry.date,
@@ -1245,37 +1245,39 @@ function FleetCalendar({
     setSelectedTaskId(taskId);
   }
 
-  function toggleKind(kind: AgendaKind) {
-    setHiddenKinds((current) =>
-      current.includes(kind) ? current.filter((item) => item !== kind) : [...current, kind],
-    );
-  }
-
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-2">
-        {AGENDA_FILTERS.filter((filter) => filter.key !== "reservation" || canSeeReservations).map((filter) => {
-          const count = entries.filter((entry) => entry.kind === filter.key).length;
-          const shown = !hiddenKinds.includes(filter.key);
-          return (
-            <button
-              key={filter.key}
-              type="button"
-              onClick={() => toggleKind(filter.key)}
-              aria-pressed={shown}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition",
-                shown
-                  ? "border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:bg-[var(--accent)]"
-                  : "border-dashed border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
-              )}
-            >
-              <span className={cn("h-2.5 w-2.5 rounded-full", filter.dot, !shown && "opacity-30")} />
-              {filter.label}
-              <span className="text-[var(--muted-foreground)]">{count}</span>
-            </button>
-          );
-        })}
+      {/* Même logique que tous les autres filtres de l'app : « Tous » par
+          défaut, et cliquer un type n'affiche que celui-là. */}
+      <div className="inline-flex flex-wrap rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
+        {[{ key: "all" as const, label: "Tous", dot: null }, ...AGENDA_FILTERS]
+          .filter((filter) => filter.key !== "reservation" || canSeeReservations)
+          .map((filter) => {
+            const active = kindFilter === filter.key;
+            const count =
+              filter.key === "all"
+                ? entries.length
+                : entries.filter((entry) => entry.kind === filter.key).length;
+            return (
+              <button
+                key={filter.key}
+                type="button"
+                onClick={() => setKindFilter(filter.key)}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold transition",
+                  active
+                    ? "bg-brand-500 text-white"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                )}
+              >
+                {filter.dot ? (
+                  <span className={cn("h-2.5 w-2.5 rounded-full", filter.dot, active && "bg-white")} />
+                ) : null}
+                {filter.label}
+                <span className={active ? "text-white/75" : "text-[var(--muted-foreground)]"}>{count}</span>
+              </button>
+            );
+          })}
       </div>
       <CalendarBoard
         events={calendarEvents}

@@ -97,15 +97,43 @@ function withTime(dayMs: number, time: string): number {
  */
 export function Equipements() {
   const [searchParams] = useSearchParams();
+  const access = usePermissionsAccess();
+  const canManage = canAccess(access, "mesoutils:equipements", "manage");
   const tab = (["manage", "planning"].includes(searchParams.get("v") ?? "")
     ? searchParams.get("v")
     : "manage") as "manage" | "planning";
 
+  // L'état de la modale vit ici pour que le bouton de création tienne dans
+  // l'entête, à la même place que « Ajouter un véhicule » ou « Nouvelle salle ».
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<Id<"equipments"> | "">("");
+
+  const actions =
+    tab === "manage" && canManage ? (
+      <Button
+        size="lg"
+        onClick={() => {
+          setEditingId("");
+          setModalOpen(true);
+        }}
+      >
+        <Plus className="h-5 w-5" />
+        Nouvel équipement
+      </Button>
+    ) : undefined;
+
   return (
     <div className="space-y-6">
-      <SectionHeader title="Équipements" />
+      <SectionHeader title="Équipements" actions={actions} />
       <SectionTabs />
-      {tab === "manage" ? <ManageEquipments /> : null}
+      {tab === "manage" ? (
+        <ManageEquipments
+          modalOpen={modalOpen}
+          setModalOpen={setModalOpen}
+          editingId={editingId}
+          setEditingId={setEditingId}
+        />
+      ) : null}
       {tab === "planning" ? <EquipmentPlanning /> : null}
     </div>
   );
@@ -546,7 +574,17 @@ const emptyForm = {
 };
 type FormState = typeof emptyForm;
 
-function ManageEquipments() {
+function ManageEquipments({
+  modalOpen,
+  setModalOpen,
+  editingId,
+  setEditingId,
+}: {
+  modalOpen: boolean;
+  setModalOpen: (open: boolean) => void;
+  editingId: Id<"equipments"> | "";
+  setEditingId: (id: Id<"equipments"> | "") => void;
+}) {
   const access = usePermissionsAccess();
   const canManage = canAccess(access, "mesoutils:equipements", "manage");
   const equipments = useQuery(api.equipements.listEquipments) as Equipment[] | undefined;
@@ -554,8 +592,6 @@ function ManageEquipments() {
   const updateEquipment = useMutation(api.equipements.updateEquipment);
   const deleteEquipment = useMutation(api.equipements.deleteEquipment);
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<Id<"equipments"> | "">("");
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
 
@@ -626,15 +662,6 @@ function ManageEquipments() {
 
   return (
     <div className="space-y-6">
-      {canManage ? (
-        <div className="flex justify-end">
-          <Button size="lg" onClick={() => { setEditingId(""); setModalOpen(true); }}>
-            <Plus className="h-5 w-5" />
-            Nouvel équipement
-          </Button>
-        </div>
-      ) : null}
-
       {equipments.length === 0 ? (
         <EmptyState icon={<Boxes className="h-8 w-8" />} title="Aucun équipement" description="Ajoutez votre premier équipement réservable." />
       ) : (
