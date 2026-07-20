@@ -48,9 +48,29 @@ const DEAL_TYPES = [
   { key: "don", label: "Don" },
   { key: "vente", label: "Vente" },
   { key: "echange", label: "Échange" },
+  { key: "location", label: "Location" },
 ] as const;
 type DealType = (typeof DEAL_TYPES)[number]["key"];
 type DealAdKind = "offre" | "demande";
+
+/** Unités de facturation d'une location : le prix s'entend « par période ». */
+const RENTAL_PERIODS = [
+  { key: "jour", label: "À la journée", suffix: "/jour" },
+  { key: "semaine", label: "À la semaine", suffix: "/semaine" },
+  { key: "mois", label: "Au mois", suffix: "/mois" },
+  { key: "annee", label: "À l'année", suffix: "/an" },
+] as const;
+type RentalPeriod = (typeof RENTAL_PERIODS)[number]["key"];
+
+/** Prix affiché : « 9 €/jour » pour une location, « 9 € » sinon. */
+function dealPriceLabel(deal: { price?: number | null; dealType: DealType; rentalPeriod?: RentalPeriod | null }) {
+  if (deal.price == null) return null;
+  const suffix =
+    deal.dealType === "location"
+      ? RENTAL_PERIODS.find((p) => p.key === deal.rentalPeriod)?.suffix ?? ""
+      : "";
+  return `${deal.price} €${suffix}`;
+}
 
 export function Actualites() {
   const access = usePermissionsAccess();
@@ -949,6 +969,7 @@ type Deal = {
   adKind: DealAdKind;
   dealType: DealType;
   price?: number;
+  rentalPeriod?: RentalPeriod;
   availableFrom?: number;
   availableTo?: number;
   imageUrls: string[];
@@ -959,7 +980,8 @@ type Deal = {
 
 /** Lien vers la messagerie pré-remplie façon "leboncoin" pour un bon plan. */
 function contactDealHref(deal: Deal) {
-  const priceLabel = deal.dealType === "vente" && deal.price ? ` (${deal.price} €)` : "";
+  const price = dealPriceLabel(deal);
+  const priceLabel = price ? ` (${price})` : "";
   const prefill = `Bonjour, je suis intéressé(e) par votre annonce « ${deal.title} »${priceLabel}. Est-elle toujours disponible ?`;
   const params = new URLSearchParams({
     to: deal.authorClerkId,
@@ -972,7 +994,7 @@ function contactDealHref(deal: Deal) {
   if (deal.description.trim()) params.set("ctxDesc", deal.description.trim().slice(0, 280));
   const typeLabel = DEAL_TYPES.find((t) => t.key === deal.dealType)?.label;
   if (typeLabel) params.set("ctxType", typeLabel);
-  if (deal.dealType === "vente" && deal.price) params.set("ctxPrice", String(deal.price));
+  if (price) params.set("ctxPrice", price);
   return `/messagerie?${params.toString()}`;
 }
 
@@ -981,6 +1003,7 @@ const DEAL_BADGE: Record<DealType, string> = {
   don: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
   vente: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
   echange: "bg-violet-100 text-violet-800 dark:bg-violet-500/20 dark:text-violet-200",
+  location: "bg-teal-100 text-teal-800 dark:bg-teal-500/20 dark:text-teal-200",
 };
 
 const DEAL_KIND_FILTERS = [
@@ -1015,6 +1038,7 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
     adKind: "offre" as DealAdKind,
     dealType: "pret" as DealType,
     price: "",
+    rentalPeriod: "jour" as RentalPeriod,
     from: null as number | null,
     to: null as number | null,
   });
@@ -1044,7 +1068,11 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
         description: form.description,
         adKind: form.adKind,
         dealType: form.dealType,
-        price: form.dealType === "vente" && form.price ? Number(form.price) : undefined,
+        price:
+          (form.dealType === "vente" || form.dealType === "location") && form.price
+            ? Number(form.price)
+            : undefined,
+        rentalPeriod: form.dealType === "location" ? form.rentalPeriod : undefined,
         availableFrom: form.from ?? undefined,
         availableTo: form.to ?? undefined,
         images,
@@ -1055,6 +1083,7 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
         adKind: form.adKind,
         dealType: "pret",
         price: "",
+        rentalPeriod: "jour",
         from: null,
         to: null,
       });
@@ -1107,7 +1136,7 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
         <EmptyState
           icon={<Tag className="h-8 w-8" />}
           title="Aucun bon plan"
-          description="Prêt, don, vente ou échange entre collègues : proposez le premier."
+          description="Prêt, don, vente, échange ou location entre collègues : proposez le premier."
         />
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
@@ -1135,7 +1164,7 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
                       {DEAL_TYPES.find((t) => t.key === deal.dealType)?.label}
                     </span>
                   </div>
-                  {deal.price != null ? <span className="text-sm font-bold text-[var(--foreground)]">{deal.price} €</span> : null}
+                  {dealPriceLabel(deal) ? <span className="text-sm font-bold text-[var(--foreground)]">{dealPriceLabel(deal)}</span> : null}
                 </div>
                 <button type="button" onClick={() => setDetailDeal(deal)} className="mt-2 text-left">
                   <h3 className="text-lg font-bold text-[var(--foreground)] hover:text-brand-600">{deal.title}</h3>
@@ -1192,6 +1221,18 @@ function BonsPlans({ canCreate }: { canCreate: boolean }) {
           </div>
           {form.dealType === "vente" ? (
             <Field label="Prix (€)"><Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></Field>
+          ) : null}
+          {form.dealType === "location" ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Périodicité" required>
+                <Select value={form.rentalPeriod} onChange={(e) => setForm({ ...form, rentalPeriod: e.target.value as RentalPeriod })}>
+                  {RENTAL_PERIODS.map((period) => <option key={period.key} value={period.key}>{period.label}</option>)}
+                </Select>
+              </Field>
+              <Field label={`Prix (€${RENTAL_PERIODS.find((p) => p.key === form.rentalPeriod)?.suffix ?? ""})`}>
+                <Input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+              </Field>
+            </div>
           ) : null}
           <Field label="Description" required><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="État, conditions, détails..." /></Field>
           <Field label="Disponibilité">
@@ -1267,7 +1308,7 @@ function DealDetail({ deal, onClose, onContact }: { deal: Deal; onClose: () => v
               <span className={cn("rounded-full px-3 py-1 text-xs font-bold", DEAL_KIND_BADGE[deal.adKind])}>{DEAL_KIND_LABEL[deal.adKind]}</span>
               <span className={cn("rounded-full px-3 py-1 text-xs font-bold", DEAL_BADGE[deal.dealType])}>{typeLabel}</span>
             </div>
-            {deal.price != null ? <span className="text-2xl font-extrabold text-[var(--foreground)]">{deal.price} €</span> : null}
+            {dealPriceLabel(deal) ? <span className="text-2xl font-extrabold text-[var(--foreground)]">{dealPriceLabel(deal)}</span> : null}
           </div>
           <h2 className="mt-3 text-2xl font-bold text-[var(--foreground)]">{deal.title}</h2>
           {deal.status === "closed" ? (

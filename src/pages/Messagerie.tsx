@@ -352,7 +352,8 @@ function Thread({
               <p className="text-[11px] font-bold uppercase tracking-wide text-brand-600">
                 {context.type ? `Bon plan · ${context.type}` : "Bon plan"}
               </p>
-              {context.price ? <span className="shrink-0 text-sm font-bold text-[var(--foreground)]">{context.price} €</span> : null}
+              {/* `ctxPrice` arrive déjà formaté (« 9 € », « 9 €/jour » pour une location). */}
+              {context.price ? <span className="shrink-0 text-sm font-bold text-[var(--foreground)]">{context.price}</span> : null}
             </div>
             <p className="truncate text-sm font-semibold text-[var(--foreground)]">{context.title}</p>
             {context.description ? (

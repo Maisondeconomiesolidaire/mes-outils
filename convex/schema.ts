@@ -1214,8 +1214,18 @@ export default defineSchema(
       v.literal("don"),
       v.literal("vente"),
       v.literal("echange"),
+      v.literal("location"),
     ),
     price: v.optional(v.number()),
+    // Unité de facturation d'une location : le prix s'entend « par période ».
+    rentalPeriod: v.optional(
+      v.union(
+        v.literal("jour"),
+        v.literal("semaine"),
+        v.literal("mois"),
+        v.literal("annee"),
+      ),
+    ),
     availableFrom: v.optional(v.number()),
     availableTo: v.optional(v.number()),
     images: v.array(v.id("_storage")),
