@@ -634,3 +634,41 @@ export async function fetchInternalClerkDirectory(
 
   return directory.sort((a, b) => a.name.localeCompare(b.name, "fr"));
 }
+
+/**
+ * Fin effective d'une réservation de véhicule, pour tout calcul de
+ * disponibilité.
+ *
+ * C'est le retour de l'utilisateur qui libère le véhicule, pas la date de fin
+ * prévue : rendu en avance, il redevient réservable immédiatement ; pas encore
+ * rendu, il reste occupé au-delà du créneau initial. Sans cette règle, un
+ * véhicule non rendu réapparaissait comme libre à la fin du créneau et pouvait
+ * être réservé — ou affecté à une tournée recyclerie — alors qu'il n'était pas
+ * revenu au dépôt.
+ *
+ * Règle unique pour les 7 apps : Mes Outils, recycapp et cycleenbray planifient
+ * les mêmes véhicules physiques.
+ */
+export function vehicleReservationBusyEnd(
+  reservation: { start: number; end: number; feedbackSubmittedAt?: number },
+  now: number,
+) {
+  if (typeof reservation.feedbackSubmittedAt === "number") {
+    return Math.max(reservation.start, reservation.feedbackSubmittedAt);
+  }
+  // Réservations antérieures à la règle : on s'en tient à la fin prévue (cf.
+  // MANDATORY_RETURN_SINCE), sinon 11 véhicules seraient immobilisés d'un coup.
+  if (reservation.end < MANDATORY_RETURN_SINCE) return reservation.end;
+  return Math.max(reservation.end, now);
+}
+
+/**
+ * Entrée en vigueur du retour obligatoire.
+ *
+ * Les réservations terminées avant cette date n'ont jamais eu de retour à
+ * faire. Les compter rétroactivement bloquerait d'un coup 7 personnes et
+ * marquerait 11 véhicules « non rendus » dans les 3 apps qui planifient la
+ * flotte, pour une règle qui n'existait pas au moment de l'emprunt. La règle
+ * ne vaut donc que pour les emprunts qui se terminent après sa mise en service.
+ */
+export const MANDATORY_RETURN_SINCE = Date.parse("2026-07-20T00:00:00.000Z");

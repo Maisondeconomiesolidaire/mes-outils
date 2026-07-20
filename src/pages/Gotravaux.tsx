@@ -41,6 +41,7 @@ import { cn } from "../lib/cn";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { ReservationRemarks } from "../components/ReservationRemarks";
 import { SectionTabs } from "../components/ui/SectionTabs";
+import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { confirmPermanentDelete } from "../lib/confirm";
 
 type VehicleKind = "utilitaire" | "voiture";
@@ -591,13 +592,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
       ) : (
         <TaskKanban
           tasks={tasks}
-          onUpdate={updateTask}
-          canEdit={canEdit}
           onOpenTask={setSelectedTaskId}
-          onRequestClose={(task) => {
-            setClosingTaskId(task._id);
-            setSelectedTaskId(task._id);
-          }}
         />
       )}
       </div>
@@ -806,6 +801,135 @@ const TASK_STATUS_COLUMNS = [
   tone: string;
 }>;
 
+const MAINTENANCE_STEPS: Array<{ status: TaskStatus; label: string }> = [
+  { status: "todo", label: "À faire" },
+  { status: "in_progress", label: "En cours" },
+  { status: "done", label: "Terminée" },
+];
+
+/**
+ * Avancement d'une maintenance, sur le modèle du process CRM de recycapp :
+ * étapes ordonnées, une seule cliquable à la fois (l'étape suivante pour
+ * avancer, la dernière franchie pour revenir en arrière), et blocage explicite
+ * quand des informations manquent.
+ *
+ * Le blocage n'est pas qu'un confort d'interface : le serveur refuse déjà de
+ * clôturer sans temps passé ni prix des pièces (`ensureClosingCost`). Ici on
+ * dit *pourquoi* c'est bloqué, avant le clic, au lieu de laisser remonter une
+ * erreur après coup.
+ */
+function MaintenanceSteps({
+  task,
+  canEdit,
+  onChangeStatus,
+  onFixMissing,
+}: {
+  task: VehicleTask;
+  canEdit: boolean;
+  onChangeStatus: (status: TaskStatus) => void;
+  /** Ouvre l'édition pour saisir ce qui manque à la clôture. */
+  onFixMissing: () => void;
+}) {
+  const currentIndex = MAINTENANCE_STEPS.findIndex((step) => step.status === task.status);
+  const missingCost = !taskHasCost(task);
+  const blockers: Partial<Record<TaskStatus, string>> = {};
+  if (missingCost) {
+    blockers.done = "Renseignez le temps passé et le prix des pièces avant de terminer.";
+  }
+  const completionPercent = Math.round(((currentIndex + 1) / MAINTENANCE_STEPS.length) * 100);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-3">
+        <div className="mb-2 flex items-center justify-between text-xs font-bold uppercase tracking-[0.14em] text-[var(--muted-foreground)]">
+          <span>Avancement</span>
+          <span className="text-brand-600">{completionPercent}%</span>
+        </div>
+        <div className="h-2.5 overflow-hidden rounded-full bg-[var(--card)]">
+          <div
+            className="h-full rounded-full bg-brand-500 transition-all"
+            style={{ width: `${completionPercent}%` }}
+          />
+        </div>
+      </div>
+
+      <ol className="grid gap-2 sm:grid-cols-3">
+        {MAINTENANCE_STEPS.map((step, index) => {
+          const isDone = index <= currentIndex;
+          const isNext = index === currentIndex + 1;
+          const isLastDone = index === currentIndex && index > 0;
+          const blocker = blockers[step.status];
+          const actionable = canEdit && (isNext || isLastDone);
+
+          return (
+            <li key={step.status}>
+              <button
+                type="button"
+                disabled={!actionable}
+                onClick={() => {
+                  if (isNext && blocker) {
+                    onFixMissing();
+                    return;
+                  }
+                  onChangeStatus(isLastDone ? MAINTENANCE_STEPS[index - 1].status : step.status);
+                }}
+                className={cn(
+                  "flex min-h-[112px] w-full flex-col items-center justify-between rounded-2xl border px-3 py-3 text-center transition",
+                  isDone
+                    ? "border-brand-500/40 bg-brand-50 text-[var(--foreground)] dark:bg-brand-500/10"
+                    : isNext && blocker
+                      ? "border-amber-400 bg-amber-50/60 text-[var(--foreground)] dark:bg-amber-500/10"
+                      : isNext
+                        ? "border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] hover:border-brand-500"
+                        : "border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)]",
+                  actionable ? "cursor-pointer" : "cursor-not-allowed",
+                )}
+                title={isNext && blocker ? blocker : undefined}
+              >
+                <span
+                  className={cn(
+                    "mb-2 flex h-8 w-8 items-center justify-center rounded-full border-2 transition",
+                    isDone
+                      ? "border-brand-500 bg-brand-500 text-white"
+                      : isNext
+                        ? "border-brand-400 text-brand-600"
+                        : "border-[var(--border)] text-transparent",
+                  )}
+                >
+                  {isDone ? <Check className="h-4 w-4" strokeWidth={3} /> : null}
+                </span>
+                <span className="flex-1 text-sm font-semibold leading-5">{step.label}</span>
+                {isNext && canEdit ? (
+                  <span
+                    className={cn(
+                      "mt-2 text-[11px] font-bold uppercase tracking-[0.12em]",
+                      blocker ? "text-amber-600 dark:text-amber-400" : "text-brand-600",
+                    )}
+                  >
+                    {blocker ? "Infos requises" : "Prochaine étape"}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+
+      {canEdit && currentIndex + 1 < MAINTENANCE_STEPS.length
+        ? (() => {
+            const nextStep = MAINTENANCE_STEPS[currentIndex + 1];
+            const blocker = blockers[nextStep.status];
+            return blocker ? (
+              <p className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200">
+                {blocker}
+              </p>
+            ) : null;
+          })()
+        : null}
+    </div>
+  );
+}
+
 function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate: ReturnType<typeof useMutation>; canEdit: boolean }) {
   const [selectedTaskId, setSelectedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
   const [closingTaskId, setClosingTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
@@ -815,13 +939,7 @@ function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate
     <>
       <TaskKanban
         tasks={tasks}
-        onUpdate={onUpdate}
-        canEdit={canEdit}
         onOpenTask={setSelectedTaskId}
-        onRequestClose={(task) => {
-          setClosingTaskId(task._id);
-          setSelectedTaskId(task._id);
-        }}
       />
       <MaintenanceDetailsModal
         task={selectedTask}
@@ -837,23 +955,17 @@ function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate
   );
 }
 
+/**
+ * Vue kanban en lecture : les cartes ouvrent la fiche, l'avancement se fait
+ * dans la modale (étapes), comme dans le CRM recycapp.
+ */
 function TaskKanban({
   tasks,
-  onUpdate,
-  canEdit,
   onOpenTask,
-  onRequestClose,
 }: {
   tasks: VehicleTask[];
-  onUpdate: ReturnType<typeof useMutation>;
-  canEdit: boolean;
   onOpenTask: (taskId: Id<"vehicleMaintenanceTasks">) => void;
-  /** Tentative de clôture d'une tâche sans coût : le parent ouvre la fiche en
-   *  édition pour le saisir. À défaut, on ouvre simplement le détail. */
-  onRequestClose?: (task: VehicleTask) => void;
 }) {
-  const [draggedTaskId, setDraggedTaskId] = useState<Id<"vehicleMaintenanceTasks"> | null>(null);
-
   const tasksByStatus = useMemo(() => {
     const grouped: Record<TaskStatus, VehicleTask[]> = {
       todo: [],
@@ -873,22 +985,6 @@ function TaskKanban({
     return grouped;
   }, [tasks]);
 
-  async function moveTask(task: VehicleTask, nextStatus: TaskStatus) {
-    if (!canEdit || task.status === nextStatus) return;
-    // Clôturer impose le coût : sans lui, on ouvre la fiche en édition plutôt
-    // que de laisser le serveur refuser silencieusement.
-    if (nextStatus === "done" && !taskHasCost(task)) {
-      if (onRequestClose) onRequestClose(task);
-      else onOpenTask(task._id);
-      return;
-    }
-    await onUpdate({
-      taskId: task._id,
-      status: nextStatus,
-      priority: task.priority,
-    });
-  }
-
   return (
     <section className="grid gap-4 xl:grid-cols-3">
       {TASK_STATUS_COLUMNS.map((column) => {
@@ -896,19 +992,6 @@ function TaskKanban({
         return (
           <div
             key={column.key}
-            onDragOver={(event) => {
-              if (!canEdit) return;
-              event.preventDefault();
-            }}
-            onDrop={(event) => {
-              if (!canEdit) return;
-              event.preventDefault();
-              const taskId = event.dataTransfer.getData("text/task-id") as Id<"vehicleMaintenanceTasks">;
-              const task = tasks.find((entry) => entry._id === taskId);
-              if (!task) return;
-              void moveTask(task, column.key);
-              setDraggedTaskId(null);
-            }}
             className={cn(
               "flex min-h-[26rem] flex-col rounded-2xl border p-4",
               column.tone,
@@ -932,20 +1015,8 @@ function TaskKanban({
                 columnTasks.map((task) => (
                   <article
                     key={task._id}
-                    draggable={canEdit}
                     onClick={() => onOpenTask(task._id)}
-                    onDragStart={(event) => {
-                      if (!canEdit) return;
-                      event.dataTransfer.setData("text/task-id", task._id);
-                      event.dataTransfer.effectAllowed = "move";
-                      setDraggedTaskId(task._id);
-                    }}
-                    onDragEnd={() => setDraggedTaskId(null)}
-                    className={cn(
-                      "rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm transition",
-                      canEdit && "cursor-grab active:cursor-grabbing",
-                      draggedTaskId === task._id && "opacity-60",
-                    )}
+                    className="cursor-pointer rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4 shadow-sm transition hover:border-brand-400"
                   >
                     <div className="flex items-start gap-3">
                       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-xl bg-[var(--muted)]">
@@ -1001,20 +1072,6 @@ function TaskKanban({
                       >
                         <Info className="h-4 w-4" />Détails
                       </Button>
-                    {canEdit ? (
-                      <div onClick={(event) => event.stopPropagation()}>
-                        <Select
-                          value={task.status}
-                          onChange={(event) =>
-                            void moveTask(task, event.target.value as TaskStatus)
-                          }
-                        >
-                          <option value="todo">À faire</option>
-                          <option value="in_progress">En cours</option>
-                          <option value="done">Terminée</option>
-                        </Select>
-                      </div>
-                    ) : null}
                     </div>
                   </article>
                 ))
@@ -1605,6 +1662,14 @@ function MaintenanceDetailsModal({
 
   return (
     <Modal open onClose={onClose} title="Détail de la maintenance" className="sm:max-w-4xl">
+      {/* Onglet unique, comme la fiche demande du CRM recycapp : une seule vue
+          « Maintenance » qui porte le détail et l'avancement. */}
+      <UnderlineTabs
+        className="mb-5"
+        items={[{ key: "maintenance", label: "Maintenance", icon: Wrench }]}
+        value="maintenance"
+        onChange={() => {}}
+      />
       <div className="grid gap-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
           {currentTask.vehicle?.photoUrl ? (
@@ -1641,6 +1706,20 @@ function MaintenanceDetailsModal({
                 : ""}
             </p>
           </div>
+
+          <MaintenanceSteps
+            task={currentTask}
+            canEdit={canEdit}
+            onChangeStatus={(nextStatus) => {
+              setStatus(nextStatus);
+              void onUpdate({ taskId: currentTask._id, status: nextStatus });
+            }}
+            onFixMissing={() => {
+              setStatus("done");
+              setEditing(true);
+              setError("Renseignez le temps passé et le prix des pièces pour terminer la maintenance.");
+            }}
+          />
 
           <dl className="grid gap-3 text-sm sm:grid-cols-2">
             <DetailItem label="Véhicule" value={displayVehicleName} />
@@ -1691,22 +1770,15 @@ function MaintenanceDetailsModal({
               <Field label="Description"><Textarea value={description} onChange={(event) => setDescription(event.target.value)} /></Field>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Période"><DateRangePicker value={range} onChange={setRange} placeholder="Période de maintenance" /></Field>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Statut">
-                    <Select value={status} onChange={(event) => setStatus(event.target.value as TaskStatus)}>
-                      <option value="todo">À faire</option>
-                      <option value="in_progress">En cours</option>
-                      <option value="done">Terminée</option>
-                    </Select>
-                  </Field>
-                  <Field label="Priorité">
-                    <Select value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
-                      <option value="low">Basse</option>
-                      <option value="medium">Moyenne</option>
-                      <option value="high">Haute</option>
-                    </Select>
-                  </Field>
-                </div>
+                {/* Pas de sélecteur de statut ici : l'avancement passe par les
+                    étapes ci-dessus, comme dans le CRM. */}
+                <Field label="Priorité">
+                  <Select value={priority} onChange={(event) => setPriority(event.target.value as TaskPriority)}>
+                    <option value="low">Basse</option>
+                    <option value="medium">Moyenne</option>
+                    <option value="high">Haute</option>
+                  </Select>
+                </Field>
               </div>
               <Field label="Kilométrage">
                 <Input type="number" inputMode="numeric" value={odometerKm} onChange={(event) => setOdometerKm(event.target.value)} placeholder="Ex: 125000" />

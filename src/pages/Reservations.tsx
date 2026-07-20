@@ -117,9 +117,25 @@ export function Reservations() {
   );
 }
 
+type OverdueReturn = {
+  _id: string;
+  vehicleName: string;
+  purpose: string;
+  start: number;
+  end: number;
+};
+
 function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const access = usePermissionsAccess();
   const canCreate = canAccess(access, "mesoutils:reservations", "create");
+  const navigate = useNavigate();
+  // Un retour de véhicule non fait bloque toute nouvelle réservation : le
+  // serveur refuse de toute façon, autant le dire avant de remplir le
+  // formulaire.
+  const overdueReturns = useQuery(api.reservations.myOverdueVehicleReturns, {}) as
+    | OverdueReturn[]
+    | undefined;
+  const blockedByReturns = (overdueReturns?.length ?? 0) > 0;
 
   // Sélection sur le calendrier : double-clic = début/jour unique, clic suivant = fin.
   const [days, setDays] = useState<DaySelection>(() => {
@@ -263,6 +279,29 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
 
   return (
     <div className="space-y-5">
+      {blockedByReturns ? (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 dark:border-amber-500/40 dark:bg-amber-500/10">
+          <p className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+            {overdueReturns?.length === 1
+              ? "Un retour de véhicule vous attend"
+              : `${overdueReturns?.length} retours de véhicule vous attendent`}
+          </p>
+          <p className="mt-1 text-sm text-amber-800 dark:text-amber-200/85">
+            Le retour libère le véhicule pour les autres. Tant qu'il n'est pas fait, vous ne pouvez
+            pas réserver à nouveau.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {overdueReturns?.map((item) => (
+              <li key={item._id} className="text-sm text-amber-800 dark:text-amber-200/85">
+                {item.vehicleName} · {item.purpose} — terminée le {formatDateTime(item.end)}
+              </li>
+            ))}
+          </ul>
+          <Button size="sm" className="mt-3" onClick={() => navigate("/reservations?v=mine")}>
+            Faire mon retour
+          </Button>
+        </div>
+      ) : null}
       <Agenda
         tab={tab}
         days={days}
@@ -373,7 +412,16 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                     <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" />{vehicle.seats ?? "—"} places</span>
                     <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4" />{vehicle.siteLabel ?? (vehicle.site ? `Site ${vehicle.site}` : "—")}</span>
                   </div>
-                  {canCreate && !blocked ? <Button className="mt-4 w-full" onClick={() => openBooking(null, vehicle)}>Réserver</Button> : null}
+                  {canCreate && !blocked ? (
+                    <Button
+                      className="mt-4 w-full"
+                      disabled={blockedByReturns}
+                      title={blockedByReturns ? "Faites d'abord votre retour de véhicule" : undefined}
+                      onClick={() => openBooking(null, vehicle)}
+                    >
+                      Réserver
+                    </Button>
+                  ) : null}
                 </div>
               </article>
             );
@@ -797,11 +845,16 @@ function MyReservations() {
         <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] divide-y divide-[var(--border)]">
           {filtered.map((reservation) => {
             const past = reservation.end < Date.now();
+            const started = reservation.start <= Date.now();
+            // Véhicule : le retour est proposé dès le départ, pas seulement
+            // après la fin prévue — c'est lui qui libère le véhicule, et on
+            // rend souvent en avance. Salle : inchangé, après le créneau.
             const canSendFeedback =
-              past &&
               !reservation.feedbackSubmittedAt &&
-              ((reservation.kind === "vehicle" && reservation.status === "approved") ||
-                (reservation.kind === "room" && reservation.status === "confirmed"));
+              ((reservation.kind === "vehicle" && reservation.status === "approved" && started) ||
+                (reservation.kind === "room" && reservation.status === "confirmed" && past));
+            const returnOverdue =
+              canSendFeedback && past && reservation.kind === "vehicle";
             return (
               <div key={`${reservation.kind}-${reservation._id}`} className="flex flex-wrap items-center gap-3 p-4">
                 <span className={`h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-[var(--accent)] ${past ? "opacity-60" : ""}`}>
@@ -837,8 +890,12 @@ function MyReservations() {
                   </Button>
                 ) : null}
                 {canSendFeedback ? (
-                  <Button size="sm" onClick={() => openFeedback(reservation)}>
-                    Faire le retour
+                  <Button
+                    size="sm"
+                    variant={returnOverdue ? "primary" : "secondary"}
+                    onClick={() => openFeedback(reservation)}
+                  >
+                    {returnOverdue ? "Faire le retour (en retard)" : "Faire le retour"}
                   </Button>
                 ) : null}
                 {past && reservation.feedbackSubmittedAt ? (
