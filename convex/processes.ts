@@ -26,6 +26,22 @@ const FULL = [
   STEP.factureReglee,
 ];
 
+/**
+ * Vrai quand la dernière étape cochée est « Facture éditée » et que l'étape
+ * suivante est « Facture réglée » : la facture attend son règlement, et la
+ * compta doit être prévenue pour venir cocher l'étape une fois encaissée.
+ */
+export function isAwaitingInvoicePayment(
+  steps: string[],
+  completedSteps: number,
+): boolean {
+  return (
+    completedSteps > 0 &&
+    steps[completedSteps - 1] === STEP.factureEditee &&
+    steps[completedSteps] === STEP.factureReglee
+  );
+}
+
 export type RequestType =
   | "aerogommage"
   | "collecte"

@@ -1,4 +1,11 @@
-import { internalMutation, mutation, query, MutationCtx } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  MutationCtx,
+} from "./_generated/server";
 import { v } from "convex/values";
 import {
   customerFullName,
@@ -22,7 +29,7 @@ import {
   requestLostReason,
   requestType,
 } from "./schema";
-import { resolveProcess } from "./processes";
+import { isAwaitingInvoicePayment, resolveProcess } from "./processes";
 import { vehicleBusyReason } from "./fleet";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
@@ -1384,6 +1391,18 @@ export const advanceProcess = mutation({
         await ctx.db.patch(articleId, { status: "vendu" });
       }
     }
+    // La facture vient d'être éditée et « Facture réglée » est l'étape
+    // suivante : on prévient la compta qu'un règlement est à encaisser puis à
+    // cocher dans le CRM.
+    if (isAwaitingInvoicePayment(steps, completedSteps)) {
+      await ctx.scheduler.runAfter(0, internal.emails.sendInvoicePendingPayment, {
+        reference: r.reference ?? String(r._id).slice(-6),
+        type: r.type,
+        customerName: customerFullName(r.customer) || "Client inconnu",
+        amount: r.quoteAmount,
+        requestId: String(r._id),
+      });
+    }
   },
 });
 
@@ -1796,5 +1815,55 @@ export const scheduled = query({
       ...request,
       customer: normalizeCustomer(request.customer),
     }));
+  },
+});
+
+/**
+ * Demandes dont la facture est éditée et dont l'étape suivante est
+ * « Facture réglée » — c.-à-d. les factures en attente de règlement.
+ */
+type PendingInvoice = {
+  reference: string;
+  type: string;
+  customerName: string;
+  amount?: number;
+  requestId: string;
+};
+
+export const pendingInvoices = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<PendingInvoice[]> => {
+    const all = await ctx.db.query("requests").collect();
+    return all
+      .filter(
+        (r) =>
+          r.outcome === "open" &&
+          isAwaitingInvoicePayment(r.processSteps ?? [], r.completedSteps ?? 0),
+      )
+      .map((r) => ({
+        reference: r.reference ?? String(r._id).slice(-6),
+        type: r.type,
+        customerName:
+          customerFullName(normalizeCustomer(r.customer)) || "Client inconnu",
+        amount: r.quoteAmount,
+        requestId: String(r._id),
+      }));
+  },
+});
+
+/**
+ * Envoie à la compta le récapitulatif des factures en attente de règlement.
+ * Déclenchable à la main (`npx convex run requests:sendPendingInvoicesDigest`)
+ * pour remettre la liste à jour sur les demandes déjà en cours.
+ */
+export const sendPendingInvoicesDigest = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ count: number }> => {
+    const requests: PendingInvoice[] = await ctx.runQuery(
+      internal.requests.pendingInvoices,
+      {},
+    );
+    await ctx.runAction(internal.emails.sendInvoicePendingDigest, { requests });
+    return { count: requests.length };
   },
 });

@@ -495,3 +495,98 @@ export const sendScheduled = internalAction({
     await resendSend(email, `Intervention programmée · ${label} #${reference}`, html);
   },
 });
+
+// ─── Facturation ─────────────────────────────────────────────────────────────
+
+/** Compta prévenue quand une facture éditée attend son règlement. */
+const INVOICE_STAFF_EMAILS = ["l.delepine@eco-solidaire.fr"];
+
+/** Ligne « demande » d'un tableau récapitulatif de factures en attente. */
+function invoiceRow(r: {
+  reference: string;
+  type: string;
+  customerName: string;
+  amount?: number;
+  requestId: string;
+}) {
+  const amount = r.amount ? euro(r.amount) : "—";
+  return `<tr>
+    <td style="padding:10px 12px;border-top:1px solid #f1ece5;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#18181b;">#${esc(r.reference)}</td>
+    <td style="padding:10px 12px;border-top:1px solid #f1ece5;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">${esc(typeLabel(r.type))}</td>
+    <td style="padding:10px 12px;border-top:1px solid #f1ece5;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">${esc(r.customerName)}</td>
+    <td style="padding:10px 12px;border-top:1px solid #f1ece5;font-family:Helvetica,Arial,sans-serif;font-size:14px;text-align:right;color:#18181b;">${esc(amount)}</td>
+  </tr>`;
+}
+
+const invoiceRequestArg = v.object({
+  reference: v.string(),
+  type: v.string(),
+  customerName: v.string(),
+  amount: v.optional(v.number()),
+  requestId: v.string(),
+});
+
+/** Une facture vient de passer en « éditée » : règlement en attente. */
+export const sendInvoicePendingPayment = internalAction({
+  args: invoiceRequestArg,
+  handler: async (_ctx, request) => {
+    const { reference, type, customerName, amount } = request;
+    const label = typeLabel(type);
+    const html = shell({
+      preheader: `Facture éditée pour ${customerName} (#${reference}) — en attente de règlement.`,
+      audience: "staff",
+      heading: "Une facture attend son règlement 🧾",
+      intro: `La facture de la demande <strong>${esc(label)}</strong> de <strong>${esc(customerName)}</strong> (référence <strong>#${esc(reference)}</strong>) vient d'être éditée.<br/><br/>Dès que le règlement est encaissé, pense à <strong>cocher l'étape « Facture réglée »</strong> dans le CRM pour clôturer la demande.`,
+      contentHtml: `
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border:1px solid #ece9e4;border-radius:14px;overflow:hidden;background:#fffdfb;">
+          <tr><td style="padding:14px 16px;">
+            <p style="margin:0 0 6px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#a1a1aa;">Montant</p>
+            <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:22px;font-weight:800;color:${BRAND};">${esc(amount ? euro(amount) : "Non renseigné")}</p>
+          </td></tr>
+        </table>
+        <div style="margin:0 0 22px;">${button(`${appUrl()}/crm/demandes`, "Ouvrir le CRM")}</div>
+      `,
+    });
+    await resendSend(
+      INVOICE_STAFF_EMAILS,
+      `Facture à régler · ${label} #${reference}`,
+      html,
+    );
+  },
+});
+
+/** Récapitulatif de toutes les factures éditées en attente de règlement. */
+export const sendInvoicePendingDigest = internalAction({
+  args: { requests: v.array(invoiceRequestArg) },
+  handler: async (_ctx, { requests }) => {
+    if (requests.length === 0) return;
+    const total = requests.reduce((sum, r) => sum + (r.amount ?? 0), 0);
+    const count = requests.length;
+    const html = shell({
+      preheader: `${count} facture${count > 1 ? "s" : ""} éditée${count > 1 ? "s" : ""} en attente de règlement.`,
+      audience: "staff",
+      heading: "Factures en attente de règlement 🧾",
+      intro: `Voici les demandes dont la facture est éditée mais <strong>pas encore marquée comme réglée</strong> dans le CRM.<br/><br/>Pour chacune, une fois le règlement encaissé, coche l'étape <strong>« Facture réglée »</strong> pour clôturer la demande.`,
+      contentHtml: `
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 18px;border:1px solid #ece9e4;border-radius:14px;overflow:hidden;background:#fffdfb;">
+          <tr style="background:#faf8f5;">
+            <th align="left" style="padding:10px 12px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#a1a1aa;">Réf.</th>
+            <th align="left" style="padding:10px 12px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#a1a1aa;">Type</th>
+            <th align="left" style="padding:10px 12px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#a1a1aa;">Client</th>
+            <th align="right" style="padding:10px 12px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#a1a1aa;">Montant</th>
+          </tr>
+          ${requests.map(invoiceRow).join("")}
+        </table>
+        <p style="margin:0 0 22px;font-family:Helvetica,Arial,sans-serif;font-size:15px;color:#3f3f46;">
+          <strong>${count}</strong> facture${count > 1 ? "s" : ""} en attente · total <strong>${esc(euro(total))}</strong>
+        </p>
+        <div style="margin:0 0 22px;">${button(`${appUrl()}/crm/demandes`, "Ouvrir le CRM")}</div>
+      `,
+    });
+    await resendSend(
+      INVOICE_STAFF_EMAILS,
+      `${count} facture${count > 1 ? "s" : ""} en attente de règlement`,
+      html,
+    );
+  },
+});
