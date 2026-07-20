@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { CalendarCheck, CarFront, Clock, DoorOpen, MapPin, MessagesSquare, Search, Users } from "lucide-react";
+import { Boxes, CalendarCheck, CarFront, Clock, DoorOpen, MapPin, MessagesSquare, Search, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -21,6 +21,7 @@ import { formatDateTime } from "../lib/format";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { confirmPermanentDelete, alertDialog } from "../lib/confirm";
+import { BookEquipment } from "./Equipements";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -54,7 +55,7 @@ type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: st
 type Vehicle = { _id: Id<"vehicles">; name: string; plate?: string; kind: string; brand?: string; model?: string; seats?: number; reservablePro?: boolean; reservablePersonal?: boolean; site?: "60" | "76"; siteLabel?: string; photoUrl?: string | null; occupiedBy?: Occupied; unavailableReason?: string | null };
 type MyReservation = {
   _id: string;
-  kind: "room" | "vehicle";
+  kind: "room" | "vehicle" | "equipment";
   assetName: string;
   photoUrl?: string | null;
   usageType?: "pro" | "personal";
@@ -86,13 +87,32 @@ function isVehicleReservable(vehicle: Vehicle) {
 
 export function Reservations() {
   const [searchParams] = useSearchParams();
-  const tab = (["rooms", "vehicles", "mine"].includes(searchParams.get("v") ?? "") ? searchParams.get("v") : "rooms") as "rooms" | "vehicles" | "mine";
+  const access = usePermissionsAccess();
+  const canBookEquipment = canAccess(access, "mesoutils:equipements");
+  const tab = (["rooms", "vehicles", "equipment", "mine"].includes(searchParams.get("v") ?? "") ? searchParams.get("v") : "rooms") as "rooms" | "vehicles" | "equipment" | "mine";
 
   return (
     <div className="space-y-6">
       <SectionHeader title="Réservations" />
       <SectionTabs />
-      {tab === "mine" ? <MyReservations /> : <BrowseAndBook tab={tab} />}
+      {tab === "mine" ? (
+        <MyReservations />
+      ) : tab === "equipment" ? (
+        // Réutilise l'écran de réservation d'équipement : la page /equipements
+        // ne sert plus qu'à gérer le parc. L'onglet est masqué sans le droit,
+        // mais l'URL reste saisissable à la main.
+        canBookEquipment ? (
+          <BookEquipment />
+        ) : (
+          <EmptyState
+            icon={<Boxes className="h-8 w-8" />}
+            title="Accès non autorisé"
+            description="Vous n'avez pas accès à la réservation d'équipements."
+          />
+        )
+      ) : (
+        <BrowseAndBook tab={tab} />
+      )}
     </div>
   );
 }
@@ -657,9 +677,10 @@ function MyReservations() {
   const reservations = useQuery(api.reservations.listMyReservations) as MyReservation[] | undefined;
   const cancelRoom = useMutation(api.reservations.cancelRoomReservation);
   const cancelVehicle = useMutation(api.reservations.cancelVehicleReservation);
+  const cancelEquipment = useMutation(api.equipements.cancelEquipmentReservation);
   const submitVehicleFeedback = useMutation(api.reservations.submitVehicleFeedback);
   const submitRoomFeedback = useMutation(api.reservations.submitRoomFeedback);
-  const [filter, setFilter] = useState<"all" | "room" | "vehicle">("all");
+  const [filter, setFilter] = useState<"all" | "room" | "vehicle" | "equipment">("all");
   const [feedbackTarget, setFeedbackTarget] = useState<MyReservation | null>(null);
   const emptyFeedback = {
     mileage: "",
@@ -697,15 +718,22 @@ function MyReservations() {
   };
 
   async function cancelReservationWithConfirmation(reservation: MyReservation) {
-    const label = reservation.kind === "room" ? "cette réservation de salle" : "cette réservation de véhicule";
+    const label =
+      reservation.kind === "room"
+        ? "cette réservation de salle"
+        : reservation.kind === "vehicle"
+          ? "cette réservation de véhicule"
+          : "cette réservation d'équipement";
     const message = canDeleteForever
       ? `Êtes-vous sûr(e) de vouloir supprimer définitivement ${label} ?`
       : `Annuler ${label} ? Elle restera visible dans l'historique.`;
     if (!(await confirmPermanentDelete(message))) return;
     if (reservation.kind === "room") {
       void cancelRoom({ reservationId: reservation._id as Id<"roomReservations"> });
-    } else {
+    } else if (reservation.kind === "vehicle") {
       void cancelVehicle({ reservationId: reservation._id as Id<"vehicleReservations"> });
+    } else {
+      void cancelEquipment({ reservationId: reservation._id as Id<"equipmentReservations"> });
     }
   }
 
@@ -758,7 +786,7 @@ function MyReservations() {
   return (
     <div className="space-y-5">
       <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
-        {([{ key: "all", label: "Tous" }, { key: "room", label: "Salles" }, { key: "vehicle", label: "Véhicules" }] as const).map((o) => (
+        {([{ key: "all", label: "Tous" }, { key: "room", label: "Salles" }, { key: "vehicle", label: "Véhicules" }, { key: "equipment", label: "Équipements" }] as const).map((o) => (
           <button key={o.key} type="button" onClick={() => setFilter(o.key)} className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${filter === o.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}>{o.label}</button>
         ))}
       </div>
@@ -781,7 +809,13 @@ function MyReservations() {
                     <img src={reservation.photoUrl} alt="" className="h-full w-full object-cover" />
                   ) : (
                     <span className="flex h-full w-full items-center justify-center text-brand-600">
-                      {reservation.kind === "room" ? <DoorOpen className="h-4 w-4" /> : <CarFront className="h-4 w-4" />}
+                      {reservation.kind === "room" ? (
+                        <DoorOpen className="h-4 w-4" />
+                      ) : reservation.kind === "vehicle" ? (
+                        <CarFront className="h-4 w-4" />
+                      ) : (
+                        <Boxes className="h-4 w-4" />
+                      )}
                     </span>
                   )}
                 </span>

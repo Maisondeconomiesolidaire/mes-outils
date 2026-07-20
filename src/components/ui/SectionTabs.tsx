@@ -1,5 +1,6 @@
 import { useLocation, useSearchParams } from "react-router-dom";
-import { SECTION_SUBNAV, sectionForPath } from "../../lib/permissions";
+import { SECTION_SUBNAV, canAccess, sectionForPath } from "../../lib/permissions";
+import { usePermissionsAccess } from "../RequirePermission";
 import { UnderlineTabs } from "./UnderlineTabs";
 
 /**
@@ -9,8 +10,11 @@ import { UnderlineTabs } from "./UnderlineTabs";
 export function SectionTabs({ className }: { className?: string }) {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const access = usePermissionsAccess();
   const section = sectionForPath(location.pathname);
-  const subnav = (section && SECTION_SUBNAV[section.to]) ?? [];
+  const subnav = ((section && SECTION_SUBNAV[section.to]) ?? []).filter(
+    (item) => !item.pageKey || canAccess(access, item.pageKey),
+  );
   if (subnav.length === 0) return null;
 
   const active = searchParams.get("v") ?? subnav[0].key;

@@ -514,7 +514,11 @@ export const PORTAL_NAV = [
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },
 ] as const;
 
-export type SubNavItem = { key: string; label: string; icon: LucideIcon };
+/**
+ * `pageKey` : sous-onglet conditionné à un droit distinct de celui de la page
+ * qui l'héberge. Sans lui, l'onglet est visible dès que la page l'est.
+ */
+export type SubNavItem = { key: string; label: string; icon: LucideIcon; pageKey?: string };
 
 /** Sous-pages affichées dans la sidebar pour chaque section principale. */
 export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
@@ -526,6 +530,7 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
   "/reservations": [
     { key: "rooms", label: "Salles", icon: DoorOpen },
     { key: "vehicles", label: "Véhicules", icon: CarFront },
+    { key: "equipment", label: "Équipements", icon: Boxes, pageKey: "mesoutils:equipements" },
     { key: "mine", label: "Mes réservations", icon: CalendarCheck },
   ],
   "/gotravaux": [
@@ -541,11 +546,11 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
     { key: "remarques", label: "Remarques", icon: MessageSquareText },
     { key: "calendar", label: "Calendrier", icon: CalendarDays },
   ],
+  // Page de gestion, sur le modèle de /salles : le parc et le planning
+  // d'occupation. La réservation elle-même vit dans /reservations.
   "/equipements": [
-    { key: "book", label: "Réserver", icon: Boxes },
-    { key: "planning", label: "Planning", icon: CalendarClock },
-    { key: "mine", label: "Mes réservations", icon: CalendarCheck },
-    { key: "manage", label: "Équipements", icon: Wrench },
+    { key: "manage", label: "Équipements", icon: Boxes },
+    { key: "planning", label: "Réservations", icon: CalendarClock },
   ],
 };
 

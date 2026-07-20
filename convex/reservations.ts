@@ -588,11 +588,13 @@ export const listMyReservations = query({
     const identity = await requireUser(ctx);
     const me = identity.subject;
 
-    const [roomRes, vehicleRes, rooms, vehicles] = await Promise.all([
+    const [roomRes, vehicleRes, equipmentRes, rooms, vehicles, equipments] = await Promise.all([
       ctx.db.query("roomReservations").collect(),
       ctx.db.query("vehicleReservations").collect(),
+      ctx.db.query("equipmentReservations").collect(),
       ctx.db.query("rooms").collect(),
       ctx.db.query("vehicles").collect(),
+      ctx.db.query("equipments").collect(),
     ]);
     const roomInfo = new Map(
       await Promise.all(
@@ -618,6 +620,22 @@ export const listMyReservations = query({
                 name: vehicle.name,
                 photoUrl:
                   (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle.photoUrl) ?? null,
+              },
+            ] as const,
+        ),
+      ),
+    );
+    const equipmentInfo = new Map(
+      await Promise.all(
+        equipments.map(
+          async (equipment) =>
+            [
+              String(equipment._id),
+              {
+                name: equipment.name,
+                photoUrl:
+                  (equipment.photo ? await ctx.storage.getUrl(equipment.photo) : equipment.photoUrl) ??
+                  null,
               },
             ] as const,
         ),
@@ -667,6 +685,24 @@ export const listMyReservations = query({
           status: reservation.status,
           feedbackSubmittedAt: reservation.feedbackSubmittedAt,
           lastRecordedMileage: lastMileageByVehicleId.get(String(reservation.vehicleId)),
+        })),
+      // Les équipements se réservent depuis la même page que salles et
+      // véhicules : « Mes réservations » doit donc tout regrouper, sinon
+      // l'utilisateur n'aurait aucun endroit où retrouver ou annuler une
+      // réservation d'équipement.
+      ...equipmentRes
+        .filter((reservation) => reservation.clerkId === me || reservation.bookedForClerkId === me)
+        .map((reservation) => ({
+          _id: String(reservation._id),
+          kind: "equipment" as const,
+          assetName: equipmentInfo.get(String(reservation.equipmentId))?.name ?? "Équipement",
+          photoUrl: equipmentInfo.get(String(reservation.equipmentId))?.photoUrl ?? null,
+          usageType: undefined as "pro" | "personal" | undefined,
+          label: reservation.title,
+          start: reservation.start,
+          end: reservation.end,
+          status: reservation.status ?? ("confirmed" as const),
+          feedbackSubmittedAt: undefined as number | undefined,
         })),
     ];
     return mine.sort((a, b) => b.start - a.start);

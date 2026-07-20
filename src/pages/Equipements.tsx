@@ -75,16 +75,6 @@ type EquipmentReservation = {
   notes?: string;
 };
 
-type MyReservation = {
-  _id: string;
-  assetName: string;
-  photoUrl?: string | null;
-  label: string;
-  start: number;
-  end: number;
-  status: "confirmed" | "cancelled";
-};
-
 type DaySelection = { start: number; end: number };
 
 function startOfDayMs(input: number | Date): number {
@@ -100,27 +90,30 @@ function withTime(dayMs: number, time: string): number {
   return date.getTime();
 }
 
+/**
+ * Page de gestion du parc d'équipements, au même titre que Gotravaux pour les
+ * véhicules ou Salles pour les salles : on y administre les équipements et on y
+ * consulte leur planning. Réserver se fait depuis /reservations.
+ */
 export function Equipements() {
   const [searchParams] = useSearchParams();
-  const tab = (["book", "planning", "mine", "manage"].includes(searchParams.get("v") ?? "")
+  const tab = (["manage", "planning"].includes(searchParams.get("v") ?? "")
     ? searchParams.get("v")
-    : "book") as "book" | "planning" | "mine" | "manage";
+    : "manage") as "manage" | "planning";
 
   return (
     <div className="space-y-6">
       <SectionHeader title="Équipements" />
       <SectionTabs />
-      {tab === "book" ? <BookEquipment /> : null}
-      {tab === "planning" ? <EquipmentPlanning /> : null}
-      {tab === "mine" ? <MyEquipmentReservations /> : null}
       {tab === "manage" ? <ManageEquipments /> : null}
+      {tab === "planning" ? <EquipmentPlanning /> : null}
     </div>
   );
 }
 
-// ─── Réserver ────────────────────────────────────────────────────────────────
+// ─── Réserver (monté depuis /reservations) ───────────────────────────────────
 
-function BookEquipment() {
+export function BookEquipment() {
   const access = usePermissionsAccess();
   const canCreate = canAccess(access, "mesoutils:equipements", "create");
 
@@ -534,71 +527,6 @@ function EquipmentPlanning() {
           </div>
         ) : null}
       </Modal>
-    </div>
-  );
-}
-
-// ─── Mes réservations ────────────────────────────────────────────────────────
-
-function MyEquipmentReservations() {
-  const access = usePermissionsAccess();
-  const canDeleteForever = access?.email?.trim().toLowerCase() === "lahmerselim@gmail.com";
-  const reservations = useQuery(api.equipements.listMyEquipmentReservations) as MyReservation[] | undefined;
-  const cancel = useMutation(api.equipements.cancelEquipmentReservation);
-
-  if (reservations === undefined) return <FullSpinner label="Chargement de vos réservations..." />;
-
-  const statusLabel: Record<MyReservation["status"], string> = { confirmed: "Confirmée", cancelled: "Annulée" };
-  const statusStyle: Record<MyReservation["status"], string> = {
-    confirmed: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
-    cancelled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200",
-  };
-
-  async function cancelWithConfirmation(reservation: MyReservation) {
-    const message = canDeleteForever
-      ? "Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation d'équipement ?"
-      : "Annuler cette réservation d'équipement ? Elle restera visible dans l'historique.";
-    if (!(await confirmPermanentDelete(message))) return;
-    void cancel({ reservationId: reservation._id as Id<"equipmentReservations"> });
-  }
-
-  if (reservations.length === 0) {
-    return <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Aucune réservation" description="Vos réservations d'équipements s'afficheront ici." />;
-  }
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] divide-y divide-[var(--border)]">
-      {reservations.map((reservation) => {
-        const past = reservation.end < Date.now();
-        return (
-          <div key={reservation._id} className="flex flex-wrap items-center gap-3 p-4">
-            <span className={`h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-[var(--accent)] ${past ? "opacity-60" : ""}`}>
-              {reservation.photoUrl ? (
-                <img src={reservation.photoUrl} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <span className="flex h-full w-full items-center justify-center text-brand-600">
-                  <Boxes className="h-4 w-4" />
-                </span>
-              )}
-            </span>
-            <div className={`min-w-0 flex-1 ${past ? "opacity-60" : ""}`}>
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="font-semibold text-[var(--foreground)]">{reservation.assetName}</p>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${statusStyle[reservation.status]}`}>
-                  {statusLabel[reservation.status]}
-                </span>
-              </div>
-              <p className="truncate text-sm text-[var(--muted-foreground)]">{reservation.label}</p>
-              <p className="text-xs text-[var(--muted-foreground)]">{formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}</p>
-            </div>
-            {!past && reservation.status !== "cancelled" ? (
-              <Button variant="ghost" size="sm" onClick={() => cancelWithConfirmation(reservation)}>
-                {canDeleteForever ? "Supprimer" : "Annuler"}
-              </Button>
-            ) : null}
-          </div>
-        );
-      })}
     </div>
   );
 }
