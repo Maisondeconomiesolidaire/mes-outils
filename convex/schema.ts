@@ -1452,6 +1452,8 @@ export default defineSchema(
     style: v.optional(v.string()),
     location: v.optional(v.string()),
     sku: v.optional(v.string()),
+    // Article mis en vente sur Vinted (case cochée dans le stock Klyd).
+    vinted: v.optional(v.boolean()),
     quantity: v.number(),
     status: v.union(
       v.literal("stock"),

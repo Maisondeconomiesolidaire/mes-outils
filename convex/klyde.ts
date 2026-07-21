@@ -1,4 +1,5 @@
 import { action, internalQuery, mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -151,6 +152,23 @@ function normalizePrice(value?: number | null) {
 function normalizeQuantity(value?: number) {
   if (!value || Number.isNaN(value) || value < 1) return 1;
   return Math.floor(value);
+}
+
+/**
+ * Génère une référence interne unique (6 chiffres) pour un article Klyd.
+ * Même principe que la réf. interne de la boutique recyclerie : on tire au
+ * hasard jusqu'à tomber sur une référence libre (vérifiée via l'index by_sku).
+ */
+async function generateKlydeReference(ctx: MutationCtx): Promise<string> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const candidate = String(Math.floor(Math.random() * 1_000_000)).padStart(6, "0");
+    const existing = await ctx.db
+      .query("klydeItems")
+      .withIndex("by_sku", (q) => q.eq("sku", candidate))
+      .first();
+    if (!existing) return candidate;
+  }
+  throw new Error("Impossible de générer une référence unique.");
 }
 
 function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
@@ -478,6 +496,7 @@ export const create = mutation({
     style: v.optional(v.string()),
     location: v.optional(v.string()),
     sku: v.optional(v.string()),
+    vinted: v.optional(v.boolean()),
     quantity: v.optional(v.number()),
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
@@ -486,6 +505,8 @@ export const create = mutation({
     await requireCrmPermission(ctx, "klyde:stock", "create");
     if (args.photos.length === 0) throw new Error("Ajoutez au moins une photo.");
     const now = Date.now();
+    // Référence auto si l'utilisateur n'en a pas saisi.
+    const sku = cleanOptional(args.sku) ?? (await generateKlydeReference(ctx));
     return await ctx.db.insert("klydeItems", {
       photos: args.photos,
       title: args.title.trim() || "Article textile",
@@ -502,7 +523,8 @@ export const create = mutation({
       gender: cleanOptional(args.gender),
       style: cleanOptional(args.style),
       location: cleanOptional(args.location),
-      sku: cleanOptional(args.sku),
+      sku,
+      vinted: args.vinted ? true : undefined,
       quantity: normalizeQuantity(args.quantity),
       status: "stock",
       aiConfidence: args.aiConfidence,
@@ -565,6 +587,7 @@ export const update = mutation({
     style: v.optional(v.string()),
     location: v.optional(v.string()),
     sku: v.optional(v.string()),
+    vinted: v.optional(v.boolean()),
     quantity: v.optional(v.number()),
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
@@ -572,6 +595,8 @@ export const update = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "klyde:stock", "update");
     if (args.photos.length === 0) throw new Error("Ajoutez au moins une photo.");
+    // On complète la référence si elle manque encore (articles antérieurs).
+    const sku = cleanOptional(args.sku) ?? (await generateKlydeReference(ctx));
     await ctx.db.patch(args.id, {
       photos: args.photos,
       title: args.title.trim() || "Article textile",
@@ -588,7 +613,8 @@ export const update = mutation({
       gender: cleanOptional(args.gender),
       style: cleanOptional(args.style),
       location: cleanOptional(args.location),
-      sku: cleanOptional(args.sku),
+      sku,
+      vinted: args.vinted ? true : undefined,
       quantity: normalizeQuantity(args.quantity),
       aiConfidence: args.aiConfidence,
       aiNotes: cleanOptional(args.aiNotes),
