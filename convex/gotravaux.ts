@@ -374,6 +374,17 @@ export const updateVehicleTask = mutation({
         odometerKm: nextOdometerKm,
       });
     }
+    // Passer « en cours » exige au minimum la date d'intervention : une
+    // maintenance qu'on démarre est planifiée à une date, et sans elle elle
+    // n'apparaît pas dans l'agenda flotte (filtré sur `dueDate`).
+    if (
+      args.status === "in_progress" &&
+      (typeof nextDueDate !== "number" || !Number.isFinite(nextDueDate))
+    ) {
+      throw new Error(
+        "Renseignez la date d'intervention pour passer la maintenance en cours.",
+      );
+    }
 
     const patch: {
       status?: "todo" | "in_progress" | "done";

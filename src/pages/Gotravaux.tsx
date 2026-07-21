@@ -833,12 +833,15 @@ function MaintenanceSteps({
   task: VehicleTask;
   canEdit: boolean;
   onChangeStatus: (status: TaskStatus) => void;
-  /** Ouvre l'édition pour saisir ce qui manque à la clôture. */
-  onFixMissing: () => void;
+  /** Ouvre l'édition pour saisir ce qui manque à l'étape visée (date, coût…). */
+  onFixMissing: (target: TaskStatus) => void;
 }) {
   const currentIndex = MAINTENANCE_STEPS.findIndex((step) => step.status === task.status);
   const missing = missingClosingFields(task);
   const blockers: Partial<Record<TaskStatus, string>> = {};
+  if (typeof task.dueDate !== "number") {
+    blockers.in_progress = "Renseignez la date d'intervention avant de passer en cours.";
+  }
   if (missing.length > 0) {
     blockers.done = `Renseignez ${formatList(missing)} avant de terminer.`;
   }
@@ -874,7 +877,7 @@ function MaintenanceSteps({
                 disabled={!actionable}
                 onClick={() => {
                   if (isNext && blocker) {
-                    onFixMissing();
+                    onFixMissing(step.status);
                     return;
                   }
                   onChangeStatus(isLastDone ? MAINTENANCE_STEPS[index - 1].status : step.status);
@@ -1659,6 +1662,11 @@ function MaintenanceDetailsModal({
         return;
       }
     }
+    // Miroir du serveur : passer « en cours » impose la date d'intervention.
+    if (status === "in_progress" && range.start == null) {
+      setError("Renseignez la date d'intervention pour passer la maintenance en cours.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -1748,11 +1756,13 @@ function MaintenanceDetailsModal({
               setStatus(nextStatus);
               void onUpdate({ taskId: currentTask._id, status: nextStatus });
             }}
-            onFixMissing={() => {
-              setStatus("done");
+            onFixMissing={(target) => {
+              setStatus(target);
               setEditing(true);
               setError(
-                `Renseignez ${formatList(missingClosingFields(currentTask))} pour terminer la maintenance.`,
+                target === "done"
+                  ? `Renseignez ${formatList(missingClosingFields(currentTask))} pour terminer la maintenance.`
+                  : "Renseignez la date d'intervention pour passer la maintenance en cours.",
               );
             }}
           />
