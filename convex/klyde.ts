@@ -810,8 +810,10 @@ export const generateTryOn = action({
     modelImageUrl: v.string(),
     // Générer un fond studio à la place du fond vert (défaut: oui).
     generateBackground: v.optional(v.boolean()),
+    // Qualité/résolution de sortie FASHN (défaut: 2k).
+    resolution: v.optional(v.union(v.literal("1k"), v.literal("2k"), v.literal("4k"))),
   },
-  handler: async (ctx, { storageId, modelImageUrl, generateBackground }) => {
+  handler: async (ctx, { storageId, modelImageUrl, generateBackground, resolution }) => {
     await ctx.runQuery(internal.klyde.assertCanAnalyze, {});
 
     const apiKey = process.env.FASHN_API_KEY;
@@ -821,6 +823,7 @@ export const generateTryOn = action({
     if (!/^https?:\/\//i.test(modelImageUrl)) {
       throw new Error("Image du mannequin invalide.");
     }
+    const outputResolution = resolution ?? "2k";
 
     const productUrl = await ctx.storage.getUrl(storageId);
     if (!productUrl) throw new Error("Photo introuvable dans le stockage Convex.");
@@ -829,7 +832,7 @@ export const generateTryOn = action({
     let resultUrl = await runFashnPrediction(apiKey, "tryon-max", {
       product_image: productUrl,
       model_image: modelImageUrl,
-      resolution: "2k",
+      resolution: outputResolution,
       generation_mode: "quality",
       output_format: "png",
       num_images: 1,
@@ -843,7 +846,7 @@ export const generateTryOn = action({
           "Replace the background with a professional but natural photo studio backdrop, " +
           "soft even lighting, subtle floor shadow, high-end e-commerce catalog look. " +
           "Keep the person, pose, body and clothing exactly the same.",
-        resolution: "2k",
+        resolution: outputResolution,
         generation_mode: "quality",
         output_format: "png",
         num_images: 1,
