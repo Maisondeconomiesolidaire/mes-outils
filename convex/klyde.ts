@@ -799,21 +799,17 @@ async function runFashnPrediction(
 /**
  * Essayage virtuel FASHN (« Try-On Max ») : place l'article (photo à plat, fond
  * vert) sur le mannequin (image) choisi par l'utilisateur, avec une fidélité
- * prête à publier. En option (par défaut activée), un second passage FASHN
- * « edit » génère un fond studio professionnel mais naturel à la place du fond
- * vert. L'image finale est téléchargée puis stockée dans Convex.
+ * prête à publier. L'image générée est téléchargée puis stockée dans Convex.
  */
 export const generateTryOn = action({
   args: {
     storageId: v.id("_storage"),
     // Image du mannequin choisi (asset public de l'app Klyd), URL absolue.
     modelImageUrl: v.string(),
-    // Générer un fond studio à la place du fond vert (défaut: oui).
-    generateBackground: v.optional(v.boolean()),
     // Qualité/résolution de sortie FASHN (défaut: 2k).
     resolution: v.optional(v.union(v.literal("1k"), v.literal("2k"), v.literal("4k"))),
   },
-  handler: async (ctx, { storageId, modelImageUrl, generateBackground, resolution }) => {
+  handler: async (ctx, { storageId, modelImageUrl, resolution }) => {
     await ctx.runQuery(internal.klyde.assertCanAnalyze, {});
 
     const apiKey = process.env.FASHN_API_KEY;
@@ -828,8 +824,8 @@ export const generateTryOn = action({
     const productUrl = await ctx.storage.getUrl(storageId);
     if (!productUrl) throw new Error("Photo introuvable dans le stockage Convex.");
 
-    // 1) Try-On Max : l'article porté par le mannequin, fidélité maximale.
-    let resultUrl = await runFashnPrediction(apiKey, "tryon-max", {
+    // Try-On Max : l'article porté par le mannequin, fidélité maximale.
+    const resultUrl = await runFashnPrediction(apiKey, "tryon-max", {
       product_image: productUrl,
       model_image: modelImageUrl,
       resolution: outputResolution,
@@ -838,22 +834,7 @@ export const generateTryOn = action({
       num_images: 1,
     });
 
-    // 2) Génération du fond studio (les prises de vue sont sur fond vert).
-    if (generateBackground !== false) {
-      resultUrl = await runFashnPrediction(apiKey, "edit", {
-        image: resultUrl,
-        prompt:
-          "Replace the background with a professional but natural photo studio backdrop, " +
-          "soft even lighting, subtle floor shadow, high-end e-commerce catalog look. " +
-          "Keep the person, pose, body and clothing exactly the same.",
-        resolution: outputResolution,
-        generation_mode: "quality",
-        output_format: "png",
-        num_images: 1,
-      });
-    }
-
-    // 3) Téléchargement et stockage de l'image générée dans Convex.
+    // Téléchargement et stockage de l'image générée dans Convex.
     const imageResponse = await fetch(resultUrl);
     if (!imageResponse.ok) throw new Error("Image générée par FASHN inaccessible.");
     const blob = await imageResponse.blob();
