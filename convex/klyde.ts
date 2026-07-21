@@ -796,42 +796,105 @@ async function runFashnPrediction(
   throw new Error("Génération FASHN expirée, réessayez.");
 }
 
+/** Traduit le genre d'un article Klyd en sujet pour le prompt FASHN. */
+function genderToSubject(gender?: string | null): string {
+  switch (cleanOptional(gender)) {
+    case "Femme":
+      return "une femme";
+    case "Homme":
+      return "un homme";
+    case "Enfant":
+      return "un enfant";
+    case "Bébé":
+      return "un bébé";
+    default:
+      return "une personne dont le physique met le mieux en valeur ce vêtement";
+  }
+}
+
 /**
- * Essayage virtuel FASHN (« Try-On Max ») : place l'article (photo à plat, fond
- * vert) sur le mannequin (image) choisi par l'utilisateur, avec une fidélité
- * prête à publier. L'image générée est téléchargée puis stockée dans Convex.
+ * Construit un prompt créatif : un mannequin et un environnement/univers
+ * choisis pour correspondre au vêtement (type, style, couleur, saison), afin
+ * de générer une scène cohérente et variée à chaque fois.
+ */
+function buildTryOnPrompt(garment?: {
+  category?: string;
+  subcategory?: string;
+  gender?: string;
+  style?: string;
+  color?: string;
+  brand?: string;
+}): string {
+  const subject = genderToSubject(garment?.gender);
+  const descriptors = [
+    cleanOptional(garment?.subcategory) ?? cleanOptional(garment?.category),
+    cleanOptional(garment?.style),
+    cleanOptional(garment?.color),
+    cleanOptional(garment?.brand),
+  ].filter(Boolean);
+  const garmentDesc = descriptors.length ? ` (${descriptors.join(", ")})` : "";
+
+  return (
+    `Photographie de mode éditoriale haut de gamme, ultra réaliste : ${subject}, ` +
+    `au style et à l'allure parfaitement assortis à ce vêtement${garmentDesc}, ` +
+    `portant l'article de façon naturelle. ` +
+    `Compose un mannequin crédible ET un environnement/univers sur mesure qui ` +
+    `correspond à l'esprit du vêtement : choisis le décor, le lieu, la saison, ` +
+    `la lumière, les couleurs et l'atmosphère qui racontent le mieux son histoire. ` +
+    `Sois créatif et varie les contextes à chaque génération (studio, extérieur, ` +
+    `scène urbaine, nature, intérieur stylé…), tant que la scène reste cohérente ` +
+    `avec le style du vêtement. Cadrage plein pied, composition soignée, ` +
+    `rendu premium type lookbook / e-commerce de marque.`
+  );
+}
+
+/**
+ * Génération d'essayage FASHN (« product-to-model ») : à partir de la photo à
+ * plat de l'article, FASHN crée un tout nouveau mannequin ET un environnement
+ * sur mesure assortis au vêtement (type, style, couleur, saison). Un seed
+ * aléatoire assure des univers variés à chaque génération. L'image est
+ * téléchargée puis stockée dans Convex.
  */
 export const generateTryOn = action({
   args: {
     storageId: v.id("_storage"),
-    // Image du mannequin choisi (asset public de l'app Klyd), URL absolue.
-    modelImageUrl: v.string(),
     // Qualité/résolution de sortie FASHN (défaut: 2k).
     resolution: v.optional(v.union(v.literal("1k"), v.literal("2k"), v.literal("4k"))),
+    // Attributs de l'article pour orienter le mannequin et l'univers généré.
+    garment: v.optional(
+      v.object({
+        category: v.optional(v.string()),
+        subcategory: v.optional(v.string()),
+        gender: v.optional(v.string()),
+        style: v.optional(v.string()),
+        color: v.optional(v.string()),
+        brand: v.optional(v.string()),
+      }),
+    ),
   },
-  handler: async (ctx, { storageId, modelImageUrl, resolution }) => {
+  handler: async (ctx, { storageId, resolution, garment }) => {
     await ctx.runQuery(internal.klyde.assertCanAnalyze, {});
 
     const apiKey = process.env.FASHN_API_KEY;
     if (!apiKey) {
       throw new Error("Clé FASHN absente du déploiement Convex partagé.");
     }
-    if (!/^https?:\/\//i.test(modelImageUrl)) {
-      throw new Error("Image du mannequin invalide.");
-    }
     const outputResolution = resolution ?? "2k";
 
     const productUrl = await ctx.storage.getUrl(storageId);
     if (!productUrl) throw new Error("Photo introuvable dans le stockage Convex.");
 
-    // Try-On Max : l'article porté par le mannequin, fidélité maximale.
-    const resultUrl = await runFashnPrediction(apiKey, "tryon-max", {
+    // product-to-model : nouveau mannequin + environnement assortis au vêtement.
+    const resultUrl = await runFashnPrediction(apiKey, "product-to-model", {
       product_image: productUrl,
-      model_image: modelImageUrl,
+      prompt: buildTryOnPrompt(garment),
+      aspect_ratio: "4:5",
       resolution: outputResolution,
       generation_mode: "quality",
       output_format: "png",
       num_images: 1,
+      // Seed aléatoire : un univers différent à chaque génération.
+      seed: Math.floor(Math.random() * 2_147_483_647),
     });
 
     // Téléchargement et stockage de l'image générée dans Convex.
