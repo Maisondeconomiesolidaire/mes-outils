@@ -500,10 +500,22 @@ export const create = mutation({
     quantity: v.optional(v.number()),
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
+    // Publier directement l'annonce sur la boutique à la création.
+    publishOnline: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "klyde:stock", "create");
     if (args.photos.length === 0) throw new Error("Ajoutez au moins une photo.");
+    // Mise en ligne immédiate : mêmes droits que updateStatus("en_ligne").
+    if (args.publishOnline) {
+      await requireAnyCrmPermission(ctx, [
+        ["klyde:boutique", "manage"],
+        ["klyde:stock", "update"],
+      ]);
+      if (normalizePrice(args.price) == null) {
+        throw new Error("Renseignez un prix pour mettre l'article en ligne.");
+      }
+    }
     const now = Date.now();
     // Référence auto si l'utilisateur n'en a pas saisi.
     const sku = cleanOptional(args.sku) ?? (await generateKlydeReference(ctx));
@@ -526,7 +538,7 @@ export const create = mutation({
       sku,
       vinted: args.vinted ? true : undefined,
       quantity: normalizeQuantity(args.quantity),
-      status: "stock",
+      status: args.publishOnline ? "en_ligne" : "stock",
       aiConfidence: args.aiConfidence,
       aiNotes: cleanOptional(args.aiNotes),
       createdAt: now,
@@ -729,5 +741,103 @@ ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim
     });
 
     return sanitizeAnalysis(result);
+  },
+});
+
+/**
+ * Essayage virtuel FASHN (« product-to-model ») : à partir de la photo à plat
+ * d'un article, génère une image de l'article porté par un mannequin homme ou
+ * femme sur fond studio professionnel mais naturel. L'image générée est
+ * téléchargée puis stockée dans Convex et renvoyée pour l'ajouter à la fiche.
+ */
+export const generateTryOn = action({
+  args: {
+    storageId: v.id("_storage"),
+    gender: v.union(v.literal("homme"), v.literal("femme")),
+    // Type de vêtement (sous-catégorie ou catégorie) pour orienter le prompt.
+    garmentType: v.optional(v.string()),
+  },
+  handler: async (ctx, { storageId, gender, garmentType }) => {
+    await ctx.runQuery(internal.klyde.assertCanAnalyze, {});
+
+    const apiKey = process.env.FASHN_API_KEY;
+    if (!apiKey) {
+      throw new Error("Clé FASHN absente du déploiement Convex partagé.");
+    }
+
+    const productUrl = await ctx.storage.getUrl(storageId);
+    if (!productUrl) throw new Error("Photo introuvable dans le stockage Convex.");
+
+    const person = gender === "homme" ? "un homme" : "une femme";
+    const garment = cleanOptional(garmentType)
+      ? `l'article (${cleanOptional(garmentType)})`
+      : "l'article";
+    const prompt =
+      `Photo de mode en pied : ${person} portant ${garment}, ` +
+      `fond studio professionnel mais naturel, lumière douce et homogène, ` +
+      `pose élégante et décontractée, rendu e-commerce haut de gamme, réaliste.`;
+
+    // 1) Lancement de la prédiction (meilleure qualité disponible).
+    const runResponse = await fetch("https://api.fashn.ai/v1/run", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model_name: "product-to-model",
+        inputs: {
+          product_image: productUrl,
+          prompt,
+          aspect_ratio: "4:5",
+          resolution: "2k",
+          generation_mode: "quality",
+          output_format: "png",
+          num_images: 1,
+        },
+      }),
+    });
+    if (!runResponse.ok) {
+      const errorText = await runResponse.text();
+      throw new Error(`Erreur FASHN (${runResponse.status}): ${errorText.slice(0, 300)}`);
+    }
+    const runData = (await runResponse.json()) as { id?: string; error?: unknown };
+    if (runData.error || !runData.id) {
+      throw new Error(`FASHN: ${JSON.stringify(runData.error ?? "réponse invalide").slice(0, 300)}`);
+    }
+
+    // 2) Attente du résultat (polling ; la génération « quality » prend ~1 min).
+    const deadline = Date.now() + 170_000;
+    let outputUrl: string | undefined;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const statusResponse = await fetch(`https://api.fashn.ai/v1/status/${runData.id}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (!statusResponse.ok) continue;
+      const statusData = (await statusResponse.json()) as {
+        status?: string;
+        output?: string[];
+        error?: unknown;
+      };
+      if (statusData.status === "completed") {
+        outputUrl = statusData.output?.[0];
+        break;
+      }
+      if (statusData.status === "failed" || statusData.error) {
+        throw new Error(
+          `Génération FASHN échouée: ${JSON.stringify(statusData.error ?? "inconnue").slice(0, 300)}`,
+        );
+      }
+    }
+    if (!outputUrl) throw new Error("Génération FASHN expirée, réessayez.");
+
+    // 3) Téléchargement et stockage de l'image générée dans Convex.
+    const imageResponse = await fetch(outputUrl);
+    if (!imageResponse.ok) throw new Error("Image générée par FASHN inaccessible.");
+    const blob = await imageResponse.blob();
+    const newStorageId = await ctx.storage.store(blob);
+    const url = await ctx.storage.getUrl(newStorageId);
+    return { storageId: newStorageId, url };
   },
 });
