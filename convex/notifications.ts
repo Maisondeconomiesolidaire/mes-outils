@@ -1,5 +1,11 @@
 import { mutation, query } from "./_generated/server";
-import { titleCaseName, requireCrmPermission, hasCrmPermission } from "./lib";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import {
+  titleCaseName,
+  requireCrmPermission,
+  hasCrmPermission,
+  requireUser,
+} from "./lib";
 import type { Doc } from "./_generated/dataModel";
 
 function currentProcessStep(request: Doc<"requests">) {
@@ -149,32 +155,76 @@ export const list = query({
   },
 });
 
+/** Repère de lecture personnel d'un compte (null s'il n'a jamais ouvert la page). */
+async function readState(ctx: QueryCtx | MutationCtx, clerkId: string) {
+  return await ctx.db
+    .query("notificationReads")
+    .withIndex("by_clerkId", (q) => q.eq("clerkId", clerkId))
+    .unique();
+}
+
+/**
+ * Nombre de notifications non lues **par utilisateur**.
+ *
+ * Chacun a son propre repère de lecture : qu'un collègue ouvre la page ne
+ * remet pas le compteur des autres à zéro.
+ *
+ * Tant qu'un compte n'a jamais ouvert la page, il n'a pas de repère — on
+ * retombe alors sur l'ancien drapeau global `read`, qui sert de valeur de
+ * départ. Évite qu'au déploiement tout le monde se retrouve avec l'historique
+ * complet des notifications d'un coup, sans avoir à migrer les données.
+ */
 export const unreadCount = query({
   args: {},
   handler: async (ctx) => {
-    // Badge permanent → 0 sans erreur si pas d'accès notifications.
+    // Badge permanent → 0 sans erreur si pas connecté ou pas d'accès
+    // notifications. L'identité se lit avant `hasCrmPermission`, qui lève
+    // quand personne n'est authentifié.
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return 0;
     if (!(await hasCrmPermission(ctx, "notifications", "read"))) return 0;
-    const unread = await ctx.db
+
+    const state = await readState(ctx, identity.subject);
+    if (!state) {
+      const unread = await ctx.db
+        .query("notifications")
+        .withIndex("by_read_and_createdAt", (q) => q.eq("read", false))
+        .collect();
+      return unread.length;
+    }
+
+    const since = await ctx.db
       .query("notifications")
-      .withIndex("by_read_and_createdAt", (q) => q.eq("read", false))
+      .withIndex("by_createdAt", (q) => q.gt("createdAt", state.lastReadAt))
       .collect();
-    return unread.length;
+    return since.length;
   },
 });
 
+/**
+ * L'utilisateur courant a tout vu : on avance **son** repère de lecture.
+ *
+ * Ne touche plus au drapeau global `read` — c'était lui qui vidait le
+ * compteur de toute l'équipe. Demande le droit `read` et non `manage` :
+ * marquer ses propres notifications comme vues n'est pas un acte
+ * d'administration, et sans ça un compte en lecture seule ne pourrait jamais
+ * faire retomber son badge.
+ */
 export const markAllRead = mutation({
   args: {},
   handler: async (ctx) => {
-    await requireCrmPermission(ctx, "notifications", "manage");
-    const unread = await ctx.db
-      .query("notifications")
-      .withIndex("by_read_and_createdAt", (q) => q.eq("read", false))
-      .collect();
+    await requireCrmPermission(ctx, "notifications", "read");
+    const identity = await requireUser(ctx);
 
-    await Promise.all(
-      unread.map((notification) =>
-        ctx.db.patch(notification._id, { read: true }),
-      ),
-    );
+    const now = Date.now();
+    const state = await readState(ctx, identity.subject);
+    if (state) {
+      await ctx.db.patch(state._id, { lastReadAt: now });
+      return;
+    }
+    await ctx.db.insert("notificationReads", {
+      clerkId: identity.subject,
+      lastReadAt: now,
+    });
   },
 });

@@ -630,6 +630,20 @@ export default defineSchema(
     .index("by_createdAt", ["createdAt"])
     .index("by_requestId", ["requestId"]),
 
+  /**
+   * Repère de lecture des notifications CRM, **par utilisateur**.
+   *
+   * Le drapeau `read` de `notifications` est global : quand quelqu'un ouvrait
+   * la page, le compteur retombait à zéro pour toute l'équipe. On stocke donc
+   * ici, par compte Clerk, la date jusqu'à laquelle il a tout vu — une
+   * notification postérieure à ce repère lui est « non lue », indépendamment
+   * des autres. Un seul document par utilisateur, pas un par notification.
+   */
+  notificationReads: defineTable({
+    clerkId: v.string(),
+    lastReadAt: v.number(),
+  }).index("by_clerkId", ["clerkId"]),
+
   teamMembers: defineTable({
     name: v.string(),
     role: v.optional(v.string()),
