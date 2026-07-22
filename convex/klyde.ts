@@ -98,6 +98,7 @@ const GENDERS = ["Femme", "Homme", "Enfant", "Bébé", "Unisexe"] as const;
 
 const itemStatus = v.union(
   v.literal("stock"),
+  v.literal("stock_b"),
   v.literal("en_ligne"),
   v.literal("en_cours_envoi"),
   v.literal("envoye"),
@@ -499,6 +500,7 @@ export const create = mutation({
     color: v.optional(v.string()),
     material: v.optional(v.string()),
     price: v.optional(v.number()),
+    actualSalePrice: v.optional(v.number()),
     parcelSize: v.optional(v.string()),
     gender: v.optional(v.string()),
     style: v.optional(v.string()),
@@ -540,6 +542,7 @@ export const create = mutation({
       color: cleanOptional(args.color),
       material: cleanOptional(args.material),
       price: normalizePrice(args.price),
+      actualSalePrice: normalizePrice(args.actualSalePrice),
       parcelSize: cleanOptional(args.parcelSize),
       gender: cleanOptional(args.gender),
       style: cleanOptional(args.style),
@@ -577,6 +580,70 @@ export const updateStatus = mutation({
   },
 });
 
+/** Prix effectivement encaissé : distinct du prix catalogue de l'article. */
+export const setActualSalePrice = mutation({
+  args: { id: v.id("klydeItems"), actualSalePrice: v.optional(v.number()) },
+  handler: async (ctx, { id, actualSalePrice }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    await ctx.db.patch(id, {
+      actualSalePrice: normalizePrice(actualSalePrice),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Décision après trois semaines sur Vinted : retrait vers Stock B. */
+export const moveToStockB = mutation({
+  args: { id: v.id("klydeItems") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    await ctx.db.patch(id, {
+      status: "stock_b",
+      vinted: undefined,
+      vintedAt: undefined,
+      vintedAlertSentAt: undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Prolonge une annonce Vinted et redémarre son délai de trois semaines. */
+export const extendVintedListing = mutation({
+  args: { id: v.id("klydeItems") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    if (!item.vinted) throw new Error("Cet article n'est pas en vente sur Vinted.");
+    const now = Date.now();
+    await ctx.db.patch(id, {
+      vintedAt: now,
+      vintedAlertSentAt: undefined,
+      vintedExtensionCount: (item.vintedExtensionCount ?? 0) + 1,
+      vintedLastExtendedAt: now,
+      updatedAt: now,
+    });
+  },
+});
+
+/** Oriente un article de Stock B vers une vente exceptionnelle ou le magasin. */
+export const setStockBDisposition = mutation({
+  args: {
+    id: v.id("klydeItems"),
+    disposition: v.union(v.literal("vente_exceptionnelle"), v.literal("magasin")),
+  },
+  handler: async (ctx, { id, disposition }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item || item.status !== "stock_b") throw new Error("Article Stock B introuvable.");
+    await ctx.db.patch(id, { stockBDisposition: disposition, updatedAt: Date.now() });
+  },
+});
+
 export const updateTrackingNotes = mutation({
   args: {
     id: v.id("klydeItems"),
@@ -605,6 +672,7 @@ export const update = mutation({
     color: v.optional(v.string()),
     material: v.optional(v.string()),
     price: v.optional(v.number()),
+    actualSalePrice: v.optional(v.number()),
     parcelSize: v.optional(v.string()),
     gender: v.optional(v.string()),
     style: v.optional(v.string()),
@@ -639,6 +707,7 @@ export const update = mutation({
       color: cleanOptional(args.color),
       material: cleanOptional(args.material),
       price: normalizePrice(args.price),
+      actualSalePrice: normalizePrice(args.actualSalePrice),
       parcelSize: cleanOptional(args.parcelSize),
       gender: cleanOptional(args.gender),
       style: cleanOptional(args.style),

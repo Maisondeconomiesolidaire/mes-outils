@@ -1447,6 +1447,9 @@ export default defineSchema(
     color: v.optional(v.string()),
     material: v.optional(v.string()),
     price: v.optional(v.number()),
+    // Prix réellement encaissé. Il peut être inférieur au prix affiché après
+    // acceptation d'une offre ; c'est cette valeur qui sert au chiffre d'affaires.
+    actualSalePrice: v.optional(v.number()),
     parcelSize: v.optional(v.string()),
     gender: v.optional(v.string()),
     style: v.optional(v.string()),
@@ -1458,11 +1461,20 @@ export default defineSchema(
     vintedAt: v.optional(v.number()),
     // Date d'envoi de l'alerte email « 3 semaines sur Vinted » (anti-doublon).
     vintedAlertSentAt: v.optional(v.number()),
+    // Nombre de fois où l'annonce Vinted a été prolongée après l'alerte de 3 semaines.
+    vintedExtensionCount: v.optional(v.number()),
+    vintedLastExtendedAt: v.optional(v.number()),
+    // Décision prise lorsqu'un article sort de Stock B.
+    stockBDisposition: v.optional(v.union(
+      v.literal("vente_exceptionnelle"),
+      v.literal("magasin"),
+    )),
     // Enseigne à laquelle l'article est rattaché : Klyd ou Mobifrip.
     outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
     quantity: v.number(),
     status: v.union(
       v.literal("stock"),
+      v.literal("stock_b"),
       v.literal("en_ligne"),
       v.literal("en_cours_envoi"),
       v.literal("envoye"),
@@ -1854,6 +1866,8 @@ export default defineSchema(
     app: feedbackApp,
     type: feedbackType,
     description: v.string(),
+    /** Captures, photos ou documents fournis avec le retour. */
+    attachments: v.optional(v.array(v.id("_storage"))),
     status: feedbackStatus,
     /** Urgence choisie par l'auteur, modifiable par lui après coup. */
     priority: v.optional(feedbackPriority),

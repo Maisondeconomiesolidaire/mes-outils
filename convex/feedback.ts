@@ -107,6 +107,7 @@ export const submit = mutation({
     app: feedbackApp,
     type: feedbackType,
     description: v.string(),
+    attachments: v.optional(v.array(v.id("_storage"))),
     priority: v.optional(feedbackPriority),
   },
   handler: async (ctx, args) => {
@@ -127,6 +128,7 @@ export const submit = mutation({
       app: args.app,
       type: args.type,
       description,
+      attachments: args.attachments?.slice(0, 8),
       status: "nouveau",
       priority: args.priority ?? "normale",
       authorClerkId: identity.subject,
@@ -256,10 +258,14 @@ export const thread = query({
       item.authorClerkId,
       ...comments.map((comment) => comment.authorClerkId),
     ]);
+    const attachmentUrls = await Promise.all(
+      (item.attachments ?? []).map((attachment) => ctx.storage.getUrl(attachment)),
+    );
     return {
       item: {
         ...item,
         authorImageUrl: livePhoto(photos, item.authorClerkId, item.authorImageUrl),
+        attachmentUrls: attachmentUrls.filter((url): url is string => Boolean(url)),
       },
       comments: comments.map((comment) => ({
         ...comment,
