@@ -163,6 +163,19 @@ function normalizeQuantity(value?: number) {
   return Math.floor(value);
 }
 
+function workflowRank(status: string) {
+  return {
+    stock: 0,
+    en_stock: 0,
+    reserve: 0,
+    en_ligne: 1,
+    en_cours_envoi: 2,
+    envoye: 3,
+    gagne: 4,
+    vendu: 4,
+  }[status] ?? -1;
+}
+
 /**
  * Génère une référence interne unique (6 chiffres) pour un article Klyd.
  * Même principe que la réf. interne de la boutique recyclerie : on tire au
@@ -567,8 +580,13 @@ export const updateStatus = mutation({
     status: itemStatus,
   },
   handler: async (ctx, { id, status }) => {
-    // Mettre en ligne = publier sur la boutique ; sinon gestion de stock.
-    if (status === "en_ligne") {
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    const advancing = workflowRank(status) > workflowRank(item.status);
+
+    // Revenir à « en ligne » ne republie rien : un droit stock suffit. La
+    // publication initiale conserve en revanche le droit boutique/stock update.
+    if (status === "en_ligne" && advancing) {
       await requireAnyCrmPermission(ctx, [
         ["klyde:boutique", "manage"],
         ["klyde:stock", "update"],
@@ -576,21 +594,20 @@ export const updateStatus = mutation({
     } else {
       await requireCrmPermission(ctx, "klyde:stock", "update");
     }
-    const item = await ctx.db.get(id);
-    if (!item) throw new Error("Article introuvable.");
 
     // Le parcours commercial doit rester complet : ces contrôles vivent côté
     // serveur afin qu'un appel direct ne puisse pas contourner la fiche CRM.
-    if (status === "en_ligne" && (!item.vinted || item.price == null)) {
+    // Ils ne concernent que le cochage d'une étape, jamais son décochage.
+    if (advancing && status === "en_ligne" && (!item.vinted || item.price == null)) {
       throw new Error("Renseignez le prix affiché et cochez Vinted avant la mise en ligne.");
     }
-    if (status === "en_cours_envoi" && item.actualSalePrice == null) {
+    if (advancing && status === "en_cours_envoi" && item.actualSalePrice == null) {
       throw new Error("Renseignez le prix de vente réel avant de marquer l'article comme vendu.");
     }
-    if (status === "envoye" && !cleanOptional(item.trackingNotes)) {
+    if (advancing && status === "envoye" && !cleanOptional(item.trackingNotes)) {
       throw new Error("Ajoutez le numéro de suivi ou une note d'expédition avant cette étape.");
     }
-    if (status === "gagne" && item.status !== "envoye") {
+    if (advancing && status === "gagne" && item.status !== "envoye") {
       throw new Error("Marquez d'abord l'article comme expédié avant de confirmer qu'il est gagné.");
     }
     await ctx.db.patch(id, { status, updatedAt: Date.now() });
