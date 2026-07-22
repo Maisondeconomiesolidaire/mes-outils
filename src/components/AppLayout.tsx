@@ -433,7 +433,7 @@ function SidebarContent({
               <span className="group relative inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-200">
                 {points} pts
                 <CircleHelp className="h-3 w-3" />
-                <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-56 rounded-lg bg-zinc-900 px-3 py-2 text-left text-xs font-medium text-white shadow-lg group-hover:block">Les points récompensent vos réservations, retours et participations utiles.</span>
+                <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-64 rounded-lg bg-zinc-900 px-3 py-2 text-left text-xs font-medium text-white shadow-lg group-hover:block">Les points récompensent vos réservations, retours et participations utiles. Ils pourront bientôt débloquer des cadeaux et des récompenses.</span>
               </span>
             </div>
         </Link>

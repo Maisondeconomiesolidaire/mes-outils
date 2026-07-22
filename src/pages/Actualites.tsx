@@ -99,7 +99,7 @@ function Classement() {
     <section className="premium-panel mx-auto max-w-2xl rounded-2xl p-5">
       <div className="mb-5">
         <h2 className="text-xl font-bold text-[var(--foreground)]">Classement des utilisateurs avec le plus de contributions</h2>
-        <p className="mt-1 text-sm text-[var(--muted-foreground)]">Chaque participation utile rapporte 100 points.</p>
+        <p className="mt-1 text-sm text-[var(--muted-foreground)]">Chaque participation utile rapporte 100 points. Ils pourront bientôt débloquer des cadeaux et des récompenses.</p>
       </div>
       {leaderboard.length === 0 ? <EmptyState title="Le classement arrive bientôt" description="Participez aux réservations et retours pour y apparaître." /> : (
         <ol className="space-y-2">
