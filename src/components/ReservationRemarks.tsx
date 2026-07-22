@@ -279,19 +279,19 @@ export function ReservationRemarks({
           </div>
 
           {remark.issues ? (
-            <div className="mt-3 rounded-xl border border-amber-300/50 bg-amber-50 px-3 py-2 dark:border-amber-500/30 dark:bg-amber-500/10">
+            <div className="mt-4 border-l-4 border-amber-500 pl-4 dark:border-amber-400">
               <p className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
                 Incident / remarque
               </p>
-              <p className="mt-0.5 whitespace-pre-wrap text-sm text-[var(--foreground)]">{remark.issues}</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{remark.issues}</p>
             </div>
           ) : null}
           {remark.notes ? (
-            <div className="mt-2 rounded-xl border border-[var(--border)] px-3 py-2">
+            <div className="mt-4 border-l-2 border-[var(--border)] pl-4">
               <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">
                 Commentaire
               </p>
-              <p className="mt-0.5 whitespace-pre-wrap text-sm text-[var(--foreground)]">{remark.notes}</p>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{remark.notes}</p>
             </div>
           ) : null}
         </div>
