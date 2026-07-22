@@ -219,6 +219,11 @@ async function remapClerkIdEverywhere(
   for (const wishlist of klydeWishlists) {
     await ctx.db.patch(wishlist._id, { clerkId: newClerkId });
   }
+
+  const feedback = await ctx.db.query("feedback").withIndex("by_author_and_createdAt", (q) => q.eq("authorClerkId", oldClerkId)).collect();
+  for (const item of feedback) await ctx.db.patch(item._id, { authorClerkId: newClerkId });
+  const feedbackComments = (await ctx.db.query("feedbackComments").take(1000)).filter((item) => item.authorClerkId === oldClerkId);
+  for (const item of feedbackComments) await ctx.db.patch(item._id, { authorClerkId: newClerkId });
 }
 
 /**
