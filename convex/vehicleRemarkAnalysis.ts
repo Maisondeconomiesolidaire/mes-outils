@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { env, internalAction, internalMutation, internalQuery, query } from "./_generated/server";
+import { env, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireCrmPermission } from "./lib";
 
@@ -149,6 +149,26 @@ export const analyze = internalAction({
       model: env.OPENAI_REQUEST_ANALYSIS_MODEL?.trim() || "gpt-4o",
     });
     return null;
+  },
+});
+
+/** Relance explicitement les analyses existantes ; réservé aux gestionnaires flotte. */
+export const rerunExisting = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "manage");
+    const reservations = await ctx.db.query("vehicleReservations").order("desc").take(300);
+    const vehicleIds = Array.from(
+      new Set(
+        reservations
+          .filter((reservation) => reservation.feedbackSubmittedAt)
+          .map((reservation) => reservation.vehicleId),
+      ),
+    );
+    for (const [index, vehicleId] of vehicleIds.entries()) {
+      await ctx.scheduler.runAfter(index * 750, internal.vehicleRemarkAnalysis.analyze, { vehicleId });
+    }
+    return { scheduled: vehicleIds.length };
   },
 });
 
