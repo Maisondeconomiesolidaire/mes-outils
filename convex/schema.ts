@@ -1454,6 +1454,8 @@ export default defineSchema(
     sku: v.optional(v.string()),
     // Article mis en vente sur Vinted (case cochée dans le stock Klyd).
     vinted: v.optional(v.boolean()),
+    // Enseigne à laquelle l'article est rattaché : Klyd ou Mobifrip.
+    outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
     quantity: v.number(),
     status: v.union(
       v.literal("stock"),
