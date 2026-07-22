@@ -192,9 +192,17 @@ export function ReservationRemarks({
                 {analysis.proposals.length ? (
                   <div className="mt-7 max-w-3xl space-y-5 border-t border-[var(--border)] pt-5">
                     <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Maintenances proposées</p>
-                    {analysis.proposals.map((proposal, index) => (
-                      <div key={`${analysis._id}-${proposal.title}-${index}`} className="border-l-2 border-amber-500 pl-4 dark:border-amber-400">
-                        <p className="text-sm font-semibold text-[var(--foreground)]">{proposal.title}</p>
+                    {[...analysis.proposals].sort((a, b) => ({ high: 0, medium: 1, low: 2 }[a.priority] - ({ high: 0, medium: 1, low: 2 }[b.priority]))).map((proposal, index) => {
+                      const priorityStyle = proposal.priority === "high"
+                        ? { label: "Priorité élevée", border: "border-red-500 dark:border-red-400", badge: "bg-red-100 text-red-800 dark:bg-red-500/20 dark:text-red-200" }
+                        : proposal.priority === "medium"
+                          ? { label: "Priorité moyenne", border: "border-orange-500 dark:border-orange-400", badge: "bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200" }
+                          : { label: "Priorité faible", border: "border-emerald-500 dark:border-emerald-400", badge: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200" };
+                      return <div key={`${analysis._id}-${proposal.title}-${index}`} className={`border-l-2 pl-4 ${priorityStyle.border}`}>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-sm font-semibold text-[var(--foreground)]">{proposal.title}</p>
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${priorityStyle.badge}`}>{priorityStyle.label}</span>
+                        </div>
                         <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">{proposal.description}</p>
                         {onCreateMaintenance ? (
                           <button
@@ -205,8 +213,8 @@ export function ReservationRemarks({
                             Effectuer cette maintenance
                           </button>
                         ) : null}
-                      </div>
-                    ))}
+                      </div>;
+                    })}
                   </div>
                 ) : null}
               </div>

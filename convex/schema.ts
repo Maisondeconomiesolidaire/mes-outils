@@ -1505,6 +1505,9 @@ export default defineSchema(
     sku: v.optional(v.string()),
     // Article mis en vente sur Vinted (case cochée dans le stock Klyd).
     vinted: v.optional(v.boolean()),
+    /** Publication indépendante dans la boutique Klyde (sans lien avec Vinted). */
+    publishedOnBoutique: v.optional(v.boolean()),
+    boutiquePublishedAt: v.optional(v.number()),
     // Date de mise en vente sur Vinted (pour l'alerte « 3 semaines »).
     vintedAt: v.optional(v.number()),
     // Date d'envoi de l'alerte email « 3 semaines sur Vinted » (anti-doublon).
@@ -1543,7 +1546,16 @@ export default defineSchema(
     .index("by_status", ["status"])
     .index("by_createdAt", ["createdAt"])
     .index("by_sku", ["sku"])
+    .index("by_boutiquePublished", ["publishedOnBoutique"])
     .index("by_featured", ["featured"]),
+
+  /** Visuels éditoriaux du header de la boutique Klyde. */
+  klydeStorefront: defineTable({
+    key: v.string(),
+    hommeCover: v.optional(v.id("_storage")),
+    femmeCover: v.optional(v.id("_storage")),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   /** Klyde — commandes boutique créées après connexion client. */
   klydeOrders: defineTable({

@@ -299,7 +299,7 @@ export const listPublic = query({
   handler: async (ctx, args) => {
     const items = await ctx.db
       .query("klydeItems")
-      .withIndex("by_status", (q) => q.eq("status", "en_ligne"))
+      .withIndex("by_boutiquePublished", (q) => q.eq("publishedOnBoutique", true))
       .order("desc")
       .collect();
 
@@ -310,7 +310,7 @@ export const listPublic = query({
       if (args.subcategory && nfc(item.subcategory) !== nfc(args.subcategory)) return false;
       if (args.gender && item.gender !== args.gender) return false;
       if (args.size && item.size !== args.size) return false;
-      if (item.price == null) return false;
+      if (!item.publishedOnBoutique || item.price == null) return false;
       if (!search) return true;
       return [
         item.title,
@@ -333,6 +333,47 @@ export const listPublic = query({
   },
 });
 
+/** Visuels du header public de la boutique. */
+export const getStorefront = query({
+  args: {},
+  handler: async (ctx) => {
+    const storefront = await ctx.db
+      .query("klydeStorefront")
+      .withIndex("by_key", (q) => q.eq("key", "default"))
+      .unique();
+    if (!storefront) return { hommeUrl: null, femmeUrl: null };
+    const [hommeUrl, femmeUrl] = await Promise.all([
+      storefront.hommeCover ? ctx.storage.getUrl(storefront.hommeCover) : null,
+      storefront.femmeCover ? ctx.storage.getUrl(storefront.femmeCover) : null,
+    ]);
+    return { hommeUrl, femmeUrl };
+  },
+});
+
+/** Met à jour un visuel éditorial ; réservé aux gestionnaires de la boutique. */
+export const updateStorefront = mutation({
+  args: {
+    hommeCover: v.optional(v.id("_storage")),
+    femmeCover: v.optional(v.id("_storage")),
+  },
+  handler: async (ctx, args) => {
+    await requireAnyCrmPermission(ctx, [
+      ["klyde:boutique", "manage"],
+      ["klyde:stock", "update"],
+    ]);
+    const existing = await ctx.db
+      .query("klydeStorefront")
+      .withIndex("by_key", (q) => q.eq("key", "default"))
+      .unique();
+    const patch = { ...args, updatedAt: Date.now() };
+    if (existing) {
+      await ctx.db.patch(existing._id, patch);
+    } else {
+      await ctx.db.insert("klydeStorefront", { key: "default", ...patch });
+    }
+  },
+});
+
 export const getFeatured = query({
   args: {},
   handler: async (ctx) => {
@@ -341,7 +382,7 @@ export const getFeatured = query({
       .withIndex("by_featured", (q) => q.eq("featured", true))
       .collect();
     const online = featured.find(
-      (item) => item.status === "en_ligne" && item.price != null,
+      (item) => item.publishedOnBoutique && item.price != null,
     );
     if (!online) return null;
     return await withPhotoUrls(ctx, online);
@@ -352,7 +393,7 @@ export const getPublic = query({
   args: { id: v.id("klydeItems") },
   handler: async (ctx, { id }) => {
     const item = await ctx.db.get(id);
-    if (!item || item.status !== "en_ligne" || item.price == null) return null;
+    if (!item || !item.publishedOnBoutique || item.price == null) return null;
     return await withPhotoUrls(ctx, item);
   },
 });
@@ -364,7 +405,7 @@ export const getManyPublic = query({
     const items = await Promise.all(uniqueIds.map((id) => ctx.db.get(id)));
     return Promise.all(
       items
-        .filter((item): item is Doc<"klydeItems"> => Boolean(item))
+        .filter((item): item is Doc<"klydeItems"> => Boolean(item?.publishedOnBoutique && item.price != null))
         .map((item) => withPhotoUrls(ctx, item)),
     );
   },
@@ -375,11 +416,11 @@ export const latestByCategory = query({
   handler: async (ctx, { category, limit }) => {
     const items = await ctx.db
       .query("klydeItems")
-      .withIndex("by_status", (q) => q.eq("status", "en_ligne"))
+      .withIndex("by_boutiquePublished", (q) => q.eq("publishedOnBoutique", true))
       .order("desc")
       .take(80);
     const filtered = items
-      .filter((item) => item.category === category && item.price != null)
+      .filter((item) => item.publishedOnBoutique && item.category === category && item.price != null)
       .slice(0, Math.min(limit ?? 4, 8));
     return Promise.all(filtered.map((item) => withPhotoUrls(ctx, item)));
   },
@@ -511,13 +552,13 @@ export const create = mutation({
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
     // Publier directement l'annonce sur la boutique à la création.
-    publishOnline: v.optional(v.boolean()),
+    publishOnBoutique: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "klyde:stock", "create");
     if (args.photos.length === 0) throw new Error("Ajoutez au moins une photo.");
     // Mise en ligne immédiate : mêmes droits que updateStatus("en_ligne").
-    if (args.publishOnline) {
+    if (args.publishOnBoutique) {
       await requireAnyCrmPermission(ctx, [
         ["klyde:boutique", "manage"],
         ["klyde:stock", "update"],
@@ -547,11 +588,11 @@ export const create = mutation({
       style: cleanOptional(args.style),
       location: cleanOptional(args.location),
       sku,
-      vinted: args.publishOnline ? true : undefined,
-      vintedAt: args.publishOnline ? now : undefined,
+      publishedOnBoutique: args.publishOnBoutique || undefined,
+      boutiquePublishedAt: args.publishOnBoutique ? now : undefined,
       outlet: args.outlet,
       quantity: normalizeQuantity(args.quantity),
-      status: args.publishOnline ? "en_ligne" : "stock",
+      status: "stock",
       aiConfidence: args.aiConfidence,
       aiNotes: cleanOptional(args.aiNotes),
       createdAt: now,
@@ -790,6 +831,7 @@ export const setFeatured = mutation({
     ]);
     const target = await ctx.db.get(id);
     if (!target) throw new Error("Article introuvable.");
+    if (!target.publishedOnBoutique) throw new Error("Publiez d'abord cet article sur la boutique.");
 
     const currentlyFeatured = await ctx.db
       .query("klydeItems")
@@ -803,6 +845,23 @@ export const setFeatured = mutation({
     }
     await ctx.db.patch(id, { featured: !target.featured, updatedAt: now });
     return { featured: !target.featured };
+  },
+});
+
+/** Publication Boutique indépendante du statut Vinted. */
+export const setBoutiquePublished = mutation({
+  args: { id: v.id("klydeItems"), published: v.boolean() },
+  handler: async (ctx, { id, published }) => {
+    await requireAnyCrmPermission(ctx, [["klyde:boutique", "manage"], ["klyde:stock", "update"]]);
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    if (published && normalizePrice(item.price) == null) throw new Error("Renseignez un prix avant de publier sur la boutique.");
+    await ctx.db.patch(id, {
+      publishedOnBoutique: published || undefined,
+      boutiquePublishedAt: published ? item.boutiquePublishedAt ?? Date.now() : undefined,
+      featured: published ? item.featured : false,
+      updatedAt: Date.now(),
+    });
   },
 });
 
