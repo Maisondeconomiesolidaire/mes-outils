@@ -580,13 +580,32 @@ export const updateStatus = mutation({
     status: itemStatus,
   },
   handler: async (ctx, { id, status }) => {
+    // Cette mutation générique est aussi utilisée par les vues de suivi : elle
+    // doit toujours permettre de décocher/revenir à un état antérieur.
+    if (status === "en_ligne") {
+      await requireAnyCrmPermission(ctx, [
+        ["klyde:boutique", "manage"],
+        ["klyde:stock", "update"],
+      ]);
+    } else {
+      await requireCrmPermission(ctx, "klyde:stock", "update");
+    }
     const item = await ctx.db.get(id);
     if (!item) throw new Error("Article introuvable.");
-    const advancing = workflowRank(status) > workflowRank(item.status);
+    await ctx.db.patch(id, { status, updatedAt: Date.now() });
+  },
+});
 
-    // Revenir à « en ligne » ne republie rien : un droit stock suffit. La
-    // publication initiale conserve en revanche le droit boutique/stock update.
-    if (status === "en_ligne" && advancing) {
+/** Avance d'une étape dans la carte de vente et applique ses champs requis. */
+export const advanceWorkflow = mutation({
+  args: { id: v.id("klydeItems"), status: itemStatus },
+  handler: async (ctx, { id, status }) => {
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    if (workflowRank(status) <= workflowRank(item.status)) {
+      throw new Error("Utilisez le décochage pour revenir en arrière.");
+    }
+    if (status === "en_ligne") {
       await requireAnyCrmPermission(ctx, [
         ["klyde:boutique", "manage"],
         ["klyde:stock", "update"],
@@ -595,19 +614,16 @@ export const updateStatus = mutation({
       await requireCrmPermission(ctx, "klyde:stock", "update");
     }
 
-    // Le parcours commercial doit rester complet : ces contrôles vivent côté
-    // serveur afin qu'un appel direct ne puisse pas contourner la fiche CRM.
-    // Ils ne concernent que le cochage d'une étape, jamais son décochage.
-    if (advancing && status === "en_ligne" && (!item.vinted || item.price == null)) {
+    if (status === "en_ligne" && (!item.vinted || item.price == null)) {
       throw new Error("Renseignez le prix affiché et cochez Vinted avant la mise en ligne.");
     }
-    if (advancing && status === "en_cours_envoi" && item.actualSalePrice == null) {
+    if (status === "en_cours_envoi" && item.actualSalePrice == null) {
       throw new Error("Renseignez le prix de vente réel avant de marquer l'article comme vendu.");
     }
-    if (advancing && status === "envoye" && !cleanOptional(item.trackingNotes)) {
+    if (status === "envoye" && !cleanOptional(item.trackingNotes)) {
       throw new Error("Ajoutez le numéro de suivi ou une note d'expédition avant cette étape.");
     }
-    if (advancing && status === "gagne" && item.status !== "envoye") {
+    if (status === "gagne" && item.status !== "envoye") {
       throw new Error("Marquez d'abord l'article comme expédié avant de confirmer qu'il est gagné.");
     }
     await ctx.db.patch(id, { status, updatedAt: Date.now() });
