@@ -1158,6 +1158,9 @@ export default defineSchema(
     decidedAt: v.optional(v.number()),
     feedbackRequestedAt: v.optional(v.number()),
     feedbackSubmittedAt: v.optional(v.number()),
+    /** Retour libéré manuellement par l'équipe quand l'utilisateur ne peut pas remplir le formulaire. */
+    feedbackManualReturnAt: v.optional(v.number()),
+    feedbackManualReturnBy: v.optional(v.string()),
     feedbackMileage: v.optional(v.number()),
     feedbackFuelRestored: v.optional(v.boolean()),
     feedbackVehicleEmpty: v.optional(v.boolean()),

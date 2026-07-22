@@ -50,7 +50,7 @@ const TIME_OPTIONS = [
   FULL_DAY_END_TIME,
 ];
 
-type Occupied = { userName: string; start: number; end: number } | null;
+type Occupied = { userName: string; start: number; end: number; returnRequired?: boolean } | null;
 type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: string; buildingLabel?: string; capacity?: number; photoUrl?: string | null; occupiedBy?: Occupied };
 type Vehicle = { _id: Id<"vehicles">; name: string; plate?: string; kind: string; brand?: string; model?: string; seats?: number; reservablePro?: boolean; reservablePersonal?: boolean; site?: "60" | "76"; siteLabel?: string; photoUrl?: string | null; occupiedBy?: Occupied; unavailableReason?: string | null };
 type MyReservation = {
@@ -1028,7 +1028,9 @@ function AssetImage({
   unavailableReason?: string | null;
 }) {
   const blockedText = occupied
-    ? `Réservé jusqu'au ${format(new Date(occupied.end), "dd/MM/yy HH:mm", { locale: fr })} par ${occupied.userName}`
+    ? occupied.returnRequired
+      ? "Véhicule non disponible, le retour doit être effectué"
+      : `Réservé jusqu'au ${format(new Date(occupied.end), "dd/MM/yy HH:mm", { locale: fr })} par ${occupied.userName}`
     : unavailableReason ?? null;
   return (
     <div className="relative aspect-video bg-[var(--muted)]">

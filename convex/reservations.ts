@@ -591,7 +591,12 @@ export const listVehiclesForSlot = query({
         return {
           ...vehicle,
           occupiedBy: conflict
-            ? { userName: conflict.userName, start: conflict.start, end: conflict.end }
+            ? {
+                userName: conflict.userName,
+                start: conflict.start,
+                end: conflict.end,
+                returnRequired: conflict.end < nowMs && !conflict.feedbackSubmittedAt,
+              }
             : null,
           unavailableReason,
         };
@@ -827,6 +832,31 @@ export const submitVehicleFeedback = mutation({
       feedbackVehicleClean: args.vehicleClean,
       feedbackIssues: args.issues?.trim() || undefined,
       feedbackNotes: args.notes?.trim() || undefined,
+    });
+  },
+});
+
+/**
+ * Libère manuellement un véhicule lorsqu'un utilisateur ne peut pas faire son
+ * retour. Réservé aux gestionnaires : l'opération est tracée sur la réservation.
+ */
+export const markVehicleReturned = mutation({
+  args: { reservationId: v.id("vehicleReservations") },
+  handler: async (ctx, { reservationId }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "manage");
+    const identity = await requireUser(ctx);
+    const reservation = await ctx.db.get(reservationId);
+    if (!reservation) throw new Error("Réservation introuvable.");
+    if (reservation.status !== "approved") {
+      throw new Error("Seule une réservation approuvée peut être clôturée.");
+    }
+    if (reservation.feedbackSubmittedAt) return;
+    const now = Date.now();
+    await ctx.db.patch(reservationId, {
+      feedbackSubmittedAt: now,
+      feedbackManualReturnAt: now,
+      feedbackManualReturnBy: displayName(identity),
+      feedbackNotes: [reservation.feedbackNotes, "Retour confirmé manuellement par l'équipe."].filter(Boolean).join("\n"),
     });
   },
 });

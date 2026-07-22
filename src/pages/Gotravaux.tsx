@@ -1167,6 +1167,7 @@ function FleetCalendar({
   const services = useQuery(api.gotravaux.listScheduledServices, {}) as ServiceItem[] | undefined;
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
+  const markVehicleReturned = useMutation(api.reservations.markVehicleReturned);
   const [selectedDay, setSelectedDay] = useState(() => startOfDayTimestamp(Date.now()));
   const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"vehicleReservations"> | null>(null);
@@ -1278,6 +1279,11 @@ function FleetCalendar({
   async function cancelReservationWithConfirmation(reservationId: Id<"vehicleReservations">) {
     if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de véhicule ?"))) return;
     void cancel({ reservationId });
+    setSelectedReservationId(null);
+  }
+
+  async function markReturnedAndClose(reservationId: Id<"vehicleReservations">) {
+    await markVehicleReturned({ reservationId });
     setSelectedReservationId(null);
   }
 
@@ -1446,6 +1452,7 @@ function FleetCalendar({
         onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
         onCancel={cancelReservationWithConfirmation}
+        onMarkReturned={markReturnedAndClose}
       />
       <ServiceDetailsModal service={selectedService} onClose={() => setSelectedServiceId(null)} />
       <MaintenanceDetailsModal
@@ -1914,6 +1921,7 @@ function VehicleReservationsPanel() {
   const reservations = useQuery(api.reservations.listVehicleReservations, {}) as ReservationItem[] | undefined;
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
+  const markVehicleReturned = useMutation(api.reservations.markVehicleReturned);
   const [selectedId, setSelectedId] = useState<Id<"vehicleReservations"> | null>(null);
   const [query, setQuery] = useState("");
 
@@ -1948,6 +1956,11 @@ function VehicleReservationsPanel() {
       : "Annuler cette demande de réservation ? Elle restera visible dans l'historique.";
     if (!(await confirmPermanentDelete(message))) return;
     void cancel({ reservationId });
+    setSelectedId(null);
+  }
+
+  async function markReturnedAndClose(reservationId: Id<"vehicleReservations">) {
+    await markVehicleReturned({ reservationId });
     setSelectedId(null);
   }
 
@@ -1989,6 +2002,7 @@ function VehicleReservationsPanel() {
         onApprove={(reservationId) => decideAndClose(reservationId, "approved")}
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
         onCancel={cancelReservationWithConfirmation}
+        onMarkReturned={markReturnedAndClose}
       />
     </div>
   );
@@ -2012,6 +2026,9 @@ type ReservationItem = {
   decisionNote?: string;
   decidedBy?: string;
   decidedAt?: number;
+  feedbackSubmittedAt?: number;
+  feedbackManualReturnAt?: number;
+  feedbackManualReturnBy?: string;
 };
 
 function ReservationRow({ reservation, canManage, canDeleteForever, onOpen, onCancel }: { reservation: ReservationItem; canManage: boolean; canDeleteForever: boolean; onOpen: () => void; onCancel: () => void }) {
@@ -2045,6 +2062,7 @@ function ReservationDetailsModal({
   onApprove,
   onReject,
   onCancel,
+  onMarkReturned,
 }: {
   reservation: ReservationItem | null;
   canManage: boolean;
@@ -2053,8 +2071,9 @@ function ReservationDetailsModal({
   onApprove: (reservationId: Id<"vehicleReservations">) => Promise<void>;
   onReject: (reservationId: Id<"vehicleReservations">) => Promise<void>;
   onCancel: (reservationId: Id<"vehicleReservations">) => void;
+  onMarkReturned: (reservationId: Id<"vehicleReservations">) => Promise<void>;
 }) {
-  const [saving, setSaving] = useState<"approved" | "rejected" | null>(null);
+  const [saving, setSaving] = useState<"approved" | "rejected" | "returned" | null>(null);
   if (!reservation) return null;
   const current = reservation;
 
@@ -2063,6 +2082,15 @@ function ReservationDetailsModal({
     try {
       if (decision === "approved") await onApprove(current._id);
       else await onReject(current._id);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function markReturned() {
+    setSaving("returned");
+    try {
+      await onMarkReturned(current._id);
     } finally {
       setSaving(null);
     }
@@ -2116,6 +2144,13 @@ function ReservationDetailsModal({
           </div>
         ) : null}
 
+        {reservation.status === "approved" && reservation.end < Date.now() && !reservation.feedbackSubmittedAt ? (
+          <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-500/40 dark:bg-amber-500/10">
+            <p className="font-semibold text-amber-900 dark:text-amber-200">Véhicule non disponible : le retour de l'utilisateur est manquant.</p>
+            <p className="mt-1 text-amber-800 dark:text-amber-200/85">Utilisez cette action uniquement si le véhicule est bien revenu mais que l'utilisateur ne peut pas remplir son retour.</p>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={onClose}>Fermer</Button>
           {reservation.status !== "cancelled" ? (
@@ -2126,6 +2161,11 @@ function ReservationDetailsModal({
               <Button variant="outline" onClick={() => decide("rejected")} disabled={saving !== null}><X className="h-4 w-4" />{saving === "rejected" ? "Refus..." : "Refuser"}</Button>
               <Button onClick={() => decide("approved")} disabled={saving !== null}><Check className="h-4 w-4" />{saving === "approved" ? "Approbation..." : "Approuver"}</Button>
             </>
+          ) : null}
+          {canManage && reservation.status === "approved" && reservation.end < Date.now() && !reservation.feedbackSubmittedAt ? (
+            <Button onClick={() => void markReturned()} disabled={saving !== null}>
+              <Check className="h-4 w-4" />{saving === "returned" ? "Confirmation..." : "Véhicule retourné"}
+            </Button>
           ) : null}
         </div>
       </div>
