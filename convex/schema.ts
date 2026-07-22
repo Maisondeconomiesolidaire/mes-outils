@@ -1454,6 +1454,10 @@ export default defineSchema(
     sku: v.optional(v.string()),
     // Article mis en vente sur Vinted (case cochée dans le stock Klyd).
     vinted: v.optional(v.boolean()),
+    // Date de mise en vente sur Vinted (pour l'alerte « 3 semaines »).
+    vintedAt: v.optional(v.number()),
+    // Date d'envoi de l'alerte email « 3 semaines sur Vinted » (anti-doublon).
+    vintedAlertSentAt: v.optional(v.number()),
     // Enseigne à laquelle l'article est rattaché : Klyd ou Mobifrip.
     outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
     quantity: v.number(),

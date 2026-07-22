@@ -1,9 +1,17 @@
-import { action, internalQuery, mutation, query } from "./_generated/server";
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+} from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAnyCrmPermission, requireCrmPermission } from "./lib";
+import { esc, resendSend } from "./emails";
 
 const CONDITIONS = [
   "Neuf avec étiquette",
@@ -538,6 +546,7 @@ export const create = mutation({
       location: cleanOptional(args.location),
       sku,
       vinted: args.vinted ? true : undefined,
+      vintedAt: args.vinted ? now : undefined,
       outlet: args.outlet,
       quantity: normalizeQuantity(args.quantity),
       status: args.publishOnline ? "en_ligne" : "stock",
@@ -610,8 +619,14 @@ export const update = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "klyde:stock", "update");
     if (args.photos.length === 0) throw new Error("Ajoutez au moins une photo.");
+    const existing = await ctx.db.get(args.id);
+    const now = Date.now();
     // On complète la référence si elle manque encore (articles antérieurs).
     const sku = cleanOptional(args.sku) ?? (await generateKlydeReference(ctx));
+    // Date Vinted : conservée si déjà en vente, initialisée à la 1re mise en
+    // vente, effacée (avec l'alerte) si l'article est retiré de Vinted.
+    const vintedAt = args.vinted ? existing?.vintedAt ?? now : undefined;
+    const vintedAlertSentAt = args.vinted ? existing?.vintedAlertSentAt : undefined;
     await ctx.db.patch(args.id, {
       photos: args.photos,
       title: args.title.trim() || "Article textile",
@@ -630,11 +645,13 @@ export const update = mutation({
       location: cleanOptional(args.location),
       sku,
       vinted: args.vinted ? true : undefined,
+      vintedAt,
+      vintedAlertSentAt,
       outlet: args.outlet,
       quantity: normalizeQuantity(args.quantity),
       aiConfidence: args.aiConfidence,
       aiNotes: cleanOptional(args.aiNotes),
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
   },
 });
@@ -902,5 +919,123 @@ export const generateTryOn = action({
     const newStorageId = await ctx.storage.store(blob);
     const url = await ctx.storage.getUrl(newStorageId);
     return { storageId: newStorageId, url };
+  },
+});
+
+/* ─── Alerte email « 3 semaines sur Vinted sans être gagné » ──────────────── */
+
+const VINTED_ALERT_RECIPIENT = "s.maccioni@eco-solidaire.fr";
+const VINTED_ALERT_AFTER_MS = 21 * 24 * 60 * 60 * 1000; // 3 semaines
+const KLYD_FROM = "Klyd <no-reply@mesoutils.eco-solidaire.fr>";
+
+/** Articles en vente sur Vinted depuis 3 semaines, non gagnés, sans alerte encore envoyée. */
+export const listVintedAlertCandidates = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - VINTED_ALERT_AFTER_MS;
+    const items = await ctx.db
+      .query("klydeItems")
+      .withIndex("by_status")
+      .collect();
+    return items
+      .filter(
+        (item) =>
+          item.vinted === true &&
+          item.vintedAt != null &&
+          item.vintedAt <= cutoff &&
+          item.status !== "gagne" &&
+          item.status !== "archive" &&
+          item.vintedAlertSentAt == null,
+      )
+      .map((item) => ({
+        _id: item._id,
+        title: item.title,
+        sku: item.sku ?? null,
+        price: item.price ?? null,
+        brand: item.brand ?? null,
+        size: item.size ?? null,
+        status: item.status,
+        vintedAt: item.vintedAt ?? null,
+      }));
+  },
+});
+
+export const markVintedAlertSent = internalMutation({
+  args: { id: v.id("klydeItems") },
+  handler: async (ctx, { id }) => {
+    await ctx.db.patch(id, { vintedAlertSentAt: Date.now() });
+  },
+});
+
+function buildVintedAlertEmail(item: {
+  title: string;
+  sku: string | null;
+  price: number | null;
+  brand: string | null;
+  size: string | null;
+  vintedAt: number | null;
+}): { subject: string; html: string } {
+  const ref = item.sku ? ` (réf. ${item.sku})` : "";
+  const since = item.vintedAt
+    ? new Date(item.vintedAt).toLocaleDateString("fr-FR", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "—";
+  const details = [
+    item.brand ? `Marque : ${item.brand}` : null,
+    item.size ? `Taille : ${item.size}` : null,
+    item.price != null ? `Prix : ${item.price.toFixed(2)} €` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const subject = `⏰ Vinted : « ${item.title} » en vente depuis 3 semaines`;
+  const html = `<!doctype html>
+<html lang="fr"><body style="margin:0;background:#f6eee5;font-family:Arial,Helvetica,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e7d8ca;">
+      <tr><td style="background:#e8306a;padding:18px 26px;">
+        <p style="margin:0;color:#ffffff;font-size:16px;font-weight:bold;">Klyd — Alerte Vinted</p>
+      </td></tr>
+      <tr><td style="padding:26px;">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;color:#e8306a;">
+          En vente depuis 3 semaines
+        </p>
+        <p style="margin:0 0 14px;font-size:19px;font-weight:bold;color:#111111;">
+          ${esc(item.title)}${esc(ref)}
+        </p>
+        <p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#3d3d3d;">
+          Cet article est mis en vente sur <strong>Vinted</strong> depuis le
+          <strong>${esc(since)}</strong> et n'est toujours pas gagné.
+          Pensez à vérifier l'annonce (prix, visibilité) ou à le réorienter.
+        </p>
+        ${details ? `<p style="margin:0;font-size:13px;line-height:20px;color:#6b6b6b;">${esc(details)}</p>` : ""}
+      </td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
+  return { subject, html };
+}
+
+/**
+ * Cron quotidien : alerte à s.maccioni pour chaque article en vente sur Vinted
+ * depuis 3 semaines et toujours non gagné (une seule alerte par article).
+ */
+export const sendVintedAlerts = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ sent: number }> => {
+    const candidates = await ctx.runQuery(internal.klyde.listVintedAlertCandidates, {});
+    let sent = 0;
+    for (const item of candidates) {
+      const { subject, html } = buildVintedAlertEmail(item);
+      await resendSend(VINTED_ALERT_RECIPIENT, subject, html, KLYD_FROM);
+      await ctx.runMutation(internal.klyde.markVintedAlertSent, { id: item._id });
+      sent += 1;
+      if (sent < candidates.length) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+    }
+    return { sent };
   },
 });

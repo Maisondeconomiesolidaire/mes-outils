@@ -23,4 +23,11 @@ crons.hourly(
   internal.reservations.requestRoomFeedbackForPastReservations,
 );
 
+// Alerte Klyd : article sur Vinted depuis 3 semaines et toujours non gagné.
+crons.daily(
+  "alerte klyd vinted 3 semaines",
+  { hourUTC: 6, minuteUTC: 0 },
+  internal.klyde.sendVintedAlerts,
+);
+
 export default crons;
