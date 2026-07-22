@@ -28,8 +28,6 @@ export type CalendarEvent = {
   tone?: "brand" | "amber" | "rose" | "sky" | "zinc" | "violet";
 };
 
-type PositionedCalendarEvent = CalendarEvent & { lane: number };
-
 export function CalendarBoard({
   selected,
   rangeStart,
@@ -68,27 +66,8 @@ export function CalendarBoard({
   );
 
   const eventsByDay = useMemo(() => {
-    const map = new Map<string, PositionedCalendarEvent[]>();
-    const lanes: number[] = [];
-    const positionedEvents = [...events]
-      .sort((a, b) => {
-        const startDelta = startOfDay(new Date(a.start)).getTime() - startOfDay(new Date(b.start)).getTime();
-        if (startDelta !== 0) return startDelta;
-        // À date de début égale, le créneau le plus long garde la première ligne.
-        return (b.end ?? b.start) - (a.end ?? a.start);
-      })
-      .map((event) => {
-        const start = startOfDay(new Date(event.start)).getTime();
-        const end = startOfDay(new Date(event.end ?? event.start)).getTime();
-        // Une ligne est réutilisable uniquement à partir du jour suivant : deux
-        // réservations qui occupent le même jour doivent rester distinguées.
-        let lane = lanes.findIndex((lastEnd) => lastEnd < start);
-        if (lane < 0) lane = lanes.length;
-        lanes[lane] = end;
-        return { ...event, lane };
-      });
-
-    for (const event of positionedEvents) {
+    const map = new Map<string, CalendarEvent[]>();
+    for (const event of events) {
       const start = startOfDay(new Date(event.start));
       const end = startOfDay(new Date(event.end ?? event.start));
       for (let current = start; current.getTime() <= end.getTime(); current = addDays(current, 1)) {
@@ -136,13 +115,6 @@ export function CalendarBoard({
         {days.map((day) => {
           const dayKey = format(day, "yyyy-MM-dd");
           const dayEvents = eventsByDay.get(dayKey) ?? [];
-          const maxVisibleLanes = compact ? 2 : 3;
-          const visibleLaneCount = Math.min(
-            maxVisibleLanes,
-            dayEvents.reduce((maximum, event) => Math.max(maximum, event.lane + 1), 0),
-          );
-          const eventsByLane = new Map(dayEvents.map((event) => [event.lane, event]));
-          const hiddenEventCount = dayEvents.filter((event) => event.lane >= maxVisibleLanes).length;
           const outside = !isSameMonth(day, viewMonth);
           const isSelected = selected ? isSameDay(day, new Date(selected)) : false;
           const isToday = isSameDay(day, new Date());
@@ -215,56 +187,40 @@ export function CalendarBoard({
               </span>
               {dayEvents.length > 0 ? (
                 <div className="mt-1 space-y-1">
-                  {Array.from({ length: visibleLaneCount }, (_, lane) => {
-                    const event = eventsByLane.get(lane);
-                    if (!event) return <span key={`empty-${lane}`} aria-hidden className="block h-5" />;
-                    const eventStart = startOfDay(new Date(event.start));
-                    const eventEnd = startOfDay(new Date(event.end ?? event.start));
-                    const spansSeveralDays = !isSameDay(eventStart, eventEnd);
-                    // Les jours affichés commencent toujours un lundi et se terminent
-                    // un dimanche. Cela permet de fermer proprement le bandeau lorsqu'il
-                    // se prolonge sur la ligne suivante du calendrier.
-                    const startsSegment = isSameDay(day, eventStart) || day.getDay() === 1;
-                    const endsSegment = isSameDay(day, eventEnd) || day.getDay() === 0;
-
-                    return (
-                      <span
-                        key={event.id}
-                        role={onEventClick ? "button" : undefined}
-                        tabIndex={onEventClick ? 0 : undefined}
-                        onClick={
-                          (e) => {
-                            e.stopPropagation();
-                            onEventClick?.(event.id, day);
-                          }
+                  {dayEvents.slice(0, compact ? 2 : 3).map((event) => (
+                    <span
+                      key={event.id}
+                      role={onEventClick ? "button" : undefined}
+                      tabIndex={onEventClick ? 0 : undefined}
+                      onClick={
+                        (e) => {
+                          e.stopPropagation();
+                          onEventClick?.(event.id, day);
                         }
-                        onKeyDown={
-                          onEventClick
-                            ? (e) => {
-                                if (e.key === "Enter" || e.key === " ") {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  onEventClick(event.id, day);
-                                }
+                      }
+                      onKeyDown={
+                        onEventClick
+                          ? (e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                onEventClick(event.id, day);
                               }
-                            : undefined
-                        }
-                        className={cn(
-                          "relative z-10 block truncate px-1.5 py-0.5 text-[10px] font-semibold",
-                          spansSeveralDays ? "-mx-[7px] rounded-none" : "rounded-md",
-                          spansSeveralDays && startsSegment && "rounded-l-md",
-                          spansSeveralDays && endsSegment && "rounded-r-md",
-                          toneClass(event.tone),
-                          onEventClick && "cursor-pointer hover:opacity-80",
-                        )}
-                      >
-                        {event.title}
-                      </span>
-                    );
-                  })}
-                  {hiddenEventCount > 0 ? (
+                            }
+                          : undefined
+                      }
+                      className={cn(
+                        "block truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
+                        toneClass(event.tone),
+                        onEventClick && "cursor-pointer hover:opacity-80",
+                      )}
+                    >
+                      {event.title}
+                    </span>
+                  ))}
+                  {dayEvents.length > (compact ? 2 : 3) ? (
                     <span className="block text-[10px] font-semibold text-[var(--muted-foreground)]">
-                      +{hiddenEventCount}
+                      +{dayEvents.length - (compact ? 2 : 3)}
                     </span>
                   ) : null}
                 </div>
