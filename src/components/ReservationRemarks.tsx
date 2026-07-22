@@ -64,6 +64,26 @@ function Check3({ label, value }: { label: string; value?: boolean }) {
   );
 }
 
+/** Rendu léger et sûr du format Markdown imposé à l'avis mécanique IA. */
+function MechanicOpinion({ children }: { children: string }) {
+  const renderBold = (text: string) =>
+    text.split(/(\*\*[^*]+\*\*)/g).map((part, index) =>
+      part.startsWith("**") && part.endsWith("**") ? <strong key={index}>{part.slice(2, -2)}</strong> : <span key={index}>{part}</span>,
+    );
+
+  return (
+    <div className="mt-2 space-y-2.5 text-sm leading-6 text-[var(--foreground)]">
+      {children.split("\n").map((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={index} className="h-1" />;
+        if (trimmed.startsWith("- ")) return <p key={index} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-600" />{renderBold(trimmed.slice(2))}</p>;
+        if (/^\*\*[^*]+\*\*$/.test(trimmed)) return <p key={index} className="pt-1 text-xs font-bold uppercase tracking-wide text-sky-800 dark:text-sky-200">{trimmed.slice(2, -2)}</p>;
+        return <p key={index}>{renderBold(trimmed)}</p>;
+      })}
+    </div>
+  );
+}
+
 /**
  * Liste des remarques (retours) laissées par les utilisateurs après leurs
  * réservations, pour les encadrants. Véhicules (Gotravaux) ou salles (Salles).
@@ -149,31 +169,27 @@ export function ReservationRemarks({
                 </div>
                 <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{analysis.summary}</p>
                 {analysis.diagnosis ? (
-                  <div className="mt-5 border-l-2 border-[var(--foreground)] pl-3">
-                    <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Avis du mécanicien IA</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{analysis.diagnosis}</p>
+                  <div className="mt-6 max-w-3xl border-l-4 border-sky-600 pl-4 dark:border-sky-400">
+                    <p className="text-xs font-bold uppercase tracking-wide text-sky-800 dark:text-sky-200">Avis du mécanicien IA · à confirmer en atelier</p>
+                    <MechanicOpinion>{analysis.diagnosis}</MechanicOpinion>
                   </div>
                 ) : null}
                 {analysis.proposals.length ? (
-                  <div className="mt-4 space-y-3">
+                  <div className="mt-7 max-w-3xl space-y-5 border-t border-[var(--border)] pt-5">
                     <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Maintenances proposées</p>
                     {analysis.proposals.map((proposal, index) => (
-                      <div key={`${analysis._id}-${proposal.title}-${index}`} className="border-l-2 border-[var(--foreground)] pl-3">
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <p className="text-sm font-semibold text-[var(--foreground)]">{proposal.title}</p>
-                            <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">{proposal.description}</p>
-                          </div>
-                          {onCreateMaintenance ? (
-                            <button
-                              type="button"
-                              onClick={() => onCreateMaintenance({ vehicleId: analysis.vehicleId, ...proposal })}
-                              className="shrink-0 border-b border-[var(--foreground)] pb-0.5 text-xs font-semibold text-[var(--foreground)] hover:opacity-70"
-                            >
-                              Effectuer cette maintenance
-                            </button>
-                          ) : null}
-                        </div>
+                      <div key={`${analysis._id}-${proposal.title}-${index}`} className="border-l-2 border-amber-500 pl-4 dark:border-amber-400">
+                        <p className="text-sm font-semibold text-[var(--foreground)]">{proposal.title}</p>
+                        <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">{proposal.description}</p>
+                        {onCreateMaintenance ? (
+                          <button
+                            type="button"
+                            onClick={() => onCreateMaintenance({ vehicleId: analysis.vehicleId, ...proposal })}
+                            className="mt-4 block border-b border-[var(--foreground)] pb-0.5 text-xs font-semibold text-[var(--foreground)] hover:opacity-70"
+                          >
+                            Effectuer cette maintenance
+                          </button>
+                        ) : null}
                       </div>
                     ))}
                   </div>

@@ -29,11 +29,12 @@ const ANALYST_INSTRUCTIONS = [
   "Ne prétends jamais qu'une panne est certaine : distingue les faits signalés et les vérifications recommandées.",
   "Pour chaque anomalie retenue, formule un avis de mécanicien : causes plausibles classées, éléments à contrôler et raisons qui les relient aux symptômes. Reste prudent : un retour utilisateur ne remplace pas un diagnostic atelier.",
   "PÉRIMÈTRE STRICT : ne traite que les anomalies mécaniques, électriques, électroniques, de freinage, de direction, de suspension, de pneus, d'éclairage, de ventilation, de chauffage, de climatisation ou de sécurité qui dégradent le fonctionnement du véhicule.",
-  "EXCLUS SANS EXCEPTION : carburant ou plein non fait, propreté, vitres sales, objets laissés, rangement, carnet de bord, kilométrage non renseigné, marquage, flocage, organisation, réservations et tout sujet administratif ou de gestion. Ne les résume pas et ne propose jamais de maintenance pour eux.",
+  "EXCLUS SANS EXCEPTION : carburant ou plein non fait, propreté, vitres sales, objets laissés, rangement, carnet de bord, kilométrage non renseigné, marquage, flocage, organisation, réservations, système audio/de confort non essentiel et tout sujet administratif ou de gestion. Ne les résume pas et ne propose jamais de maintenance pour eux.",
   "Ne crée une proposition que si elle est justifiée par une anomalie technique ou de sécurité réellement signalée dans les retours.",
   "Au maximum 5 propositions, concrètes et actionnables. Une priorité vaut low, medium ou high.",
   "S'il n'y a aucune anomalie technique ou de sécurité à retenir, réponds avec une synthèse vide et aucune proposition. N'écris pas de message du type « tout va bien ».",
-  'Format strict : {"summary":"... ou vide","diagnosis":"avis mécanique détaillé ou vide","proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
+  "La valeur diagnosis doit respecter exactement cette présentation Markdown courte : **Constat** puis une phrase, **Causes plausibles** puis des puces commençant par - , **Contrôles à réaliser** puis des puces, **Prudence** puis une phrase. Chaque section est sur sa propre ligne. Utilise le gras uniquement pour ces titres, sans paragraphe compact ni numérotation.",
+  'Format strict : {"summary":"... ou vide","diagnosis":"**Constat**\\n...\\n\\n**Causes plausibles**\\n- ...\\n\\n**Contrôles à réaliser**\\n- ...\\n\\n**Prudence**\\n... ou vide","proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
 ].join("\n");
 
 /** Données métiers bornées, accessibles uniquement à l'action IA interne. */
