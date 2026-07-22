@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   Shirt,
   Tag,
+  Trophy,
   Truck,
   Wrench,
   type LucideIcon,
@@ -526,6 +527,7 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
     { key: "publications", label: "Publications", icon: Newspaper },
     { key: "evenements", label: "Événements", icon: PartyPopper },
     { key: "bonsplans", label: "Bons plans", icon: Tag },
+    { key: "classement", label: "Classement", icon: Trophy },
   ],
   "/reservations": [
     { key: "rooms", label: "Salles", icon: DoorOpen },

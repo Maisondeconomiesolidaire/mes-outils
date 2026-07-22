@@ -11,6 +11,7 @@ import {
   requireCrmPermission,
   requireUser,
 } from "./lib";
+import { awardEngagementPoints } from "./points";
 
 /**
  * App « Feedback » (feedback.groupemes.fr) — retours des utilisateurs sur les
@@ -137,6 +138,11 @@ export const submit = mutation({
       authorImageUrl: identity.pictureUrl ?? undefined,
       createdAt: now,
       updatedAt: now,
+    });
+    await awardEngagementPoints(ctx, {
+      clerkId: identity.subject,
+      displayName: feedbackDisplayName(identity),
+      eventKey: `feedback:${feedbackId}`,
     });
 
     await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendFeedbackCreatedEmail, {

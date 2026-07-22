@@ -18,6 +18,7 @@ import {
 } from "./lib";
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
+import { awardEngagementPoints } from "./points";
 
 /** Photo de profil de l'identité Clerk courante, si présente. */
 function pictureUrl(identity: unknown): string | undefined {
@@ -388,6 +389,11 @@ export const bookRoom = mutation({
       notes: args.notes?.trim() || undefined,
       status: "confirmed",
       createdAt: Date.now(),
+    });
+    await awardEngagementPoints(ctx, {
+      clerkId: target.clerkId ?? identity.subject,
+      displayName: target.name,
+      eventKey: `room-reservation:${reservationId}`,
     });
     await createMesoutilsNotification(ctx, {
       recipientClerkId: target.clerkId ?? identity.subject,
@@ -833,6 +839,11 @@ export const submitVehicleFeedback = mutation({
       feedbackIssues: args.issues?.trim() || undefined,
       feedbackNotes: args.notes?.trim() || undefined,
     });
+    await awardEngagementPoints(ctx, {
+      clerkId: identity.subject,
+      displayName: displayName(identity),
+      eventKey: `vehicle-return:${args.reservationId}`,
+    });
   },
 });
 
@@ -1253,6 +1264,11 @@ export const requestVehicle = mutation({
       end: args.end,
       status: "pending",
       createdAt: Date.now(),
+    });
+    await awardEngagementPoints(ctx, {
+      clerkId: target.clerkId ?? identity.subject,
+      displayName: target.name,
+      eventKey: `vehicle-reservation:${reservationId}`,
     });
 
     // Les responsables sont notifiés de chaque demande de réservation véhicule :

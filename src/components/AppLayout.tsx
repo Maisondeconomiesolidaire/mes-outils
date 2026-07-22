@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { CircleHelp, LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../convex/_generated/api";
 import { PORTAL_NAV, canAccess } from "../lib/permissions";
@@ -249,6 +249,8 @@ function ProfileSync() {
 function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {
   const access = usePermissionsAccess();
   const { user } = useUser();
+  const points = useQuery(api.points.myPoints, {}) ?? 100;
+  const ensurePoints = useMutation(api.points.ensureMine);
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -256,6 +258,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
   useEffect(() => {
     setMobileOpen(false);
   }, [location.pathname, location.search]);
+  useEffect(() => { void ensurePoints({}); }, [ensurePoints]);
 
   const hasMesoutilsAccess =
     access !== undefined &&
@@ -295,8 +298,8 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
       logoSrc={logoSrc}
       theme={theme}
       setTheme={setTheme}
-      userName={user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"}
-      userEmail={user?.primaryEmailAddress?.emailAddress}
+      userName={user?.firstName ?? user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"}
+      points={points}
       userImage={user?.imageUrl}
       currentPath={location.pathname}
     />
@@ -367,7 +370,7 @@ function SidebarContent({
   theme,
   setTheme,
   userName,
-  userEmail,
+  points,
   userImage,
   currentPath,
 }: {
@@ -376,7 +379,7 @@ function SidebarContent({
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
   userName: string;
-  userEmail?: string;
+  points: number;
   userImage?: string | null;
   currentPath: string;
 }) {
@@ -428,7 +431,10 @@ function SidebarContent({
             <UserAvatar name={userName} src={userImage} />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-[var(--foreground)]">{userName}</p>
-              <p className="truncate text-xs text-[var(--muted-foreground)]">{userEmail}</p>
+              <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-200">
+                {points} pts
+                <span title="Les points récompensent vos réservations, retours et participations utiles."><CircleHelp className="h-3 w-3" /></span>
+              </span>
             </div>
           </Link>
           <SignOutButton />

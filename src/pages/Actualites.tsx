@@ -85,7 +85,32 @@ export function Actualites() {
       {sub === "publications" ? <Publications canCreate={canCreate} canManage={canManage} /> : null}
       {sub === "evenements" ? <Evenements canCreate={canCreate} /> : null}
       {sub === "bonsplans" ? <BonsPlans canCreate={canCreate} /> : null}
+      {sub === "classement" ? <Classement /> : null}
     </div>
+  );
+}
+
+function Classement() {
+  const leaderboard = useQuery(api.points.leaderboard, {}) as Array<{ rank: number; displayName: string; points: number }> | undefined;
+  if (!leaderboard) return <FullSpinner label="Chargement du classement..." />;
+  return (
+    <section className="premium-panel mx-auto max-w-2xl rounded-2xl p-5">
+      <div className="mb-5">
+        <h2 className="text-xl font-bold text-[var(--foreground)]">Classement</h2>
+        <p className="mt-1 text-sm text-[var(--muted-foreground)]">Chaque participation utile rapporte 100 points.</p>
+      </div>
+      {leaderboard.length === 0 ? <EmptyState title="Le classement arrive bientôt" description="Participez aux réservations et retours pour y apparaître." /> : (
+        <ol className="space-y-2">
+          {leaderboard.map((entry) => (
+            <li key={`${entry.rank}-${entry.displayName}`} className="flex items-center gap-4 rounded-xl bg-[var(--accent)] px-4 py-3">
+              <span className="w-7 text-center text-sm font-black text-brand-600">#{entry.rank}</span>
+              <span className="min-w-0 flex-1 truncate font-semibold text-[var(--foreground)]">{entry.displayName}</span>
+              <span className="rounded-full bg-brand-600 px-2.5 py-1 text-xs font-black text-white">{entry.points} pts</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
 

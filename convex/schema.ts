@@ -569,6 +569,24 @@ export default defineSchema(
     .index("by_clerkId", ["clerkId"])
     .index("by_email", ["email"]),
 
+  /** Solde d'engagement partagé par toutes les applications. */
+  userPoints: defineTable({
+    clerkId: v.string(),
+    displayName: v.string(),
+    points: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_clerkId", ["clerkId"])
+    .index("by_points", ["points"]),
+
+  /** Une attribution par action, afin qu'un même retour ne rapporte qu'une fois. */
+  userPointAwards: defineTable({
+    clerkId: v.string(),
+    eventKey: v.string(),
+    points: v.number(),
+    createdAt: v.number(),
+  }).index("by_clerkId_and_eventKey", ["clerkId", "eventKey"]),
+
   /** Demandes de congés / absences déposées depuis Mes Outils. */
   leaveRequests: defineTable({
     clerkId: v.string(),
