@@ -13,7 +13,7 @@ import {
 import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
-import { accessAllows, requireCrmPermission, requireUser } from "./lib";
+import { accessAllows, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
 import { resendSend, storageImageUrl, type EmailAttachment } from "./emails";
 import { bpBilling, bpCompanyType, bpMaterial, bpUnit } from "./schema";
 
@@ -163,16 +163,32 @@ async function findAdoptableCompanyByEmail(
   );
 }
 
-function serializeBpMessage(m: Doc<"bpCompanyMessages">) {
+function serializeBpMessage(
+  m: Doc<"bpCompanyMessages">,
+  senderImageUrl: string | null = null,
+) {
   return {
     _id: m._id,
     senderRole: m.senderRole,
     senderName: m.senderName,
+    senderImageUrl,
     body: m.body,
     createdAt: m.createdAt,
     readByClientAt: m.readByClientAt ?? null,
     readByStaffAt: m.readByStaffAt ?? null,
   };
+}
+
+/** Sérialise une liste de messages en résolvant les photos de profil (par lot). */
+async function serializeBpMessages(
+  ctx: QueryCtx | MutationCtx,
+  messages: Doc<"bpCompanyMessages">[],
+) {
+  const sorted = [...messages].sort((a, b) => a.createdAt - b.createdAt);
+  const photos = await livePhotosByClerkId(ctx, sorted.map((m) => m.senderClerkId));
+  return sorted.map((m) =>
+    serializeBpMessage(m, m.senderClerkId ? photos.get(m.senderClerkId) ?? null : null),
+  );
 }
 
 /* ─── Espace client (portail public) ──────────────────────────────────────── */
@@ -345,7 +361,7 @@ export const listMyMessages = query({
       .query("bpCompanyMessages")
       .withIndex("by_company", (q) => q.eq("companyId", company._id))
       .collect();
-    return msgs.sort((a, b) => a.createdAt - b.createdAt).map(serializeBpMessage);
+    return serializeBpMessages(ctx, msgs);
   },
 });
 
@@ -359,6 +375,7 @@ export const sendMyMessage = mutation({
       companyId: company._id,
       senderRole: "client",
       senderName: identity.name ?? company.contactName ?? company.name,
+      senderClerkId: identity.subject,
       body: trimmed,
       createdAt: Date.now(),
     });
@@ -513,7 +530,7 @@ export const listCompanyMessages = query({
       .query("bpCompanyMessages")
       .withIndex("by_company", (q) => q.eq("companyId", companyId))
       .collect();
-    return msgs.sort((a, b) => a.createdAt - b.createdAt).map(serializeBpMessage);
+    return serializeBpMessages(ctx, msgs);
   },
 });
 
@@ -528,6 +545,7 @@ export const sendCompanyMessage = mutation({
       companyId,
       senderRole: "staff",
       senderName: identity.name ?? "Déchet'Lab",
+      senderClerkId: identity.subject,
       body: trimmed,
       createdAt: Date.now(),
     });

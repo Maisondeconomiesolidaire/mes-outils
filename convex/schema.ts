@@ -1568,6 +1568,9 @@ export default defineSchema(
     companyId: v.id("bpCompanies"),
     senderRole: v.union(v.literal("client"), v.literal("staff")),
     senderName: v.string(),
+    // Compte Clerk de l'expéditeur : sert à afficher sa photo de profil (résolue
+    // à la lecture via `users.imageUrl`, toujours à jour).
+    senderClerkId: v.optional(v.string()),
     body: v.string(),
     readByClientAt: v.optional(v.number()),
     readByStaffAt: v.optional(v.number()),
