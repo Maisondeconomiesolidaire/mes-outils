@@ -110,15 +110,36 @@ export const sendMessage = mutation({
 
     // Notifier le staff quand un client écrit.
     if (!fromStaff) {
-      await ctx.db.insert("notifications", {
-        kind: "new_message",
-        title: "Nouveau message client",
-        requestId,
-        requestType: request.type,
-        customerName: customerFullName(request.customer),
-        read: false,
-        createdAt: now,
-      });
+      const messagePreview = trimmed.length > 160 ? `${trimmed.slice(0, 160)}…` : trimmed;
+      // Une conversation garde une seule alerte de message, mise à jour avec
+      // le dernier texte : une rafale de messages ne noie plus les demandes.
+      const previousMessageNotifications = await ctx.db
+        .query("notifications")
+        .withIndex("by_requestId", (q) => q.eq("requestId", requestId))
+        .collect();
+      const existing = previousMessageNotifications
+        .filter((notification) => notification.kind === "new_message")
+        .sort((a, b) => b.createdAt - a.createdAt)[0];
+      if (existing) {
+        await ctx.db.patch(existing._id, {
+          title: "Nouveau message client",
+          customerName: customerFullName(request.customer),
+          messagePreview,
+          read: false,
+          createdAt: now,
+        });
+      } else {
+        await ctx.db.insert("notifications", {
+          kind: "new_message",
+          title: "Nouveau message client",
+          requestId,
+          requestType: request.type,
+          customerName: customerFullName(request.customer),
+          messagePreview,
+          read: false,
+          createdAt: now,
+        });
+      }
     } else if (request.customer.email) {
       // Prévenir le client par email quand le staff répond (Resend).
       await ctx.scheduler.runAfter(0, internal.emails.sendNewMessage, {

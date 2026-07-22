@@ -623,6 +623,8 @@ export default defineSchema(
     requestId: v.id("requests"),
     requestType,
     customerName: v.string(),
+    /** Extrait du dernier message client, seulement pour `new_message`. */
+    messagePreview: v.optional(v.string()),
     read: v.boolean(),
     createdAt: v.number(),
   })
