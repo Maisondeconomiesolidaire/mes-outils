@@ -91,7 +91,7 @@ export function Actualites() {
 }
 
 function Classement() {
-  const leaderboard = useQuery(api.points.leaderboard, {}) as Array<{ rank: number; displayName: string; points: number }> | undefined;
+  const leaderboard = useQuery(api.points.leaderboard, {}) as Array<{ rank: number; displayName: string; profileImageUrl?: string; points: number }> | undefined;
   const syncLeaderboard = useAction(api.points.syncLeaderboardDirectory);
   useEffect(() => { void syncLeaderboard({}); }, [syncLeaderboard]);
   if (!leaderboard) return <FullSpinner label="Chargement du classement..." />;
@@ -106,6 +106,9 @@ function Classement() {
           {leaderboard.map((entry) => (
             <li key={`${entry.rank}-${entry.displayName}`} className="flex items-center gap-4 rounded-xl bg-[var(--accent)] px-4 py-3">
               <span className="w-7 text-center text-sm font-black text-brand-600">#{entry.rank}</span>
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-xs font-bold text-white">
+                {entry.profileImageUrl ? <img src={entry.profileImageUrl} alt="" className="h-full w-full object-cover" /> : entry.displayName.slice(0, 2).toUpperCase()}
+              </span>
               <span className="min-w-0 flex-1 truncate font-semibold text-[var(--foreground)]">{entry.displayName}</span>
               <span className="rounded-full bg-brand-600 px-2.5 py-1 text-xs font-black text-white">{entry.points} pts</span>
             </li>

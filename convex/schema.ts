@@ -573,6 +573,7 @@ export default defineSchema(
   userPoints: defineTable({
     clerkId: v.string(),
     displayName: v.string(),
+    profileImageUrl: v.optional(v.string()),
     points: v.number(),
     updatedAt: v.number(),
   })

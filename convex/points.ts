@@ -11,13 +11,13 @@ function nameFor(identity: { name?: string | null; givenName?: string | null; fa
 }
 
 /** Attribution idempotente, utilisable par les mutations métier du backend partagé. */
-export async function awardEngagementPoints(ctx: MutationCtx, args: { clerkId: string; displayName: string; eventKey: string }) {
+export async function awardEngagementPoints(ctx: MutationCtx, args: { clerkId: string; displayName: string; eventKey: string; profileImageUrl?: string }) {
   const existingAward = await ctx.db.query("userPointAwards").withIndex("by_clerkId_and_eventKey", (q) => q.eq("clerkId", args.clerkId).eq("eventKey", args.eventKey)).unique();
   if (existingAward) return;
   const now = Date.now();
   const account = await ctx.db.query("userPoints").withIndex("by_clerkId", (q) => q.eq("clerkId", args.clerkId)).unique();
-  if (account) await ctx.db.patch(account._id, { displayName: args.displayName || account.displayName, points: account.points + ENGAGEMENT_POINTS, updatedAt: now });
-  else await ctx.db.insert("userPoints", { clerkId: args.clerkId, displayName: args.displayName || "Utilisateur", points: INITIAL_POINTS + ENGAGEMENT_POINTS, updatedAt: now });
+  if (account) await ctx.db.patch(account._id, { displayName: args.displayName || account.displayName, profileImageUrl: args.profileImageUrl ?? account.profileImageUrl, points: account.points + ENGAGEMENT_POINTS, updatedAt: now });
+  else await ctx.db.insert("userPoints", { clerkId: args.clerkId, displayName: args.displayName || "Utilisateur", profileImageUrl: args.profileImageUrl, points: INITIAL_POINTS + ENGAGEMENT_POINTS, updatedAt: now });
   await ctx.db.insert("userPointAwards", { clerkId: args.clerkId, eventKey: args.eventKey, points: ENGAGEMENT_POINTS, createdAt: now });
 }
 
@@ -36,7 +36,7 @@ export const ensureMine = mutation({
     const identity = await requireUser(ctx);
     const current = await ctx.db.query("userPoints").withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject)).unique();
     if (current) return current.points;
-    await ctx.db.insert("userPoints", { clerkId: identity.subject, displayName: nameFor(identity), points: INITIAL_POINTS, updatedAt: Date.now() });
+    await ctx.db.insert("userPoints", { clerkId: identity.subject, displayName: nameFor(identity), profileImageUrl: identity.pictureUrl ?? undefined, points: INITIAL_POINTS, updatedAt: Date.now() });
     return INITIAL_POINTS;
   },
 });
@@ -46,7 +46,7 @@ export const leaderboard = query({
   handler: async (ctx) => {
     await requireUser(ctx);
     const rows = await ctx.db.query("userPoints").withIndex("by_points").order("desc").take(100);
-    return rows.map((row, index) => ({ rank: index + 1, displayName: row.displayName, points: row.points }));
+    return rows.map((row, index) => ({ rank: index + 1, displayName: row.displayName, profileImageUrl: row.profileImageUrl, points: row.points }));
   },
 });
 
@@ -58,7 +58,7 @@ export const syncLeaderboardDirectory = action({
     if (!secret) throw new Error("Annuaire indisponible.");
     const directory = await fetchInternalClerkDirectory(secret, identity.email ?? "");
     directory.push({ clerkId: identity.subject, name: nameFor(identity), imageUrl: null });
-    await ctx.runMutation(internal.points.syncHistorical, { directory: directory.map(({ clerkId, name }) => ({ clerkId, name })) });
+    await ctx.runMutation(internal.points.syncHistorical, { directory: directory.map(({ clerkId, name, imageUrl }) => ({ clerkId, name, imageUrl: imageUrl ?? undefined })) });
     return null;
   },
 });
@@ -66,12 +66,13 @@ export const syncLeaderboardDirectory = action({
 export const assertSignedIn = query({ args: {}, handler: async (ctx) => await requireUser(ctx) });
 
 export const syncHistorical = internalMutation({
-  args: { directory: v.array(v.object({ clerkId: v.string(), name: v.string() })) },
+  args: { directory: v.array(v.object({ clerkId: v.string(), name: v.string(), imageUrl: v.optional(v.string()) })) },
   handler: async (ctx, { directory }) => {
     const names = new Map(directory.map((entry) => [entry.clerkId, entry.name]));
     for (const entry of directory) {
       const current = await ctx.db.query("userPoints").withIndex("by_clerkId", (q) => q.eq("clerkId", entry.clerkId)).unique();
-      if (!current) await ctx.db.insert("userPoints", { clerkId: entry.clerkId, displayName: entry.name, points: INITIAL_POINTS, updatedAt: Date.now() });
+      if (!current) await ctx.db.insert("userPoints", { clerkId: entry.clerkId, displayName: entry.name, profileImageUrl: entry.imageUrl, points: INITIAL_POINTS, updatedAt: Date.now() });
+      else await ctx.db.patch(current._id, { displayName: entry.name, profileImageUrl: entry.imageUrl, updatedAt: Date.now() });
     }
     const rooms = await ctx.db.query("roomReservations").take(1000);
     for (const row of rooms) await awardEngagementPoints(ctx, { clerkId: row.bookedForClerkId ?? row.clerkId, displayName: row.userName, eventKey: `room-reservation:${row._id}` });
