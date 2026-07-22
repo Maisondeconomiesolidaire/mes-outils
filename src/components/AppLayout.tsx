@@ -428,7 +428,7 @@ function SidebarContent({
           className="flex min-w-0 items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2 transition hover:bg-[var(--selected)]"
         >
             <UserAvatar name={userName} src={userImage} />
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <p className="truncate text-sm font-semibold text-[var(--foreground)]">{userName}</p>
               <span className="group relative inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-200">
                 {points} pts
