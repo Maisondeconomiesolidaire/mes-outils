@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { action, env, internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
-import { fetchInternalClerkDirectory, requireUser } from "./lib";
+import { fetchInternalClerkDirectory, livePhoto, livePhotosByClerkId, requireUser } from "./lib";
 
 export const INITIAL_POINTS = 100;
 export const ENGAGEMENT_POINTS = 100;
@@ -46,7 +46,15 @@ export const leaderboard = query({
   handler: async (ctx) => {
     await requireUser(ctx);
     const rows = await ctx.db.query("userPoints").withIndex("by_points").order("desc").take(100);
-    return rows.map((row, index) => ({ rank: index + 1, displayName: row.displayName, profileImageUrl: row.profileImageUrl, points: row.points }));
+    // Photo résolue à la lecture (users.imageUrl, à jour à chaque connexion) :
+    // évite qu'une photo figée disparaisse, comme pour les posts/deals/events.
+    const photos = await livePhotosByClerkId(ctx, rows.map((row) => row.clerkId));
+    return rows.map((row, index) => ({
+      rank: index + 1,
+      displayName: row.displayName,
+      profileImageUrl: livePhoto(photos, row.clerkId, row.profileImageUrl),
+      points: row.points,
+    }));
   },
 });
 
@@ -57,7 +65,7 @@ export const syncLeaderboardDirectory = action({
     const secret = env.CLERK_SECRET_KEY;
     if (!secret) throw new Error("Annuaire indisponible.");
     const directory = await fetchInternalClerkDirectory(secret, identity.email ?? "");
-    directory.push({ clerkId: identity.subject, name: nameFor(identity), imageUrl: null });
+    directory.push({ clerkId: identity.subject, name: nameFor(identity), imageUrl: identity.pictureUrl ?? null });
     await ctx.runMutation(internal.points.syncHistorical, { directory: directory.map(({ clerkId, name, imageUrl }) => ({ clerkId, name, imageUrl: imageUrl ?? undefined })) });
     return null;
   },
@@ -71,8 +79,18 @@ export const syncHistorical = internalMutation({
     const names = new Map(directory.map((entry) => [entry.clerkId, entry.name]));
     for (const entry of directory) {
       const current = await ctx.db.query("userPoints").withIndex("by_clerkId", (q) => q.eq("clerkId", entry.clerkId)).unique();
-      if (!current) await ctx.db.insert("userPoints", { clerkId: entry.clerkId, displayName: entry.name, profileImageUrl: entry.imageUrl, points: INITIAL_POINTS, updatedAt: Date.now() });
-      else await ctx.db.patch(current._id, { displayName: entry.name, profileImageUrl: entry.imageUrl, updatedAt: Date.now() });
+      if (!current) {
+        await ctx.db.insert("userPoints", { clerkId: entry.clerkId, displayName: entry.name, profileImageUrl: entry.imageUrl, points: INITIAL_POINTS, updatedAt: Date.now() });
+        continue;
+      }
+      // Ne jamais écraser une photo existante par `undefined` (compte Clerk sans
+      // photo). Et ne patcher que si quelque chose change réellement : sinon le
+      // `updatedAt` invalide la requête `leaderboard` à chaque montage de page
+      // et provoque des « refresh » visuels intempestifs.
+      const nextPhoto = entry.imageUrl ?? current.profileImageUrl;
+      if (current.displayName !== entry.name || current.profileImageUrl !== nextPhoto) {
+        await ctx.db.patch(current._id, { displayName: entry.name, profileImageUrl: nextPhoto, updatedAt: Date.now() });
+      }
     }
     const rooms = await ctx.db.query("roomReservations").take(1000);
     for (const row of rooms) await awardEngagementPoints(ctx, { clerkId: row.bookedForClerkId ?? row.clerkId, displayName: row.userName, eventKey: `room-reservation:${row._id}` });
