@@ -27,10 +27,12 @@ const ANALYST_INSTRUCTIONS = [
   "Tu analyses les retours d'utilisation d'UN SEUL véhicule et tu aides une équipe non technique à décider des prochaines maintenances.",
   "Réponds uniquement en français et en JSON valide, sans markdown.",
   "Ne prétends jamais qu'une panne est certaine : distingue les faits signalés et les vérifications recommandées.",
-  "Ne crée une proposition que si elle est justifiée par les retours ou un contrôle prudent utile.",
+  "PÉRIMÈTRE STRICT : ne traite que les anomalies mécaniques, électriques, électroniques, de freinage, de direction, de suspension, de pneus, d'éclairage, de ventilation, de chauffage, de climatisation ou de sécurité qui dégradent le fonctionnement du véhicule.",
+  "EXCLUS SANS EXCEPTION : carburant ou plein non fait, propreté, vitres sales, objets laissés, rangement, carnet de bord, kilométrage non renseigné, marquage, flocage, organisation, réservations et tout sujet administratif ou de gestion. Ne les résume pas et ne propose jamais de maintenance pour eux.",
+  "Ne crée une proposition que si elle est justifiée par une anomalie technique ou de sécurité réellement signalée dans les retours.",
   "Au maximum 5 propositions, concrètes et actionnables. Une priorité vaut low, medium ou high.",
-  "Le résumé doit être bref, opérationnel et faire apparaître les problèmes récurrents, ou indiquer explicitement qu'aucune anomalie n'est signalée.",
-  'Format strict : {"summary":"...","proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
+  "S'il n'y a aucune anomalie technique ou de sécurité à retenir, réponds avec une synthèse vide et aucune proposition. N'écris pas de message du type « tout va bien ».",
+  'Format strict : {"summary":"... ou vide","proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
 ].join("\n");
 
 /** Données métiers bornées, accessibles uniquement à l'action IA interne. */
@@ -96,6 +98,18 @@ export const save = internalMutation({
   },
 });
 
+/** Retire une ancienne analyse lorsque les retours ne remontent aucun sujet technique. */
+export const clear = internalMutation({
+  args: { vehicleId: v.id("vehicles"), latestRemarkAt: v.number() },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("vehicleRemarkAnalyses")
+      .withIndex("by_vehicleId", (q) => q.eq("vehicleId", args.vehicleId))
+      .unique();
+    if (existing && existing.latestRemarkAt <= args.latestRemarkAt) await ctx.db.delete(existing._id);
+  },
+});
+
 /** Lance OpenAI après chaque retour véhicule ; la synthèse inclut tous ses retours. */
 export const analyze = internalAction({
   args: { vehicleId: v.id("vehicles") },
@@ -139,6 +153,13 @@ export const analyze = internalAction({
         })
       : [];
     const summary = typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 2000) : "";
+    if (!summary && proposals.length === 0) {
+      await ctx.runMutation(internal.vehicleRemarkAnalysis.clear, {
+        vehicleId,
+        latestRemarkAt: snapshot.remarks[0].submittedAt,
+      });
+      return null;
+    }
     if (!summary) throw new Error("OpenAI n'a pas fourni de synthèse exploitable.");
     await ctx.runMutation(internal.vehicleRemarkAnalysis.save, {
       vehicleId,
