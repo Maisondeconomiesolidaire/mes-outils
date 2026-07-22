@@ -576,6 +576,23 @@ export const updateStatus = mutation({
     } else {
       await requireCrmPermission(ctx, "klyde:stock", "update");
     }
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+
+    // Le parcours commercial doit rester complet : ces contrôles vivent côté
+    // serveur afin qu'un appel direct ne puisse pas contourner la fiche CRM.
+    if (status === "en_ligne" && (!item.vinted || item.price == null)) {
+      throw new Error("Renseignez le prix affiché et cochez Vinted avant la mise en ligne.");
+    }
+    if (status === "en_cours_envoi" && item.actualSalePrice == null) {
+      throw new Error("Renseignez le prix de vente réel avant de marquer l'article comme vendu.");
+    }
+    if (status === "envoye" && !cleanOptional(item.trackingNotes)) {
+      throw new Error("Ajoutez le numéro de suivi ou une note d'expédition avant cette étape.");
+    }
+    if (status === "gagne" && item.status !== "envoye") {
+      throw new Error("Marquez d'abord l'article comme expédié avant de confirmer qu'il est gagné.");
+    }
     await ctx.db.patch(id, { status, updatedAt: Date.now() });
   },
 });
