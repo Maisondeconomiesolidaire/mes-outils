@@ -423,22 +423,21 @@ function SidebarContent({
           {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           {theme === "dark" ? "Mode clair" : "Mode sombre"}
         </button>
-        <div className="flex items-center gap-1.5">
-          <Link
-            to="/compte"
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2 transition hover:bg-[var(--selected)]"
-          >
+        <Link
+          to="/compte"
+          className="flex min-w-0 items-center gap-3 rounded-xl bg-[var(--accent)] px-3 py-2 transition hover:bg-[var(--selected)]"
+        >
             <UserAvatar name={userName} src={userImage} />
             <div className="min-w-0">
               <p className="truncate text-sm font-semibold text-[var(--foreground)]">{userName}</p>
-              <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-200">
+              <span className="group relative inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-200">
                 {points} pts
-                <span title="Les points récompensent vos réservations, retours et participations utiles."><CircleHelp className="h-3 w-3" /></span>
+                <CircleHelp className="h-3 w-3" />
+                <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-56 rounded-lg bg-zinc-900 px-3 py-2 text-left text-xs font-medium text-white shadow-lg group-hover:block">Les points récompensent vos réservations, retours et participations utiles.</span>
               </span>
             </div>
-          </Link>
-          <SignOutButton />
-        </div>
+        </Link>
+        <SignOutButton />
       </div>
     </>
   );
@@ -469,11 +468,11 @@ function SignOutButton() {
     <button
       type="button"
       onClick={() => void signOut({ redirectUrl: "/" })}
-      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--muted-foreground)] transition hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
+      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl text-sm font-medium text-[var(--muted-foreground)] transition hover:bg-[var(--accent)] hover:text-[var(--foreground)]"
       aria-label="Se déconnecter"
       title="Se déconnecter"
     >
-      <LogOut className="h-4 w-4" />
+      <LogOut className="h-4 w-4" /> Déconnexion
     </button>
   );
 }

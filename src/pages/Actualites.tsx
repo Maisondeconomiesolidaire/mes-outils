@@ -92,6 +92,8 @@ export function Actualites() {
 
 function Classement() {
   const leaderboard = useQuery(api.points.leaderboard, {}) as Array<{ rank: number; displayName: string; points: number }> | undefined;
+  const syncLeaderboard = useAction(api.points.syncLeaderboardDirectory);
+  useEffect(() => { void syncLeaderboard({}); }, [syncLeaderboard]);
   if (!leaderboard) return <FullSpinner label="Chargement du classement..." />;
   return (
     <section className="premium-panel mx-auto max-w-2xl rounded-2xl p-5">
