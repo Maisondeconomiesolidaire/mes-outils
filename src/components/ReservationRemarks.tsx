@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "convex/react";
 import { CarFront, Check, DoorOpen, MessageSquareText, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
@@ -75,6 +76,7 @@ export function ReservationRemarks({
   vehicleId?: Id<"vehicles">;
   onCreateMaintenance?: (proposal: MaintenanceProposal) => void;
 }) {
+  const [vehicleTab, setVehicleTab] = useState<"remarks" | "analyses">("remarks");
   const vehicleRemarks = useQuery(
     api.reservations.listVehicleRemarks,
     kind === "vehicle" ? { vehicleId } : "skip",
@@ -90,7 +92,7 @@ export function ReservationRemarks({
   const data = (kind === "vehicle" ? vehicleRemarks : roomRemarks) as Remark[] | undefined;
 
   if (data === undefined || (kind === "vehicle" && vehicleAnalyses === undefined)) return <FullSpinner label="Chargement des remarques..." />;
-  if (data.length === 0) {
+  if (data.length === 0 && (kind !== "vehicle" || vehicleAnalyses?.length === 0)) {
     return (
       <EmptyState
         icon={<MessageSquareText className="h-8 w-8" />}
@@ -104,7 +106,27 @@ export function ReservationRemarks({
 
   return (
     <div className="space-y-3">
-      {kind === "vehicle" && vehicleAnalyses?.length ? (
+      {kind === "vehicle" ? (
+        <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--accent)] p-1">
+          <button
+            type="button"
+            onClick={() => setVehicleTab("remarks")}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${vehicleTab === "remarks" ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+          >
+            Remarques ({data.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setVehicleTab("analyses")}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${vehicleTab === "analyses" ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+          >
+            Analyses IA ({vehicleAnalyses?.length ?? 0})
+          </button>
+        </div>
+      ) : null}
+
+      {kind === "vehicle" && vehicleTab === "analyses" ? (
+        vehicleAnalyses?.length ? (
         <section className="border-b border-[var(--border)] pb-6">
           <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Synthèse IA des retours</p>
           <div className="mt-3 space-y-6">
@@ -140,8 +162,11 @@ export function ReservationRemarks({
             ))}
           </div>
         </section>
+        ) : (
+          <EmptyState icon={<MessageSquareText className="h-8 w-8" />} title="Aucune analyse IA" description="Une synthèse apparaîtra après le prochain retour de véhicule." />
+        )
       ) : null}
-      {data.map((remark) => (
+      {(kind !== "vehicle" || vehicleTab === "remarks") ? data.map((remark) => (
         <div key={remark._id} className="premium-panel rounded-2xl p-4">
           <div className="flex flex-wrap items-start gap-3">
             <span className="h-12 w-16 shrink-0 overflow-hidden rounded-xl bg-[var(--accent)]">
@@ -211,7 +236,7 @@ export function ReservationRemarks({
             </div>
           ) : null}
         </div>
-      ))}
+      )) : null}
     </div>
   );
 }
