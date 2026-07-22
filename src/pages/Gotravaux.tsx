@@ -2168,8 +2168,7 @@ function ReservationDetailsModal({
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <DetailItem label="Demandeur" value={reservation.userName} />
           <DetailItem label="Réservé par" value={reservation.bookedByName ?? reservation.userName} />
-          <DetailItem label="Début" value={formatDateTimeWithDay(reservation.start)} />
-          <DetailItem label="Fin" value={formatDateTimeWithDay(reservation.end)} />
+          <DetailItem className="sm:col-span-2" label="Période" value={`Du ${formatDateTimeWithDay(reservation.start)} au ${formatDateTimeWithDay(reservation.end)}`} />
           <DetailItem label="Usage" value={usageLabel} />
           <DetailItem label="Km estimés" value={reservation.expectedKm !== undefined ? `${reservation.expectedKm.toLocaleString("fr-FR")} km` : "Non renseigné"} />
         </dl>
@@ -2228,9 +2227,9 @@ function ReservationDetailsModal({
   );
 }
 
-function DetailItem({ label, value }: { label: string; value: string }) {
+function DetailItem({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] px-3 py-2">
+    <div className={`rounded-xl border border-[var(--border)] px-3 py-2 ${className ?? ""}`}>
       <dt className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">{label}</dt>
       <dd className="mt-1 font-semibold text-[var(--foreground)]">{value}</dd>
     </div>

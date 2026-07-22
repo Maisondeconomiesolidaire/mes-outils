@@ -530,8 +530,7 @@ function EquipmentPlanning() {
             <dl className="grid gap-3 text-sm">
               <DetailRow label="Réservé pour" value={selected.userName} />
               <DetailRow label="Réservé par" value={selected.bookedByName ?? selected.userName} />
-              <DetailRow label="Début" value={formatDateTime(selected.start)} />
-              <DetailRow label="Fin" value={formatDateTime(selected.end)} />
+              <DetailRow label="Période" value={`Du ${formatDateTime(selected.start)} au ${formatDateTime(selected.end)}`} />
             </dl>
             {selected.notes ? (
               <div className="rounded-xl border border-[var(--border)] p-3">

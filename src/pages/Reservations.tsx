@@ -689,12 +689,8 @@ function Agenda({
                 <dd className="font-semibold text-[var(--foreground)]">{active.personName}</dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="text-[var(--muted-foreground)]">Début</dt>
-                <dd className="font-medium text-[var(--foreground)]">{formatDateTime(active.date)}</dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-[var(--muted-foreground)]">Fin</dt>
-                <dd className="font-medium text-[var(--foreground)]">{formatDateTime(active.endDate)}</dd>
+                <dt className="text-[var(--muted-foreground)]">Période</dt>
+                <dd className="text-right font-medium text-[var(--foreground)]">Du {formatDateTime(active.date)} au {formatDateTime(active.endDate)}</dd>
               </div>
             </dl>
             {!isMine ? (

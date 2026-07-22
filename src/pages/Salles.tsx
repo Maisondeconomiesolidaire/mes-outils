@@ -539,8 +539,7 @@ function RoomReservationDetailsModal({
             <DetailItem label="Bâtiment / zone" value={room?.buildingLabel ?? room?.siteLabel ?? (room?.site ? `Site ${room.site}` : "Non renseigné")} />
             <DetailItem label="Réservé pour" value={reservation.userName} />
             <DetailItem label="Réservé par" value={reservation.bookedByName ?? reservation.userName} />
-            <DetailItem label="Début" value={formatDateTime(reservation.start)} />
-            <DetailItem label="Fin" value={formatDateTime(reservation.end)} />
+            <DetailItem className="sm:col-span-2" label="Période" value={`Du ${formatDateTime(reservation.start)} au ${formatDateTime(reservation.end)}`} />
             <DetailItem label="Participants" value={reservation.attendees ? `${reservation.attendees} personne${reservation.attendees > 1 ? "s" : ""}` : "Non renseigné"} />
             <DetailItem label="Capacité" value={room?.capacity ? `${room.capacity} personnes` : "Non renseignée"} />
           </dl>
@@ -564,9 +563,9 @@ function RoomReservationDetailsModal({
   );
 }
 
-function DetailItem({ label, value }: { label: string; value: string }) {
+function DetailItem({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] px-3 py-2">
+    <div className={`rounded-xl border border-[var(--border)] px-3 py-2 ${className ?? ""}`}>
       <dt className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">{label}</dt>
       <dd className="mt-1 font-semibold text-[var(--foreground)]">{value}</dd>
     </div>
