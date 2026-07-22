@@ -78,23 +78,9 @@ const CATEGORIES = {
     "Cravates et nœuds papillon",
     "Accessoires cheveux",
   ],
-  "Bébé et enfant": [
-    "Vêtements de naissance",
-    "Bodies",
-    "Pyjamas",
-    "Hauts",
-    "Bas",
-    "Robes et ensembles",
-    "Manteaux",
-    "Sport enfant",
-    "Maillots de bain enfant",
-    "Sous-vêtements enfant",
-    "Chaussures enfant",
-    "Accessoires enfant",
-  ],
 } as const;
 
-const GENDERS = ["Femme", "Homme", "Enfant", "Bébé", "Unisexe"] as const;
+const GENDERS = ["Femme", "Homme", "Unisexe"] as const;
 
 const itemStatus = v.union(
   v.literal("stock"),
@@ -852,7 +838,7 @@ Retourne uniquement un JSON valide avec ces champs:
 {
   "title": "titre boutique clair, max 80 caractères",
   "description": "description prête à publier, objective, mentionne l'état et les défauts visibles",
-  "category": "une de: Vêtements | Chaussures | Accessoires | Bébé et enfant",
+  "category": "une de: Vêtements | Chaussures | Accessoires",
   "subcategory": "une sous-catégorie exacte de la catégorie choisie",
   "brand": "marque si visible ou null",
   "size": "taille si visible ou estimée prudemment, sinon null",
@@ -861,7 +847,7 @@ Retourne uniquement un JSON valide avec ces champs:
   "material": "matière si visible/probable, sinon null",
   "price": prix conseillé en euros pour la boutique, nombre ou null,
   "parcelSize": "Petit | Moyen | Grand",
-  "gender": "une de: Femme | Homme | Enfant | Bébé | Unisexe",
+  "gender": "une de: Femme | Homme | Unisexe",
   "style": "style/mots utiles: vintage, casual, sport, chic... ou null",
   "aiConfidence": nombre entre 0 et 1,
   "aiNotes": "points à vérifier humainement"
@@ -870,7 +856,6 @@ Sous-catégories autorisées:
 - Vêtements: Manteaux et vestes, Blousons et bombers, Doudounes et parkas, Trenchs et imperméables, Pulls et gilets, Sweats, Chemises et blouses, T-shirts et tops, Tops et débardeurs, Robes, Combinaisons, Jupes, Pantalons, Jeans, Chinos et toiles, Shorts, Tailleurs et costumes, Ensembles, Joggings et survêtements, Leggings, Sport, Maillots de bain, Sous-vêtements, Lingerie, Pyjamas
 - Chaussures: Baskets, Bottes et bottines, Sandales, Tongs et claquettes, Escarpins, Ballerines, Mocassins, Espadrilles, Chaussures de ville, Chaussures de sport, Chaussons
 - Accessoires: Sacs, Sacs à dos, Portefeuilles et maroquinerie, Ceintures, Chapeaux et bonnets, Écharpes et foulards, Gants, Bijoux, Montres, Lunettes, Cravates et nœuds papillon, Accessoires cheveux
-- Bébé et enfant: Vêtements de naissance, Bodies, Pyjamas, Hauts, Bas, Robes et ensembles, Manteaux, Sport enfant, Maillots de bain enfant, Sous-vêtements enfant, Chaussures enfant, Accessoires enfant
 Sois prudent: si marque, taille ou matière ne sont pas visibles, mets null.
 ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim()}` : ""}`;
 
