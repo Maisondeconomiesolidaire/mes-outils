@@ -35,6 +35,7 @@ type VehicleAnalysis = {
   vehiclePhotoUrl: string | null;
   summary: string;
   diagnosis?: string;
+  webSources?: Array<{ title: string; url: string }>;
   proposals: Array<{ title: string; description: string; priority: "low" | "medium" | "high" }>;
   sourceRemarkCount: number;
   updatedAt: number;
@@ -172,6 +173,20 @@ export function ReservationRemarks({
                   <div className="mt-6 max-w-3xl border-l-4 border-sky-600 pl-4 dark:border-sky-400">
                     <p className="text-xs font-bold uppercase tracking-wide text-sky-800 dark:text-sky-200">Avis du mécanicien IA · à confirmer en atelier</p>
                     <MechanicOpinion>{analysis.diagnosis}</MechanicOpinion>
+                  </div>
+                ) : null}
+                {analysis.webSources?.length ? (
+                  <div className="mt-4 max-w-3xl border-l-2 border-[var(--border)] pl-4">
+                    <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Sources techniques consultées</p>
+                    <ul className="mt-2 space-y-1.5 text-sm">
+                      {analysis.webSources.map((source) => (
+                        <li key={source.url}>
+                          <a href={source.url} target="_blank" rel="noreferrer" className="underline decoration-[var(--muted-foreground)] underline-offset-4 hover:opacity-70">
+                            {source.title}
+                          </a>
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 ) : null}
                 {analysis.proposals.length ? (

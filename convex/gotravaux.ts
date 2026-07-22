@@ -75,6 +75,7 @@ export const createVehicle = mutation({
     site: v.optional(site),
     brand: v.optional(v.string()),
     model: v.optional(v.string()),
+    year: v.optional(v.number()),
     seats: v.optional(v.number()),
     assignedTo: v.optional(v.string()),
     photo: v.optional(v.id("_storage")),
@@ -112,6 +113,7 @@ export const updateVehicle = mutation({
     site: v.optional(site),
     brand: v.optional(v.string()),
     model: v.optional(v.string()),
+    year: v.optional(v.number()),
     seats: v.optional(v.number()),
     assignedTo: v.optional(v.string()),
     photo: v.optional(v.id("_storage")),
@@ -655,4 +657,3 @@ export const adminDeleteMaintenanceByCreator = internalMutation({
     };
   },
 });
-

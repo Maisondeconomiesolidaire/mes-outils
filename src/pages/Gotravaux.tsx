@@ -63,6 +63,7 @@ type Vehicle = {
   site?: "60" | "76";
   brand?: string;
   model?: string;
+  year?: number;
   seats?: number;
   assignedTo?: string;
   odometerKm?: number;
@@ -299,7 +300,7 @@ type VehicleStatus = "active" | "immobilized" | "sold";
 
 const emptyVehicleForm = {
   name: "", plate: "", kind: "utilitaire" as VehicleKind, site: "" as "" | "60" | "76",
-  brand: "", model: "", seats: "", assignedTo: "", photo: null as Id<"_storage"> | null, photoUrl: "",
+  brand: "", model: "", year: "", seats: "", assignedTo: "", photo: null as Id<"_storage"> | null, photoUrl: "",
   odometerKm: "", technicalControlDate: "", pollutionControlDate: "", status: "active" as VehicleStatus,
   recycappEnabled: false, reservablePro: true, reservablePersonal: false,
 };
@@ -312,7 +313,7 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
     vehicle
       ? {
           name: vehicle.name, plate: vehicle.plate ?? "", kind: normalizeVehicleKind(vehicle.kind), site: vehicle.site ?? ("" as "" | "60" | "76"),
-          brand: vehicle.brand ?? "", model: vehicle.model ?? "", seats: vehicle.seats ? String(vehicle.seats) : "",
+          brand: vehicle.brand ?? "", model: vehicle.model ?? "", year: vehicle.year ? String(vehicle.year) : "", seats: vehicle.seats ? String(vehicle.seats) : "",
           assignedTo: vehicle.assignedTo ?? "", photo: vehicle.photo ?? null, photoUrl: vehicle.photoUrl ?? "",
           odometerKm: vehicle.odometerKm ? String(vehicle.odometerKm) : "",
           technicalControlDate: vehicle.technicalControlDate ?? "", pollutionControlDate: vehicle.pollutionControlDate ?? "",
@@ -329,7 +330,7 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
     return {
       name: nextForm.name, plate: nextForm.plate || undefined, kind: nextForm.kind,
       site: (nextForm.site || undefined) as "60" | "76" | undefined,
-      brand: nextForm.brand || undefined, model: nextForm.model || undefined, seats: nextForm.seats ? Number(nextForm.seats) : undefined,
+      brand: nextForm.brand || undefined, model: nextForm.model || undefined, year: nextForm.year ? Number(nextForm.year) : undefined, seats: nextForm.seats ? Number(nextForm.seats) : undefined,
       assignedTo: nextForm.assignedTo || undefined, photo: nextForm.photo ?? undefined, photoUrl: nextForm.photoUrl || undefined,
       odometerKm: nextForm.odometerKm ? Number(nextForm.odometerKm) : undefined,
       technicalControlDate: nextForm.technicalControlDate || undefined, pollutionControlDate: nextForm.pollutionControlDate || undefined,
@@ -369,7 +370,10 @@ function VehicleInfoForm({ vehicle, onSaved, canSave = true }: { vehicle: Vehicl
         <Field label="Modèle"><Input value={form.model} onChange={(e) => updateForm({ model: e.target.value })} /></Field>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Année modèle"><Input type="number" min="1900" max="2100" value={form.year} onChange={(e) => updateForm({ year: e.target.value })} /></Field>
         <Field label="Plaque"><Input value={form.plate} onChange={(e) => updateForm({ plate: e.target.value })} /></Field>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Type">
           <Select value={form.kind} onChange={(e) => updateForm({ kind: e.target.value as VehicleKind })}>
             <option value="utilitaire">Utilitaire</option><option value="voiture">Voiture</option>

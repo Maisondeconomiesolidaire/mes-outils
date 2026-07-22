@@ -1225,6 +1225,11 @@ export default defineSchema(
     summary: v.string(),
     /** Hypothèses mécaniques de l'IA, à vérifier avant toute intervention. */
     diagnosis: v.optional(v.string()),
+    /** Sources techniques trouvées lors de la recherche web liée au véhicule. */
+    webSources: v.optional(v.array(v.object({
+      title: v.string(),
+      url: v.string(),
+    }))),
     proposals: v.array(v.object({
       title: v.string(),
       description: v.string(),

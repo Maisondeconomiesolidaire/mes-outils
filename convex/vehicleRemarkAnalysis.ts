@@ -8,7 +8,15 @@ const FLEET_PAGE_KEY = "mesoutils:gotravaux";
 const priority = v.union(v.literal("low"), v.literal("medium"), v.literal("high"));
 
 type RemarkSnapshot = {
-  vehicle: { name: string; plate?: string; brand?: string; model?: string; odometerKm?: number };
+  vehicle: {
+    name: string;
+    plate?: string;
+    brand?: string;
+    model?: string;
+    year?: number;
+    kind?: "utilitaire" | "voiture";
+    odometerKm?: number;
+  };
   remarks: Array<{
     submittedAt: number;
     userName: string;
@@ -26,6 +34,11 @@ const ANALYST_INSTRUCTIONS = [
   "Tu es un mécanicien automobile senior spécialisé dans le diagnostic de véhicules utilitaires et voitures de flotte.",
   "Tu analyses les retours d'utilisation d'UN SEUL véhicule et tu aides une équipe non technique à décider des prochaines maintenances.",
   "Réponds uniquement en français et en JSON valide, sans markdown.",
+  "Tu as accès à une recherche web : utilise-la systématiquement lorsque la marque et le modèle sont renseignés, afin de rechercher les défauts récurrents et les recommandations techniques correspondant au véhicule, à son année et aux symptômes signalés.",
+  "N'utilise les informations trouvées sur le web que si elles concernent bien la marque, le modèle, la génération et, si connue, l'année du véhicule. Une information générale ou concernant une autre motorisation ne suffit pas.",
+  "Privilégie les manuels constructeur, rappels, bulletins techniques et sources d'atelier reconnues. Un forum peut suggérer une piste, mais ne doit jamais être présenté comme une preuve ni être retenu comme source si une source technique plus fiable existe.",
+  "Les problèmes connus issus du web restent des pistes à vérifier : ne les présente jamais comme une panne avérée et ne propose pas une maintenance uniquement sur la base d'un problème connu sans symptôme cohérent dans les retours.",
+  "Ne conserve dans sources que 3 liens techniques directement utiles, avec leur titre et leur URL complète. Si aucune source pertinente n'a été trouvée, renvoie un tableau vide.",
   "Ne prétends jamais qu'une panne est certaine : distingue les faits signalés et les vérifications recommandées.",
   "Pour chaque anomalie retenue, formule un avis de mécanicien : causes plausibles classées, éléments à contrôler et raisons qui les relient aux symptômes. Reste prudent : un retour utilisateur ne remplace pas un diagnostic atelier.",
   "PÉRIMÈTRE STRICT : ne traite que les anomalies mécaniques, électriques, électroniques, de freinage, de direction, de suspension, de pneus, d'éclairage, de ventilation, de chauffage, de climatisation ou de sécurité qui dégradent le fonctionnement du véhicule.",
@@ -34,7 +47,7 @@ const ANALYST_INSTRUCTIONS = [
   "Au maximum 5 propositions, concrètes et actionnables. Une priorité vaut low, medium ou high.",
   "S'il n'y a aucune anomalie technique ou de sécurité à retenir, réponds avec une synthèse vide et aucune proposition. N'écris pas de message du type « tout va bien ».",
   "La valeur diagnosis doit respecter exactement cette présentation Markdown courte : **Constat** puis une phrase, **Causes plausibles** puis des puces commençant par - , **Contrôles à réaliser** puis des puces, **Prudence** puis une phrase. Chaque section est sur sa propre ligne. Utilise le gras uniquement pour ces titres, sans paragraphe compact ni numérotation.",
-  'Format strict : {"summary":"... ou vide","diagnosis":"**Constat**\\n...\\n\\n**Causes plausibles**\\n- ...\\n\\n**Contrôles à réaliser**\\n- ...\\n\\n**Prudence**\\n... ou vide","proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
+  'Format strict : {"summary":"... ou vide","diagnosis":"**Constat**\\n...\\n\\n**Causes plausibles**\\n- ...\\n\\n**Points connus à vérifier**\\n- ... ou Aucun point spécifique confirmé\\n\\n**Contrôles à réaliser**\\n- ...\\n\\n**Prudence**\\n... ou vide","webSources":[{"title":"...","url":"https://..."}],"proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
 ].join("\n");
 
 /** Données métiers bornées, accessibles uniquement à l'action IA interne. */
@@ -68,6 +81,8 @@ export const snapshot = internalQuery({
         plate: vehicle.plate,
         brand: vehicle.brand,
         model: vehicle.model,
+        year: vehicle.year,
+        kind: vehicle.kind,
         odometerKm: vehicle.odometerKm,
       },
       remarks,
@@ -81,6 +96,7 @@ export const save = internalMutation({
     vehicleId: v.id("vehicles"),
     summary: v.string(),
     diagnosis: v.optional(v.string()),
+    webSources: v.optional(v.array(v.object({ title: v.string(), url: v.string() }))),
     proposals: v.array(v.object({ title: v.string(), description: v.string(), priority })),
     sourceRemarkCount: v.number(),
     latestRemarkAt: v.number(),
@@ -122,25 +138,28 @@ export const analyze = internalAction({
     const apiKey = env.OPENAI_API_KEY;
     if (!apiKey) throw new Error("Clé OpenAI non configurée pour l'analyse des retours véhicules.");
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const model = env.OPENAI_REQUEST_ANALYSIS_MODEL?.trim() || "gpt-4o";
+    const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: env.OPENAI_REQUEST_ANALYSIS_MODEL?.trim() || "gpt-4o",
-        temperature: 0.15,
-        response_format: { type: "json_object" },
-        messages: [
-          { role: "system", content: ANALYST_INSTRUCTIONS },
-          { role: "user", content: JSON.stringify(snapshot) },
-        ],
+        model,
+        instructions: ANALYST_INSTRUCTIONS,
+        tools: [{ type: "web_search", search_context_size: "medium" }],
+        input: JSON.stringify(snapshot),
       }),
     });
     if (!response.ok) throw new Error(`OpenAI n'a pas pu analyser les retours (${response.status}).`);
-    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    const raw = data.choices?.[0]?.message?.content ?? "";
-    let parsed: { summary?: unknown; diagnosis?: unknown; proposals?: unknown };
+    const data = (await response.json()) as {
+      output_text?: string;
+      output?: Array<{ content?: Array<{ type?: string; text?: string }> }>;
+    };
+    const raw = data.output_text ?? data.output
+      ?.flatMap((item) => item.content ?? [])
+      .find((item) => item.type === "output_text")?.text ?? "";
+    let parsed: { summary?: unknown; diagnosis?: unknown; webSources?: unknown; proposals?: unknown };
     try {
-      parsed = JSON.parse(raw) as { summary?: unknown; diagnosis?: unknown; proposals?: unknown };
+      parsed = JSON.parse(raw) as { summary?: unknown; diagnosis?: unknown; webSources?: unknown; proposals?: unknown };
     } catch {
       throw new Error("OpenAI a renvoyé une analyse illisible.");
     }
@@ -157,6 +176,16 @@ export const analyze = internalAction({
       : [];
     const summary = typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 2000) : "";
     const diagnosis = typeof parsed.diagnosis === "string" ? parsed.diagnosis.trim().slice(0, 2200) : "";
+    const webSources = Array.isArray(parsed.webSources)
+      ? parsed.webSources.slice(0, 3).flatMap((source) => {
+          if (!source || typeof source !== "object") return [];
+          const value = source as { title?: unknown; url?: unknown };
+          const title = typeof value.title === "string" ? value.title.trim().slice(0, 180) : "";
+          const url = typeof value.url === "string" ? value.url.trim().slice(0, 1000) : "";
+          if (!title || !/^https?:\/\//i.test(url)) return [];
+          return [{ title, url }];
+        })
+      : [];
     if (!summary && proposals.length === 0) {
       await ctx.runMutation(internal.vehicleRemarkAnalysis.clear, {
         vehicleId,
@@ -169,10 +198,11 @@ export const analyze = internalAction({
       vehicleId,
       summary,
       diagnosis: diagnosis || undefined,
+      webSources: webSources.length ? webSources : undefined,
       proposals,
       sourceRemarkCount: snapshot.remarks.length,
       latestRemarkAt: snapshot.remarks[0].submittedAt,
-      model: env.OPENAI_REQUEST_ANALYSIS_MODEL?.trim() || "gpt-4o",
+      model,
     });
     return null;
   },
