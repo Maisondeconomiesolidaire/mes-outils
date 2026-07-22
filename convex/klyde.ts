@@ -561,8 +561,8 @@ export const create = mutation({
       style: cleanOptional(args.style),
       location: cleanOptional(args.location),
       sku,
-      vinted: args.vinted ? true : undefined,
-      vintedAt: args.vinted ? now : undefined,
+      vinted: args.publishOnline ? true : undefined,
+      vintedAt: args.publishOnline ? now : undefined,
       outlet: args.outlet,
       quantity: normalizeQuantity(args.quantity),
       status: args.publishOnline ? "en_ligne" : "stock",
@@ -592,7 +592,13 @@ export const updateStatus = mutation({
     }
     const item = await ctx.db.get(id);
     if (!item) throw new Error("Article introuvable.");
-    await ctx.db.patch(id, { status, updatedAt: Date.now() });
+    const now = Date.now();
+    await ctx.db.patch(id, {
+      status,
+      vinted: status === "stock" || status === "stock_b" ? undefined : status === "en_ligne" ? true : item.vinted,
+      vintedAt: status === "en_ligne" ? item.vintedAt ?? now : status === "stock" || status === "stock_b" ? undefined : item.vintedAt,
+      updatedAt: now,
+    });
   },
 });
 
@@ -614,8 +620,8 @@ export const advanceWorkflow = mutation({
       await requireCrmPermission(ctx, "klyde:stock", "update");
     }
 
-    if (status === "en_ligne" && (!item.vinted || item.price == null)) {
-      throw new Error("Renseignez le prix affiché et cochez Vinted avant la mise en ligne.");
+    if (status === "en_ligne" && item.price == null) {
+      throw new Error("Renseignez le prix affiché avant la mise en ligne.");
     }
     if (status === "en_cours_envoi" && item.actualSalePrice == null) {
       throw new Error("Renseignez le prix de vente réel avant de marquer l'article comme vendu.");
@@ -626,7 +632,13 @@ export const advanceWorkflow = mutation({
     if (status === "gagne" && item.status !== "envoye") {
       throw new Error("Marquez d'abord l'article comme expédié avant de confirmer qu'il est gagné.");
     }
-    await ctx.db.patch(id, { status, updatedAt: Date.now() });
+    const now = Date.now();
+    await ctx.db.patch(id, {
+      status,
+      vinted: status === "en_ligne" ? true : item.vinted,
+      vintedAt: status === "en_ligne" ? item.vintedAt ?? now : item.vintedAt,
+      updatedAt: now,
+    });
   },
 });
 
