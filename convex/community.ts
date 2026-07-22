@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import {
   emailForClerkId,
+  formatUserName,
   hasCrmPermission,
   livePhoto,
   livePhotosByClerkId,
@@ -40,11 +41,7 @@ function displayName(identity: {
   familyName?: string | null;
   email?: string | null;
 }) {
-  const fullName = [identity.givenName, identity.familyName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
+  return formatUserName(identity);
 }
 
 function pictureUrl(identity: unknown) {

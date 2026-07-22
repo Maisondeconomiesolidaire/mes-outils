@@ -15,6 +15,16 @@ export function titleCaseName(value: string): string {
     );
 }
 
+/** Nom à afficher pour une identité Clerk, homogène dans toutes les apps. */
+export function formatUserName(
+  identity: { name?: string | null; givenName?: string | null; familyName?: string | null; email?: string | null },
+  fallback = "Utilisateur",
+): string {
+  const fullName = [identity.givenName, identity.familyName].filter(Boolean).join(" ").trim();
+  const value = fullName || identity.name?.trim();
+  return value ? titleCaseName(value) : identity.email?.trim() || fallback;
+}
+
 /** Normalise une adresse email pour comparaison/rattachement (trim + minuscules). */
 export function normalizeEmail(email: string | null | undefined): string {
   return (email ?? "").trim().toLowerCase();

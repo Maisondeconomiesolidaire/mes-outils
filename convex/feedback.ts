@@ -5,6 +5,7 @@ import type { QueryCtx, MutationCtx } from "./_generated/server";
 import { feedbackApp, feedbackPriority, feedbackStatus, feedbackType } from "./schema";
 import {
   hasCrmPermission,
+  formatUserName,
   livePhoto,
   livePhotosByClerkId,
   normalizeEmail,
@@ -39,8 +40,7 @@ function feedbackDisplayName(identity: {
   familyName?: string | null;
   email?: string | null;
 }) {
-  const fullName = [identity.givenName, identity.familyName].filter(Boolean).join(" ").trim();
-  return identity.name?.trim() || fullName || identity.email?.trim() || "L'équipe produit";
+  return formatUserName(identity, "L'équipe produit");
 }
 
 /** Peut traiter les retours (kanban) : statut, réponse d'équipe, suppression. */
@@ -134,7 +134,7 @@ export const submit = mutation({
       priority: args.priority ?? "normale",
       authorClerkId: identity.subject,
       authorEmail: email,
-      authorName: identity.name ?? undefined,
+      authorName: feedbackDisplayName(identity),
       authorImageUrl: identity.pictureUrl ?? undefined,
       createdAt: now,
       updatedAt: now,
@@ -149,7 +149,7 @@ export const submit = mutation({
       app: args.app,
       feedbackType: args.type,
       description,
-      authorName: identity.name ?? undefined,
+      authorName: feedbackDisplayName(identity),
       authorEmail: email,
       authorPhotoUrl: typeof identity.pictureUrl === "string" ? identity.pictureUrl : undefined,
     });
@@ -310,7 +310,7 @@ export const addComment = mutation({
       body,
       authorClerkId: identity.subject,
       authorEmail: email,
-      authorName: identity.name ?? undefined,
+      authorName: feedbackDisplayName(identity),
       authorImageUrl: identity.pictureUrl ?? undefined,
       fromTeam: admin,
       createdAt: now,

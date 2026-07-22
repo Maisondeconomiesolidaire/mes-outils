@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { livePhoto, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
+import { formatUserName, livePhoto, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const POSTS_PAGE_KEY = "mesoutils:actualites";
@@ -31,11 +31,7 @@ function displayName(identity: {
   familyName?: string | null;
   email?: string | null;
 }) {
-  const fullName = [identity.givenName, identity.familyName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
+  return formatUserName(identity);
 }
 
 function normalizePersonKey(value: string) {

@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { getCrmAccessForIdentity, requireCrmPermission, requireUser } from "./lib";
+import { formatUserName, getCrmAccessForIdentity, requireCrmPermission, requireUser } from "./lib";
 
 function displayName(identity: {
   name?: string | null;
@@ -8,12 +8,7 @@ function displayName(identity: {
   familyName?: string | null;
   email?: string | null;
 }) {
-  const fullName = [identity.givenName, identity.familyName]
-    .map((value) => value?.trim())
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
+  return formatUserName(identity);
 }
 
 function parseDay(value: string) {

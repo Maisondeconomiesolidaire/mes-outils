@@ -1,13 +1,13 @@
 import { v } from "convex/values";
 import { action, env, internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
-import { fetchInternalClerkDirectory, livePhoto, livePhotosByClerkId, requireUser } from "./lib";
+import { fetchInternalClerkDirectory, formatUserName, livePhoto, livePhotosByClerkId, requireUser } from "./lib";
 
 export const INITIAL_POINTS = 100;
 export const ENGAGEMENT_POINTS = 100;
 
 function nameFor(identity: { name?: string | null; givenName?: string | null; familyName?: string | null; email?: string | null }) {
-  return identity.givenName?.trim() || identity.name?.trim() || identity.familyName?.trim() || identity.email?.trim() || "Utilisateur";
+  return formatUserName(identity);
 }
 
 /** Attribution idempotente, utilisable par les mutations métier du backend partagé. */

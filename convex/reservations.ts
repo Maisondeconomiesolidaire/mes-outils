@@ -8,6 +8,7 @@ import {
   clerkIdForEmail,
   emailForClerkId,
   fetchInternalClerkDirectory,
+  formatUserName,
   hasCrmPermission,
   isReservationParticipant,
   photoForClerkId,
@@ -88,11 +89,7 @@ function displayName(identity: {
   familyName?: string | null;
   email?: string | null;
 }) {
-  const fullName = [identity.givenName, identity.familyName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
+  return formatUserName(identity);
 }
 
 function normalizeVehicleKind(kind: string) {

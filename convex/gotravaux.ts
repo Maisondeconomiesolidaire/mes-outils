@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { api, internal } from "./_generated/api";
-import { accessAllows, customerFullName, requireCrmPermission, requireUser } from "./lib";
+import { accessAllows, customerFullName, formatUserName, requireCrmPermission, requireUser } from "./lib";
 import { buildAddressString, drivingDistanceKm, geocode } from "./livraison";
 import type { Id } from "./_generated/dataModel";
 
@@ -34,11 +34,7 @@ function displayName(identity: {
   familyName?: string | null;
   email?: string | null;
 }) {
-  const fullName = [identity.givenName, identity.familyName]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-  return identity.name?.trim() || fullName || identity.email?.trim() || "Utilisateur";
+  return formatUserName(identity);
 }
 
 export const listVehicles = query({
