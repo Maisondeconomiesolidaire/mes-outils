@@ -32,7 +32,9 @@ type VehicleAnalysis = {
   _id: Id<"vehicleRemarkAnalyses">;
   vehicleId: Id<"vehicles">;
   vehicleName: string;
+  vehiclePhotoUrl: string | null;
   summary: string;
+  diagnosis?: string;
   proposals: Array<{ title: string; description: string; priority: "low" | "medium" | "high" }>;
   sourceRemarkCount: number;
   updatedAt: number;
@@ -127,13 +129,31 @@ export function ReservationRemarks({
 
       {kind === "vehicle" && vehicleTab === "analyses" ? (
         vehicleAnalyses?.length ? (
-        <section className="border-b border-[var(--border)] pb-6">
+        <section className="space-y-7">
           <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Synthèse IA des retours</p>
           <div className="mt-3 space-y-6">
             {vehicleAnalyses.map((analysis) => (
-              <div key={analysis._id}>
-                {!vehicleId ? <p className="font-semibold text-[var(--foreground)]">{analysis.vehicleName}</p> : null}
-                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{analysis.summary}</p>
+              <div key={analysis._id} className="border-t border-[var(--border)] pt-6 first:border-t-0 first:pt-0">
+                <div className="flex items-center gap-3">
+                  <span className="h-14 w-20 shrink-0 overflow-hidden rounded-xl bg-[var(--accent)]">
+                    {analysis.vehiclePhotoUrl ? (
+                      <img src={analysis.vehiclePhotoUrl} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-[var(--muted-foreground)]"><CarFront className="h-5 w-5" /></span>
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[var(--foreground)]">{analysis.vehicleName}</p>
+                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">Analyse de {analysis.sourceRemarkCount} retour{analysis.sourceRemarkCount > 1 ? "s" : ""}</p>
+                  </div>
+                </div>
+                <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{analysis.summary}</p>
+                {analysis.diagnosis ? (
+                  <div className="mt-5 border-l-2 border-[var(--foreground)] pl-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Avis du mécanicien IA</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{analysis.diagnosis}</p>
+                  </div>
+                ) : null}
                 {analysis.proposals.length ? (
                   <div className="mt-4 space-y-3">
                     <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Maintenances proposées</p>

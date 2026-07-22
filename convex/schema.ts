@@ -1223,6 +1223,8 @@ export default defineSchema(
   vehicleRemarkAnalyses: defineTable({
     vehicleId: v.id("vehicles"),
     summary: v.string(),
+    /** Hypothèses mécaniques de l'IA, à vérifier avant toute intervention. */
+    diagnosis: v.optional(v.string()),
     proposals: v.array(v.object({
       title: v.string(),
       description: v.string(),

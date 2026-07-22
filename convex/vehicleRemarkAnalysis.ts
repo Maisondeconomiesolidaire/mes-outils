@@ -23,16 +23,17 @@ type RemarkSnapshot = {
 };
 
 const ANALYST_INSTRUCTIONS = [
-  "Tu es le responsable maintenance d'une flotte solidaire.",
+  "Tu es un mécanicien automobile senior spécialisé dans le diagnostic de véhicules utilitaires et voitures de flotte.",
   "Tu analyses les retours d'utilisation d'UN SEUL véhicule et tu aides une équipe non technique à décider des prochaines maintenances.",
   "Réponds uniquement en français et en JSON valide, sans markdown.",
   "Ne prétends jamais qu'une panne est certaine : distingue les faits signalés et les vérifications recommandées.",
+  "Pour chaque anomalie retenue, formule un avis de mécanicien : causes plausibles classées, éléments à contrôler et raisons qui les relient aux symptômes. Reste prudent : un retour utilisateur ne remplace pas un diagnostic atelier.",
   "PÉRIMÈTRE STRICT : ne traite que les anomalies mécaniques, électriques, électroniques, de freinage, de direction, de suspension, de pneus, d'éclairage, de ventilation, de chauffage, de climatisation ou de sécurité qui dégradent le fonctionnement du véhicule.",
   "EXCLUS SANS EXCEPTION : carburant ou plein non fait, propreté, vitres sales, objets laissés, rangement, carnet de bord, kilométrage non renseigné, marquage, flocage, organisation, réservations et tout sujet administratif ou de gestion. Ne les résume pas et ne propose jamais de maintenance pour eux.",
   "Ne crée une proposition que si elle est justifiée par une anomalie technique ou de sécurité réellement signalée dans les retours.",
   "Au maximum 5 propositions, concrètes et actionnables. Une priorité vaut low, medium ou high.",
   "S'il n'y a aucune anomalie technique ou de sécurité à retenir, réponds avec une synthèse vide et aucune proposition. N'écris pas de message du type « tout va bien ».",
-  'Format strict : {"summary":"... ou vide","proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
+  'Format strict : {"summary":"... ou vide","diagnosis":"avis mécanique détaillé ou vide","proposals":[{"title":"...","description":"...","priority":"low|medium|high"}]}',
 ].join("\n");
 
 /** Données métiers bornées, accessibles uniquement à l'action IA interne. */
@@ -78,6 +79,7 @@ export const save = internalMutation({
   args: {
     vehicleId: v.id("vehicles"),
     summary: v.string(),
+    diagnosis: v.optional(v.string()),
     proposals: v.array(v.object({ title: v.string(), description: v.string(), priority })),
     sourceRemarkCount: v.number(),
     latestRemarkAt: v.number(),
@@ -135,9 +137,9 @@ export const analyze = internalAction({
     if (!response.ok) throw new Error(`OpenAI n'a pas pu analyser les retours (${response.status}).`);
     const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
     const raw = data.choices?.[0]?.message?.content ?? "";
-    let parsed: { summary?: unknown; proposals?: unknown };
+    let parsed: { summary?: unknown; diagnosis?: unknown; proposals?: unknown };
     try {
-      parsed = JSON.parse(raw) as { summary?: unknown; proposals?: unknown };
+      parsed = JSON.parse(raw) as { summary?: unknown; diagnosis?: unknown; proposals?: unknown };
     } catch {
       throw new Error("OpenAI a renvoyé une analyse illisible.");
     }
@@ -153,6 +155,7 @@ export const analyze = internalAction({
         })
       : [];
     const summary = typeof parsed.summary === "string" ? parsed.summary.trim().slice(0, 2000) : "";
+    const diagnosis = typeof parsed.diagnosis === "string" ? parsed.diagnosis.trim().slice(0, 2200) : "";
     if (!summary && proposals.length === 0) {
       await ctx.runMutation(internal.vehicleRemarkAnalysis.clear, {
         vehicleId,
@@ -164,6 +167,7 @@ export const analyze = internalAction({
     await ctx.runMutation(internal.vehicleRemarkAnalysis.save, {
       vehicleId,
       summary,
+      diagnosis: diagnosis || undefined,
       proposals,
       sourceRemarkCount: snapshot.remarks.length,
       latestRemarkAt: snapshot.remarks[0].submittedAt,
@@ -204,14 +208,22 @@ export const list = query({
         .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
         .unique();
       const vehicle = await ctx.db.get(vehicleId);
-      return analysis ? [{ ...analysis, vehicleName: vehicle?.name ?? "Véhicule" }] : [];
+      return analysis ? [{
+        ...analysis,
+        vehicleName: vehicle?.name ?? "Véhicule",
+        vehiclePhotoUrl: vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl ?? null,
+      }] : [];
     }
     const analyses = await ctx.db.query("vehicleRemarkAnalyses").order("desc").take(100);
     return await Promise.all(
-      analyses.map(async (analysis) => ({
-        ...analysis,
-        vehicleName: (await ctx.db.get(analysis.vehicleId))?.name ?? "Véhicule",
-      })),
+      analyses.map(async (analysis) => {
+        const vehicle = await ctx.db.get(analysis.vehicleId);
+        return {
+          ...analysis,
+          vehicleName: vehicle?.name ?? "Véhicule",
+          vehiclePhotoUrl: vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl ?? null,
+        };
+      }),
     );
   },
 });
