@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import {
   type ClerkApiUser,
   fetchAllClerkUsers,
+  formatUserName,
   getCrmAccessForIdentity,
   hasCrmPermission,
   isAdminIdentity,
@@ -167,12 +168,10 @@ function normalizeClerkUser(user: ClerkUserPayload) {
   if (!email) return null;
   const firstName = stringOrNull(user.first_name);
   const lastName = stringOrNull(user.last_name);
-  const name = [firstName, lastName].filter(Boolean).join(" ").trim();
-
   return {
     clerkId: stringOrNull(user.id) ?? email,
     email,
-    name: name || stringOrNull(user.username) || email,
+    name: formatUserName({ givenName: firstName, familyName: lastName, name: stringOrNull(user.username), email }),
     role: roleFromMetadata(user.public_metadata),
     imageUrl: stringOrNull(user.image_url),
     createdAt: numberOrNull(user.created_at),

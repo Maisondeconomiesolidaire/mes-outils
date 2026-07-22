@@ -1,6 +1,7 @@
 import { v } from "convex/values";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
-import { normalizeCustomer, normalizeEmail, requireCrmPermission, requireUser, titleCaseName } from "./lib";
+import { action, env, internalAction, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { api, internal } from "./_generated/api";
+import { fetchAllClerkUsers, normalizeCustomer, normalizeEmail, requireCrmPermission, requireUser, titleCaseName } from "./lib";
 import { STEP } from "./processes";
 import type { DataModel, Doc, Id } from "./_generated/dataModel";
 
@@ -54,6 +55,58 @@ async function getProfileByEmail(ctx: QueryCtx | MutationCtx, email: string) {
 function directPairKey(a: string, b: string) {
   return [a, b].sort().join("__");
 }
+
+async function updateClerkNameCase(
+  secret: string,
+  clerkId: string,
+  firstName?: string,
+  lastName?: string,
+) {
+  if (!firstName && !lastName) return false;
+  const response = await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(clerkId)}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ ...(firstName ? { first_name: firstName } : {}), ...(lastName ? { last_name: lastName } : {}) }),
+  });
+  if (!response.ok) throw new Error(`Clerk a répondu ${response.status} lors de la normalisation du nom.`);
+  return true;
+}
+
+export const normalizeClerkUserName = internalAction({
+  args: { clerkId: v.string(), firstName: v.optional(v.string()), lastName: v.optional(v.string()) },
+  handler: async (_ctx, args) => {
+    const secret = env.CLERK_SECRET_KEY;
+    if (!secret) throw new Error("Annuaire Clerk indisponible.");
+    return await updateClerkNameCase(secret, args.clerkId, args.firstName, args.lastName);
+  },
+});
+
+export const assertCanNormalizeNames = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "mesoutils:admin", "manage");
+    return true;
+  },
+});
+
+export const normalizeAllClerkUserNames = action({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.runQuery(api.users.assertCanNormalizeNames, {});
+    const secret = env.CLERK_SECRET_KEY;
+    if (!secret) throw new Error("Annuaire Clerk indisponible.");
+    let updated = 0;
+    for (const user of await fetchAllClerkUsers(secret)) {
+      const clerkId = user.id ?? "";
+      const firstName = user.first_name ? titleCaseName(user.first_name) : undefined;
+      const lastName = user.last_name ? titleCaseName(user.last_name) : undefined;
+      if (!clerkId || (firstName === user.first_name && lastName === user.last_name)) continue;
+      await updateClerkNameCase(secret, clerkId, firstName, lastName);
+      updated += 1;
+    }
+    return { updated };
+  },
+});
 
 function replaceClerkIdInHref(href: string | undefined, oldClerkId: string, newClerkId: string) {
   if (!href) return href;
@@ -303,6 +356,9 @@ export const syncProfile = mutation({
       if (Object.keys(patch).length > 0) {
         patch.updatedAt = now;
         await ctx.db.patch(profile._id, patch);
+      }
+      if (firstName !== identity.givenName || lastName !== identity.familyName) {
+        await ctx.scheduler.runAfter(0, internal.users.normalizeClerkUserName, { clerkId, firstName, lastName });
       }
     }
 

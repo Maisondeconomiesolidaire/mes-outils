@@ -637,7 +637,12 @@ export async function fetchInternalClerkDirectory(
     if (self && email === self) continue;
     directory.push({
       clerkId,
-      name: [user.first_name, user.last_name].filter(Boolean).join(" ").trim() || email,
+      name: formatUserName({
+        givenName: user.first_name,
+        familyName: user.last_name,
+        name: user.username,
+        email,
+      }),
       imageUrl: typeof user.image_url === "string" ? user.image_url : null,
     });
   }
