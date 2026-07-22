@@ -187,37 +187,51 @@ export function CalendarBoard({
               </span>
               {dayEvents.length > 0 ? (
                 <div className="mt-1 space-y-1">
-                  {dayEvents.slice(0, compact ? 2 : 3).map((event) => (
-                    <span
-                      key={event.id}
-                      role={onEventClick ? "button" : undefined}
-                      tabIndex={onEventClick ? 0 : undefined}
-                      onClick={
-                        (e) => {
-                          e.stopPropagation();
-                          onEventClick?.(event.id, day);
+                  {dayEvents.slice(0, compact ? 2 : 3).map((event) => {
+                    const eventStart = startOfDay(new Date(event.start));
+                    const eventEnd = startOfDay(new Date(event.end ?? event.start));
+                    const spansSeveralDays = !isSameDay(eventStart, eventEnd);
+                    // Les jours affichés commencent toujours un lundi et se terminent
+                    // un dimanche. Cela permet de fermer proprement le bandeau lorsqu'il
+                    // se prolonge sur la ligne suivante du calendrier.
+                    const startsSegment = isSameDay(day, eventStart) || day.getDay() === 1;
+                    const endsSegment = isSameDay(day, eventEnd) || day.getDay() === 0;
+
+                    return (
+                      <span
+                        key={event.id}
+                        role={onEventClick ? "button" : undefined}
+                        tabIndex={onEventClick ? 0 : undefined}
+                        onClick={
+                          (e) => {
+                            e.stopPropagation();
+                            onEventClick?.(event.id, day);
+                          }
                         }
-                      }
-                      onKeyDown={
-                        onEventClick
-                          ? (e) => {
-                              if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                onEventClick(event.id, day);
+                        onKeyDown={
+                          onEventClick
+                            ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  onEventClick(event.id, day);
+                                }
                               }
-                            }
-                          : undefined
-                      }
-                      className={cn(
-                        "block truncate rounded-md px-1.5 py-0.5 text-[10px] font-semibold",
-                        toneClass(event.tone),
-                        onEventClick && "cursor-pointer hover:opacity-80",
-                      )}
-                    >
-                      {event.title}
-                    </span>
-                  ))}
+                            : undefined
+                        }
+                        className={cn(
+                          "relative z-10 block truncate px-1.5 py-0.5 text-[10px] font-semibold",
+                          spansSeveralDays ? "-mx-[7px] rounded-none" : "rounded-md",
+                          spansSeveralDays && startsSegment && "rounded-l-md",
+                          spansSeveralDays && endsSegment && "rounded-r-md",
+                          toneClass(event.tone),
+                          onEventClick && "cursor-pointer hover:opacity-80",
+                        )}
+                      >
+                        {event.title}
+                      </span>
+                    );
+                  })}
                   {dayEvents.length > (compact ? 2 : 3) ? (
                     <span className="block text-[10px] font-semibold text-[var(--muted-foreground)]">
                       +{dayEvents.length - (compact ? 2 : 3)}
