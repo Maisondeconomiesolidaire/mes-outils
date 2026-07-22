@@ -1161,6 +1161,8 @@ export default defineSchema(
     /** Retour libéré manuellement par l'équipe quand l'utilisateur ne peut pas remplir le formulaire. */
     feedbackManualReturnAt: v.optional(v.number()),
     feedbackManualReturnBy: v.optional(v.string()),
+    /** Dernière relance manuelle envoyée au demandeur pour compléter son retour. */
+    feedbackReminderSentAt: v.optional(v.number()),
     feedbackMileage: v.optional(v.number()),
     feedbackFuelRestored: v.optional(v.boolean()),
     feedbackVehicleEmpty: v.optional(v.boolean()),

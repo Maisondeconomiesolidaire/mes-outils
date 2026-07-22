@@ -861,6 +861,41 @@ export const markVehicleReturned = mutation({
   },
 });
 
+/** Relance le demandeur d'une réservation terminée dont le retour manque encore. */
+export const remindVehicleReturn = mutation({
+  args: { reservationId: v.id("vehicleReservations") },
+  handler: async (ctx, { reservationId }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "manage");
+    const reservation = await ctx.db.get(reservationId);
+    if (!reservation) throw new Error("Réservation introuvable.");
+    if (reservation.status !== "approved" || reservation.end >= Date.now()) {
+      throw new Error("Seule une réservation approuvée et terminée peut être relancée.");
+    }
+    if (reservation.feedbackSubmittedAt) {
+      throw new Error("Le retour de cette réservation a déjà été effectué.");
+    }
+
+    const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
+    const email = await emailForClerkId(ctx, recipientClerkId);
+    if (!email) throw new Error("Adresse e-mail introuvable pour cet utilisateur.");
+
+    const vehicle = await ctx.db.get(reservation.vehicleId);
+    const now = Date.now();
+    await ctx.db.patch(reservationId, { feedbackReminderSentAt: now });
+    await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendVehicleFeedbackRequestEmail, {
+      email,
+      name: reservation.userName,
+      vehicleName: vehicle?.name ?? "Véhicule",
+      vehicleImageUrl:
+        (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ??
+        undefined,
+      label: reservation.purpose,
+      start: reservation.start,
+      end: reservation.end,
+    });
+  },
+});
+
 export const requestVehicleFeedbackForPastReservations = internalMutation({
   args: {},
   handler: async (ctx) => {

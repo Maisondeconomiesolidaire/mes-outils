@@ -10,6 +10,7 @@ import {
   Euro,
   FileText,
   Info,
+  Mail,
   MapPin,
   MessageSquareText,
   Plus,
@@ -1168,6 +1169,7 @@ function FleetCalendar({
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
   const markVehicleReturned = useMutation(api.reservations.markVehicleReturned);
+  const remindVehicleReturn = useMutation(api.reservations.remindVehicleReturn);
   const [selectedDay, setSelectedDay] = useState(() => startOfDayTimestamp(Date.now()));
   const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const [selectedReservationId, setSelectedReservationId] = useState<Id<"vehicleReservations"> | null>(null);
@@ -1285,6 +1287,10 @@ function FleetCalendar({
   async function markReturnedAndClose(reservationId: Id<"vehicleReservations">) {
     await markVehicleReturned({ reservationId });
     setSelectedReservationId(null);
+  }
+
+  async function remindReturn(reservationId: Id<"vehicleReservations">) {
+    await remindVehicleReturn({ reservationId });
   }
 
   function openDayPanel(day: Date) {
@@ -1453,6 +1459,7 @@ function FleetCalendar({
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
         onCancel={cancelReservationWithConfirmation}
         onMarkReturned={markReturnedAndClose}
+        onRemindReturn={remindReturn}
       />
       <ServiceDetailsModal service={selectedService} onClose={() => setSelectedServiceId(null)} />
       <MaintenanceDetailsModal
@@ -1922,6 +1929,7 @@ function VehicleReservationsPanel() {
   const decide = useMutation(api.reservations.decideVehicleReservation);
   const cancel = useMutation(api.reservations.cancelVehicleReservation);
   const markVehicleReturned = useMutation(api.reservations.markVehicleReturned);
+  const remindVehicleReturn = useMutation(api.reservations.remindVehicleReturn);
   const [selectedId, setSelectedId] = useState<Id<"vehicleReservations"> | null>(null);
   const [query, setQuery] = useState("");
 
@@ -1964,6 +1972,10 @@ function VehicleReservationsPanel() {
     setSelectedId(null);
   }
 
+  async function remindReturn(reservationId: Id<"vehicleReservations">) {
+    await remindVehicleReturn({ reservationId });
+  }
+
   return (
     <div className="space-y-6">
       <div className="relative max-w-xl">
@@ -2003,6 +2015,7 @@ function VehicleReservationsPanel() {
         onReject={(reservationId) => decideAndClose(reservationId, "rejected")}
         onCancel={cancelReservationWithConfirmation}
         onMarkReturned={markReturnedAndClose}
+        onRemindReturn={remindReturn}
       />
     </div>
   );
@@ -2029,6 +2042,7 @@ type ReservationItem = {
   feedbackSubmittedAt?: number;
   feedbackManualReturnAt?: number;
   feedbackManualReturnBy?: string;
+  feedbackReminderSentAt?: number;
 };
 
 function ReservationRow({ reservation, canManage, canDeleteForever, onOpen, onCancel }: { reservation: ReservationItem; canManage: boolean; canDeleteForever: boolean; onOpen: () => void; onCancel: () => void }) {
@@ -2038,7 +2052,7 @@ function ReservationRow({ reservation, canManage, canDeleteForever, onOpen, onCa
         {reservation.vehiclePhotoUrl ? <img src={reservation.vehiclePhotoUrl} alt="" className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-[var(--muted-foreground)]"><CarFront className="h-6 w-6" /></div>}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-[var(--foreground)]">{reservation.vehicle?.name ?? "Véhicule"}</p><StatusBadge status={reservation.status} /></div>
+        <div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-[var(--foreground)]">{reservation.vehicle?.name ?? "Véhicule"}</p><StatusBadge reservation={reservation} /></div>
         <p className="mt-1 text-sm text-[var(--muted-foreground)]">{reservation.userName}{reservation.bookedByName ? ` (par ${reservation.bookedByName})` : ""} · {reservation.purpose}</p>
         <p className="text-xs text-[var(--muted-foreground)]">{formatDateTimeWithDay(reservation.start)} → {formatDateTimeWithDay(reservation.end)}</p>
       </div>
@@ -2063,6 +2077,7 @@ function ReservationDetailsModal({
   onReject,
   onCancel,
   onMarkReturned,
+  onRemindReturn,
 }: {
   reservation: ReservationItem | null;
   canManage: boolean;
@@ -2072,8 +2087,9 @@ function ReservationDetailsModal({
   onReject: (reservationId: Id<"vehicleReservations">) => Promise<void>;
   onCancel: (reservationId: Id<"vehicleReservations">) => void;
   onMarkReturned: (reservationId: Id<"vehicleReservations">) => Promise<void>;
+  onRemindReturn: (reservationId: Id<"vehicleReservations">) => Promise<void>;
 }) {
-  const [saving, setSaving] = useState<"approved" | "rejected" | "returned" | null>(null);
+  const [saving, setSaving] = useState<"approved" | "rejected" | "returned" | "reminder" | null>(null);
   if (!reservation) return null;
   const current = reservation;
 
@@ -2096,6 +2112,15 @@ function ReservationDetailsModal({
     }
   }
 
+  async function remindReturn() {
+    setSaving("reminder");
+    try {
+      await onRemindReturn(current._id);
+    } finally {
+      setSaving(null);
+    }
+  }
+
   const usageLabel = reservation.usageType === "personal" ? "Personnel" : reservation.usageType === "pro" ? "Professionnel" : "Non renseigné";
   const vehicleDetails = [reservation.vehicle?.brand, reservation.vehicle?.model, reservation.vehicle?.plate].filter(Boolean).join(" · ");
 
@@ -2109,7 +2134,7 @@ function ReservationDetailsModal({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-semibold text-[var(--foreground)]">{reservation.vehicle?.name ?? "Véhicule"}</p>
-              <StatusBadge status={reservation.status} />
+              <StatusBadge reservation={reservation} />
             </div>
             {vehicleDetails ? <p className="mt-1 truncate text-sm text-[var(--muted-foreground)]">{vehicleDetails}</p> : null}
           </div>
@@ -2163,9 +2188,14 @@ function ReservationDetailsModal({
             </>
           ) : null}
           {canManage && reservation.status === "approved" && reservation.end < Date.now() && !reservation.feedbackSubmittedAt ? (
-            <Button onClick={() => void markReturned()} disabled={saving !== null}>
-              <Check className="h-4 w-4" />{saving === "returned" ? "Confirmation..." : "Véhicule retourné"}
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => void remindReturn()} disabled={saving !== null}>
+                <Mail className="h-4 w-4" />{saving === "reminder" ? "Relance..." : "Relancer l'utilisateur"}
+              </Button>
+              <Button onClick={() => void markReturned()} disabled={saving !== null}>
+                <Check className="h-4 w-4" />{saving === "returned" ? "Confirmation..." : "Véhicule retourné"}
+              </Button>
+            </>
           ) : null}
         </div>
       </div>
@@ -2182,9 +2212,26 @@ function DetailItem({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatusBadge({ status }: { status: ReservationItem["status"] }) {
-  const styles = { approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200", pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200", rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200", cancelled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200" };
-  const labels = { approved: "Approuvée", pending: "En attente", rejected: "Refusée", cancelled: "Annulée" };
+function StatusBadge({ reservation }: { reservation: ReservationItem }) {
+  const status = reservation.status === "approved" && reservation.end < Date.now()
+    ? reservation.feedbackSubmittedAt ? "completed" : "awaiting_return"
+    : reservation.status;
+  const styles = {
+    approved: "bg-brand-100 text-brand-800 dark:bg-brand-500/20 dark:text-brand-200",
+    pending: "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200",
+    rejected: "bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200",
+    cancelled: "bg-zinc-200 text-zinc-700 dark:bg-zinc-500/20 dark:text-zinc-200",
+    completed: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200",
+    awaiting_return: "bg-orange-100 text-orange-800 dark:bg-orange-500/20 dark:text-orange-200",
+  };
+  const labels = {
+    approved: "Approuvée",
+    pending: "En attente",
+    rejected: "Refusée",
+    cancelled: "Annulée",
+    completed: "Terminée",
+    awaiting_return: "En attente de retour",
+  };
   return <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}>{labels[status]}</span>;
 }
 
