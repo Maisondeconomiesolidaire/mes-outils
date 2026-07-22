@@ -51,6 +51,7 @@ import type * as stripe from "../stripe.js";
 import type * as team from "../team.js";
 import type * as users from "../users.js";
 import type * as vehicleControlReminders from "../vehicleControlReminders.js";
+import type * as vehicleRemarkAnalysis from "../vehicleRemarkAnalysis.js";
 import type * as ventes from "../ventes.js";
 
 import type {
@@ -103,6 +104,7 @@ declare const fullApi: ApiFromModules<{
   team: typeof team;
   users: typeof users;
   vehicleControlReminders: typeof vehicleControlReminders;
+  vehicleRemarkAnalysis: typeof vehicleRemarkAnalysis;
   ventes: typeof ventes;
 }>;
 

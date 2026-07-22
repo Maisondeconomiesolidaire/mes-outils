@@ -27,6 +27,23 @@ type Remark = {
   notes?: string;
 };
 
+type VehicleAnalysis = {
+  _id: Id<"vehicleRemarkAnalyses">;
+  vehicleId: Id<"vehicles">;
+  vehicleName: string;
+  summary: string;
+  proposals: Array<{ title: string; description: string; priority: "low" | "medium" | "high" }>;
+  sourceRemarkCount: number;
+  updatedAt: number;
+};
+
+type MaintenanceProposal = {
+  vehicleId: Id<"vehicles">;
+  title: string;
+  description: string;
+  priority: "low" | "medium" | "high";
+};
+
 /** Petit indicateur oui/non (vert/rouge) pour un point de contrôle. */
 function Check3({ label, value }: { label: string; value?: boolean }) {
   if (value === undefined) return null;
@@ -51,10 +68,12 @@ function Check3({ label, value }: { label: string; value?: boolean }) {
 export function ReservationRemarks({
   kind,
   vehicleId,
+  onCreateMaintenance,
 }: {
   kind: "vehicle" | "room";
   /** Restreint aux remarques d'un véhicule précis (onglet dans la fiche véhicule). */
   vehicleId?: Id<"vehicles">;
+  onCreateMaintenance?: (proposal: MaintenanceProposal) => void;
 }) {
   const vehicleRemarks = useQuery(
     api.reservations.listVehicleRemarks,
@@ -64,9 +83,13 @@ export function ReservationRemarks({
     api.reservations.listRoomRemarks,
     kind === "room" ? {} : "skip",
   );
+  const vehicleAnalyses = useQuery(
+    api.vehicleRemarkAnalysis.list,
+    kind === "vehicle" ? { vehicleId } : "skip",
+  ) as VehicleAnalysis[] | undefined;
   const data = (kind === "vehicle" ? vehicleRemarks : roomRemarks) as Remark[] | undefined;
 
-  if (data === undefined) return <FullSpinner label="Chargement des remarques..." />;
+  if (data === undefined || (kind === "vehicle" && vehicleAnalyses === undefined)) return <FullSpinner label="Chargement des remarques..." />;
   if (data.length === 0) {
     return (
       <EmptyState
@@ -81,6 +104,43 @@ export function ReservationRemarks({
 
   return (
     <div className="space-y-3">
+      {kind === "vehicle" && vehicleAnalyses?.length ? (
+        <section className="border-b border-[var(--border)] pb-6">
+          <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Synthèse IA des retours</p>
+          <div className="mt-3 space-y-6">
+            {vehicleAnalyses.map((analysis) => (
+              <div key={analysis._id}>
+                {!vehicleId ? <p className="font-semibold text-[var(--foreground)]">{analysis.vehicleName}</p> : null}
+                <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{analysis.summary}</p>
+                {analysis.proposals.length ? (
+                  <div className="mt-4 space-y-3">
+                    <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Maintenances proposées</p>
+                    {analysis.proposals.map((proposal, index) => (
+                      <div key={`${analysis._id}-${proposal.title}-${index}`} className="border-l-2 border-[var(--foreground)] pl-3">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-[var(--foreground)]">{proposal.title}</p>
+                            <p className="mt-1 text-sm leading-6 text-[var(--muted-foreground)]">{proposal.description}</p>
+                          </div>
+                          {onCreateMaintenance ? (
+                            <button
+                              type="button"
+                              onClick={() => onCreateMaintenance({ vehicleId: analysis.vehicleId, ...proposal })}
+                              className="shrink-0 border-b border-[var(--foreground)] pb-0.5 text-xs font-semibold text-[var(--foreground)] hover:opacity-70"
+                            >
+                              Effectuer cette maintenance
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {data.map((remark) => (
         <div key={remark._id} className="premium-panel rounded-2xl p-4">
           <div className="flex flex-wrap items-start gap-3">

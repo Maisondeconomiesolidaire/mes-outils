@@ -844,6 +844,11 @@ export const submitVehicleFeedback = mutation({
       displayName: displayName(identity),
       eventKey: `vehicle-return:${args.reservationId}`,
     });
+    // Chaque nouveau retour relance une synthèse qui tient compte de tout
+    // l'historique du véhicule et de ses éventuels problèmes récurrents.
+    await ctx.scheduler.runAfter(0, internal.vehicleRemarkAnalysis.analyze, {
+      vehicleId: reservation.vehicleId,
+    });
   },
 });
 

@@ -1219,6 +1219,21 @@ export default defineSchema(
     .index("by_status", ["status"])
     .index("by_dueDate", ["dueDate"]),
 
+  /** Synthèse IA des retours de réservation, une par véhicule. */
+  vehicleRemarkAnalyses: defineTable({
+    vehicleId: v.id("vehicles"),
+    summary: v.string(),
+    proposals: v.array(v.object({
+      title: v.string(),
+      description: v.string(),
+      priority: v.union(v.literal("low"), v.literal("medium"), v.literal("high")),
+    })),
+    sourceRemarkCount: v.number(),
+    latestRemarkAt: v.number(),
+    model: v.string(),
+    updatedAt: v.number(),
+  }).index("by_vehicleId", ["vehicleId"]),
+
   /** Documents rattachés à un véhicule (carte grise, facture, devis, assurance...). */
   vehicleDocuments: defineTable({
     vehicleId: v.id("vehicles"),

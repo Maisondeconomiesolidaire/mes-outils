@@ -48,6 +48,12 @@ import { confirmPermanentDelete } from "../lib/confirm";
 type VehicleKind = "utilitaire" | "voiture";
 type TaskPriority = "low" | "medium" | "high";
 type TaskStatus = "todo" | "in_progress" | "done";
+type MaintenancePrefill = {
+  vehicleId: Id<"vehicles">;
+  title: string;
+  description: string;
+  priority: TaskPriority;
+};
 
 type Vehicle = {
   _id: Id<"vehicles">;
@@ -157,6 +163,13 @@ export function Gotravaux() {
   const [detailsVehicleId, setDetailsVehicleId] = useState<Id<"vehicles"> | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [taskPrefill, setTaskPrefill] = useState<MaintenancePrefill | null>(null);
+
+  function openMaintenanceFromProposal(proposal: MaintenancePrefill) {
+    setDetailsVehicleId(null);
+    setTaskPrefill(proposal);
+    setTaskModalOpen(true);
+  }
 
   const filteredVehicles = useMemo(() => {
     const normalized = search.trim().toLowerCase();
@@ -178,7 +191,7 @@ export function Gotravaux() {
     sub === "vehicles" && canCreate ? (
       <Button size="lg" onClick={() => setCreateOpen(true)}><Plus className="h-5 w-5" />Ajouter un véhicule</Button>
     ) : sub === "tasks" && canCreate ? (
-      <Button size="lg" onClick={() => setTaskModalOpen(true)}><Plus className="h-5 w-5" />Nouvelle maintenance</Button>
+      <Button size="lg" onClick={() => { setTaskPrefill(null); setTaskModalOpen(true); }}><Plus className="h-5 w-5" />Nouvelle maintenance</Button>
     ) : undefined;
 
   return (
@@ -253,7 +266,7 @@ export function Gotravaux() {
 
         {sub === "tasks" ? <TaskList tasks={tasks} onUpdate={updateTask} canEdit={canEdit} /> : null}
         {sub === "reservations" && canSeeReservations ? <VehicleReservationsPanel /> : null}
-        {sub === "remarques" ? <ReservationRemarks kind="vehicle" /> : null}
+        {sub === "remarques" ? <ReservationRemarks kind="vehicle" onCreateMaintenance={canCreate ? openMaintenanceFromProposal : undefined} /> : null}
         {sub === "calendar" ? (
           <FleetCalendar
             vehicles={vehicles}
@@ -271,11 +284,11 @@ export function Gotravaux() {
 
       {/* Détails d'un véhicule existant : 3 onglets */}
       {detailsVehicle ? (
-        <VehicleDetailsModal vehicle={detailsVehicle} onClose={() => setDetailsVehicleId(null)} canCreate={canCreate} canEdit={canEdit} />
+        <VehicleDetailsModal vehicle={detailsVehicle} onClose={() => setDetailsVehicleId(null)} canCreate={canCreate} canEdit={canEdit} onCreateMaintenance={canCreate ? openMaintenanceFromProposal : undefined} />
       ) : null}
 
       {/* Maintenance globale (avec sélecteur de véhicule) */}
-      <TaskModal open={taskModalOpen} onClose={() => setTaskModalOpen(false)} vehicles={vehicles} />
+      <TaskModal open={taskModalOpen} onClose={() => { setTaskModalOpen(false); setTaskPrefill(null); }} vehicles={vehicles} prefill={taskPrefill} />
     </>
   );
 }
@@ -470,7 +483,7 @@ function CreateVehicleModal({ open, onClose }: { open: boolean; onClose: () => v
 
 /* ─── Modal détails véhicule (4 onglets) ─────────────────────────────────── */
 
-function VehicleDetailsModal({ vehicle, onClose, canCreate, canEdit }: { vehicle: Vehicle; onClose: () => void; canCreate: boolean; canEdit: boolean }) {
+function VehicleDetailsModal({ vehicle, onClose, canCreate, canEdit, onCreateMaintenance }: { vehicle: Vehicle; onClose: () => void; canCreate: boolean; canEdit: boolean; onCreateMaintenance?: (proposal: MaintenancePrefill) => void }) {
   const [tab, setTab] = useState<"info" | "maintenance" | "documents" | "remarques">("info");
   const tabs = [
     { key: "info" as const, label: "Informations", icon: Info },
@@ -495,7 +508,7 @@ function VehicleDetailsModal({ vehicle, onClose, canCreate, canEdit }: { vehicle
       {tab === "info" ? <VehicleInfoForm vehicle={vehicle} onSaved={onClose} canSave={canEdit} /> : null}
       {tab === "maintenance" ? <VehicleMaintenanceTab vehicleId={vehicle._id} canCreate={canCreate} canEdit={canEdit} /> : null}
       {tab === "documents" ? <VehicleDocumentsTab vehicleId={vehicle._id} canEdit={canEdit} /> : null}
-      {tab === "remarques" ? <ReservationRemarks kind="vehicle" vehicleId={vehicle._id} /> : null}
+      {tab === "remarques" ? <ReservationRemarks kind="vehicle" vehicleId={vehicle._id} onCreateMaintenance={onCreateMaintenance} /> : null}
     </Modal>
   );
 }
@@ -693,7 +706,7 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
 
 /* ─── Maintenance globale ────────────────────────────────────────────────── */
 
-function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => void; vehicles: Vehicle[] }) {
+function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClose: () => void; vehicles: Vehicle[]; prefill: MaintenancePrefill | null }) {
   const createTask = useMutation(api.gotravaux.createVehicleTask);
   const [vehicleId, setVehicleId] = useState<Id<"vehicles"> | "">("");
   const [title, setTitle] = useState("");
@@ -706,6 +719,14 @@ function TaskModal({ open, onClose, vehicles }: { open: boolean; onClose: () => 
   const [partsCost, setPartsCost] = useState("");
   const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setVehicleId(prefill?.vehicleId ?? "");
+    setTitle(prefill?.title ?? "");
+    setDescription(prefill?.description ?? "");
+    setPriority(prefill?.priority ?? "medium");
+  }, [open, prefill]);
 
   async function save() {
     if (!vehicleId || !title.trim()) return;
