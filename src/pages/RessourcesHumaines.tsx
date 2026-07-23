@@ -304,12 +304,12 @@ export function RessourcesHumaines() {
 
       {tab === "employees" ? (
         <div className="space-y-5">
-          <UnderlineTabs
+          <SegmentedTabs
             value={employeeSection}
             onChange={setEmployeeSection}
             items={[
-              { key: "new", label: "Nouveau salarié", icon: UserPlus },
-              { key: "list", label: "Salariés", icon: Users },
+              { key: "new", label: "Nouveau salarié" },
+              { key: "list", label: "Salariés" },
             ]}
           />
           <section className={cn("premium-panel rounded-2xl p-5", employeeSection !== "list" && "hidden")}>
@@ -522,12 +522,12 @@ export function RessourcesHumaines() {
         </div>
       ) : (
         <div className="space-y-5">
-          <UnderlineTabs
+          <SegmentedTabs
             value={contractSection}
             onChange={setContractSection}
             items={[
-              { key: "new", label: "Nouveau contrat", icon: Sparkles },
-              { key: "history", label: "Historique", icon: FileText },
+              { key: "new", label: "Nouveau contrat" },
+              { key: "history", label: "Historique" },
             ]}
           />
           <section className={cn("premium-panel rounded-2xl p-5", contractSection !== "new" && "hidden")}>
@@ -850,6 +850,39 @@ export function RessourcesHumaines() {
           onClose={() => setContractDocumentUrl(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+function SegmentedTabs<T extends string>({
+  items,
+  value,
+  onChange,
+}: {
+  items: Array<{ key: T; label: string }>;
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="inline-flex max-w-full gap-1 overflow-x-auto rounded-[22px] border border-[var(--border)] bg-[var(--card)] p-2 shadow-sm">
+      {items.map((item) => {
+        const active = item.key === value;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onChange(item.key)}
+            className={cn(
+              "whitespace-nowrap rounded-2xl px-5 py-3 text-base font-medium transition sm:px-7 sm:text-lg",
+              active
+                ? "bg-brand-500 text-white shadow-[0_5px_14px_rgba(71,198,103,0.24)]"
+                : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+            )}
+          >
+            {item.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
