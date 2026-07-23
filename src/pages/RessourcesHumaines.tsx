@@ -864,7 +864,7 @@ function SegmentedTabs<T extends string>({
   onChange: (value: T) => void;
 }) {
   return (
-    <div className="inline-flex max-w-full gap-1 overflow-x-auto rounded-[22px] border border-[var(--border)] bg-[var(--card)] p-2 shadow-sm">
+    <div className="inline-flex max-w-full gap-1 overflow-x-auto overflow-y-hidden rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
       {items.map((item) => {
         const active = item.key === value;
         return (
@@ -873,10 +873,10 @@ function SegmentedTabs<T extends string>({
             type="button"
             onClick={() => onChange(item.key)}
             className={cn(
-              "whitespace-nowrap rounded-2xl px-5 py-3 text-base font-medium transition sm:px-7 sm:text-lg",
+              "whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-semibold transition",
               active
-                ? "bg-brand-500 text-white shadow-[0_5px_14px_rgba(71,198,103,0.24)]"
-                : "text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-[var(--foreground)]",
+                ? "bg-brand-500 text-white"
+                : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
             )}
           >
             {item.label}

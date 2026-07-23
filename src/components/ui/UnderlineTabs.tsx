@@ -42,7 +42,7 @@ export function UnderlineTabs<T extends string>({
 }) {
   return (
     <div className={cn("border-b border-[var(--border)]", className)}>
-      <div className="flex flex-wrap items-end gap-6 overflow-x-auto">
+      <div className="flex flex-nowrap items-end gap-6 overflow-x-auto overflow-y-hidden">
         {items.map((item, index) => {
           const active = item.key === value;
           const Icon = item.icon;
