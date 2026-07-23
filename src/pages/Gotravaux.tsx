@@ -6,6 +6,7 @@ import {
   CalendarDays,
   CarFront,
   Check,
+  CheckCircle2,
   Clock,
   Euro,
   FileText,
@@ -2115,6 +2116,7 @@ function ReservationDetailsModal({
   onRemindReturn: (reservationId: Id<"vehicleReservations">) => Promise<void>;
 }) {
   const [saving, setSaving] = useState<"approved" | "rejected" | "returned" | "reminder" | null>(null);
+  const [reminderToast, setReminderToast] = useState<"success" | "error" | null>(null);
   if (!reservation) return null;
   const current = reservation;
 
@@ -2141,6 +2143,11 @@ function ReservationDetailsModal({
     setSaving("reminder");
     try {
       await onRemindReturn(current._id);
+      setReminderToast("success");
+      window.setTimeout(() => setReminderToast(null), 4_000);
+    } catch {
+      setReminderToast("error");
+      window.setTimeout(() => setReminderToast(null), 4_000);
     } finally {
       setSaving(null);
     }
@@ -2222,6 +2229,22 @@ function ReservationDetailsModal({
             </>
           ) : null}
         </div>
+        {reminderToast ? (
+          <div
+            role="status"
+            className={cn(
+              "fixed bottom-5 right-5 z-[60] flex max-w-sm items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-[var(--shadow-strong)]",
+              reminderToast === "success"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/15 dark:text-emerald-200"
+                : "border-red-200 bg-red-50 text-red-800 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-200",
+            )}
+          >
+            {reminderToast === "success" ? <CheckCircle2 className="h-5 w-5 shrink-0" /> : <Info className="h-5 w-5 shrink-0" />}
+            {reminderToast === "success"
+              ? "Email de relance envoyé à l’utilisateur."
+              : "La relance n’a pas pu être envoyée. Réessayez."}
+          </div>
+        ) : null}
       </div>
     </Modal>
   );
