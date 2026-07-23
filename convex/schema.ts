@@ -179,6 +179,7 @@ export const hrContractWebhookPayload = v.object({
   adresse_salarie: v.string(),
   num_sec_sociale: v.string(),
   structure: v.string(),
+  Nom_contrat: v.optional(v.string()),
   numero_contrat: v.optional(v.string()),
   type_contrat: v.string(),
   type_document: v.string(),

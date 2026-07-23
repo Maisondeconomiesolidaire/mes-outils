@@ -6,6 +6,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
+import { DatePicker } from "../components/ui/DatePicker";
 import { Field, Input, Select } from "../components/ui/Field";
 import { FullSpinner } from "../components/ui/Spinner";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
@@ -36,10 +37,6 @@ type ContractHistoryItem = {
   _id: Id<"hrContracts">;
   employeeId: Id<"hrEmployees">;
   employeeName: string;
-  webhookStatus: "pending" | "success" | "error";
-  webhookResponseCode?: number;
-  requestedAt: number;
-  requestedBy: string;
   payload: {
     structure: string;
     numero_contrat?: string;
@@ -108,41 +105,6 @@ const emptyContractForm = {
   salaire_brut_mensuel: "",
   PREMIER_CONTRAT: "",
 };
-
-const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", {
-  day: "2-digit",
-  month: "2-digit",
-  year: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-});
-
-function formatDateTime(value: number) {
-  return dateTimeFormatter.format(new Date(value));
-}
-
-function structureWebhookLabel(
-  structure: Employee["structure"] | undefined,
-) {
-  switch (structure) {
-    case "Recyclerie 60":
-      return "Recyclerie60";
-    case "Pays de Bray Services 60":
-      return "Recyclaide";
-    case "Pays de Bray Services 76":
-      return "Materiosol";
-    case "Les Sens du Bray":
-      return "LSDB";
-    case "Recyclerie 76":
-      return "Recyclerie76";
-    case "Pays de Bray Emploi":
-      return "PBE";
-    case "Maison d'Economie Solidaire":
-      return "MES";
-    default:
-      return "—";
-  }
-}
 
 export function RessourcesHumaines() {
   const employees = useQuery(api.rh.listEmployees) as Employee[] | undefined;
@@ -264,7 +226,7 @@ export function RessourcesHumaines() {
           selectedContractEmployee?.firstContractDate ||
           "",
       });
-      setContractMessage("Contrat envoyé au scénario Make.");
+      setContractMessage("Contrat généré.");
       setContractForm((current) => ({
         ...emptyContractForm,
         employeeId: current.employeeId,
@@ -286,7 +248,7 @@ export function RessourcesHumaines() {
     <div className="space-y-6">
       <SectionHeader
         title="Ressources Humaines"
-        subtitle="Gérez les salariés et déclenchez les contrats depuis Mes Outils."
+        subtitle="Gérez les salariés et leurs contrats."
       />
 
       <UnderlineTabs
@@ -304,7 +266,7 @@ export function RessourcesHumaines() {
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4 text-[var(--muted-foreground)]" />
               <h2 className="text-lg font-semibold text-[var(--foreground)]">
-                Salariés importés et actifs
+                Salariés
               </h2>
             </div>
 
@@ -338,9 +300,6 @@ export function RessourcesHumaines() {
                     </div>
                     <div className="mt-3 grid gap-1 text-sm text-[var(--muted-foreground)]">
                       <p>{employee.address || "Adresse à compléter"}</p>
-                      <p>
-                        NIR : {employee.socialSecurityNumber || "Non renseigné"}
-                      </p>
                       <p>
                         Premier contrat : {employee.firstContractDate || "Non renseigné"}
                       </p>
@@ -445,13 +404,12 @@ export function RessourcesHumaines() {
                   label="Date du premier contrat"
                   hint="Valeur reprise par défaut lors de la génération du contrat."
                 >
-                  <Input
-                    type="date"
+                  <DatePicker
                     value={employeeForm.firstContractDate}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       setEmployeeForm((current) => ({
                         ...current,
-                        firstContractDate: event.target.value,
+                        firstContractDate: value,
                       }))
                     }
                   />
@@ -548,12 +506,6 @@ export function RessourcesHumaines() {
                     <p className="mt-1 text-[var(--muted-foreground)]">
                       {selectedContractEmployee.structure}
                     </p>
-                    <p className="mt-1 text-[var(--muted-foreground)]">
-                      Structure webhook : {structureWebhookLabel(selectedContractEmployee.structure)}
-                    </p>
-                    <p className="mt-1 text-[var(--muted-foreground)]">
-                      NIR : {selectedContractEmployee.socialSecurityNumber}
-                    </p>
                   </div>
                 ) : null}
 
@@ -608,25 +560,23 @@ export function RessourcesHumaines() {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="Date de début du contrat" required>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={contractForm.date_debut_contrat}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setContractForm((current) => ({
                           ...current,
-                          date_debut_contrat: event.target.value,
+                          date_debut_contrat: value,
                         }))
                       }
                     />
                   </Field>
                   <Field label="Date de fin du contrat" required>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={contractForm.date_fin_contrat}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setContractForm((current) => ({
                           ...current,
-                          date_fin_contrat: event.target.value,
+                          date_fin_contrat: value,
                         }))
                       }
                     />
@@ -673,25 +623,23 @@ export function RessourcesHumaines() {
                     />
                   </Field>
                   <Field label="Début période d'essai">
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={contractForm.date_debut_periode_essai}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setContractForm((current) => ({
                           ...current,
-                          date_debut_periode_essai: event.target.value,
+                          date_debut_periode_essai: value,
                         }))
                       }
                     />
                   </Field>
                   <Field label="Fin période d'essai">
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={contractForm.date_fin_periode_essai}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setContractForm((current) => ({
                           ...current,
-                          date_fin_periode_essai: event.target.value,
+                          date_fin_periode_essai: value,
                         }))
                       }
                     />
@@ -739,13 +687,12 @@ export function RessourcesHumaines() {
                     />
                   </Field>
                   <Field label="PREMIER_CONTRAT" required>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={contractForm.PREMIER_CONTRAT}
-                      onChange={(event) =>
+                      onChange={(value) =>
                         setContractForm((current) => ({
                           ...current,
-                          PREMIER_CONTRAT: event.target.value,
+                          PREMIER_CONTRAT: value,
                         }))
                       }
                     />
@@ -801,7 +748,7 @@ export function RessourcesHumaines() {
                 <EmptyState
                   icon={<FileText className="h-8 w-8" />}
                   title="Aucun contrat généré"
-                  description="Les envois au webhook Make apparaîtront ici."
+                  description="Les contrats générés apparaîtront ici."
                 />
               ) : (
                 contracts.map((contract) => (
@@ -818,7 +765,6 @@ export function RessourcesHumaines() {
                           {contract.payload.poste}
                         </p>
                       </div>
-                      <StatusBadge status={contract.webhookStatus} />
                     </div>
                     <div className="mt-3 grid gap-1 text-sm text-[var(--muted-foreground)]">
                       <p>
@@ -827,7 +773,6 @@ export function RessourcesHumaines() {
                           ? "Contrat initial"
                           : "Avenant prolongation"}
                       </p>
-                      <p>Structure webhook : {contract.payload.structure}</p>
                       {contract.payload.numero_contrat ? (
                         <p>Numéro de contrat : {contract.payload.numero_contrat}</p>
                       ) : null}
@@ -835,11 +780,6 @@ export function RessourcesHumaines() {
                         Contrat : {contract.payload.date_debut_contrat} →{" "}
                         {contract.payload.date_fin_contrat}
                       </p>
-                      <p>Demandé par : {contract.requestedBy}</p>
-                      <p>Envoyé le : {formatDateTime(contract.requestedAt)}</p>
-                      {contract.webhookResponseCode ? (
-                        <p>Code retour webhook : {contract.webhookResponseCode}</p>
-                      ) : null}
                     </div>
                   </article>
                 ))
@@ -862,10 +802,11 @@ function AddressField({
   const searchAddresses = useAction(api.rh.searchAddresses);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
 
   useEffect(() => {
     const trimmed = value.trim();
-    if (trimmed.length < 3) {
+    if (!isFocused || trimmed.length < 3) {
       setSuggestions([]);
       setLoading(false);
       return;
@@ -880,7 +821,7 @@ function AddressField({
     }, 250);
 
     return () => window.clearTimeout(timer);
-  }, [value, searchAddresses]);
+  }, [isFocused, value, searchAddresses]);
 
   return (
     <Field
@@ -895,6 +836,8 @@ function AddressField({
             className="pl-9"
             value={value}
             onChange={(event) => onChange(event.target.value)}
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => window.setTimeout(() => setIsFocused(false), 120)}
             placeholder="Ex. 14 rue du 9 juin 60220 Formerie"
           />
         </div>
@@ -907,6 +850,7 @@ function AddressField({
               <button
                 key={suggestion}
                 type="button"
+                onMouseDown={(event) => event.preventDefault()}
                 onClick={() => {
                   onChange(suggestion);
                   setSuggestions([]);
@@ -941,22 +885,5 @@ function MessageBox({
     >
       {children}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: ContractHistoryItem["webhookStatus"] }) {
-  const label =
-    status === "success" ? "Envoyé" : status === "error" ? "Erreur" : "En attente";
-  return (
-    <span
-      className={cn(
-        "rounded-full px-2.5 py-1 text-xs font-medium",
-        status === "success" && "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-        status === "error" && "bg-red-500/10 text-red-700 dark:text-red-300",
-        status === "pending" && "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-      )}
-    >
-      {label}
-    </span>
   );
 }

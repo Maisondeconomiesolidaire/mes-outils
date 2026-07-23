@@ -198,6 +198,7 @@ function contractPayloadFromEmployee(
   return {
     genre_salarie: employee.gender,
     nom_prenom_salarie: employee.fullName,
+    Nom_contrat: `${employee.lastName.replace(/\s+/g, "")}-${employee.firstName.replace(/\s+/g, "")}`,
     adresse_salarie: employee.address,
     num_sec_sociale: employee.socialSecurityNumber,
     structure: structureForWebhook(employee.structure),
@@ -395,6 +396,7 @@ export const recordContractWebhook = internalMutation({
       payload: v.object({
         genre_salarie: v.string(),
         nom_prenom_salarie: v.string(),
+        Nom_contrat: v.string(),
         adresse_salarie: v.string(),
         num_sec_sociale: v.string(),
         structure: v.string(),
