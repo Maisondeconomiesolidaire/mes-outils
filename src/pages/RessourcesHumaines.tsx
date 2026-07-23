@@ -126,12 +126,21 @@ export function RessourcesHumaines() {
   const [contractMessage, setContractMessage] = useState<string | null>(null);
   const [savingEmployee, setSavingEmployee] = useState(false);
   const [sendingContract, setSendingContract] = useState(false);
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const employeeFormRef = useRef<HTMLElement>(null);
 
   const selectedContractEmployee = useMemo(
     () =>
       employees?.find((employee) => employee._id === contractForm.employeeId) ?? null,
     [employees, contractForm.employeeId],
   );
+  const filteredEmployees = useMemo(() => {
+    const query = employeeSearch.trim().toLocaleLowerCase("fr");
+    if (!query) return employees ?? [];
+    return (employees ?? []).filter((employee) =>
+      employee.fullName.toLocaleLowerCase("fr").includes(query),
+    );
+  }, [employeeSearch, employees]);
 
   useEffect(() => {
     if (!employees?.length) return;
@@ -200,6 +209,9 @@ export function RessourcesHumaines() {
     setEmployeeMessage(null);
     setEmployeeError(null);
     setTab("employees");
+    window.requestAnimationFrame(() =>
+      employeeFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
   }
 
   function updateContractCompensation(
@@ -292,6 +304,16 @@ export function RessourcesHumaines() {
               </h2>
             </div>
 
+            <div className="relative mt-4">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+              <Input
+                className="pl-9"
+                value={employeeSearch}
+                onChange={(event) => setEmployeeSearch(event.target.value)}
+                placeholder="Rechercher un salarié…"
+              />
+            </div>
+
             <div className="mt-4 grid gap-3">
               {employees.length === 0 ? (
                 <EmptyState
@@ -299,8 +321,14 @@ export function RessourcesHumaines() {
                   title="Aucun salarié"
                   description="Ajoutez votre premier salarié pour démarrer la gestion RH."
                 />
+              ) : filteredEmployees.length === 0 ? (
+                <EmptyState
+                  icon={<Search className="h-8 w-8" />}
+                  title="Aucun salarié trouvé"
+                  description="Essayez avec un autre nom."
+                />
               ) : (
-                employees.map((employee) => (
+                filteredEmployees.map((employee) => (
                   <button
                     key={employee._id}
                     type="button"
@@ -332,7 +360,7 @@ export function RessourcesHumaines() {
             </div>
           </section>
 
-          <section className="premium-panel rounded-2xl p-5">
+          <section ref={employeeFormRef} className="premium-panel rounded-2xl p-5">
             <div className="flex items-center gap-2">
               <UserPlus className="h-4 w-4 text-[var(--muted-foreground)]" />
               <h2 className="text-lg font-semibold text-[var(--foreground)]">
