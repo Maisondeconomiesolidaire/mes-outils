@@ -118,6 +118,8 @@ export function RessourcesHumaines() {
   const generateContract = useAction(api.rh.generateContract);
 
   const [tab, setTab] = useState<"employees" | "contracts">("employees");
+  const [employeeSection, setEmployeeSection] = useState<"new" | "list">("list");
+  const [contractSection, setContractSection] = useState<"new" | "history">("new");
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
   const [contractForm, setContractForm] = useState(emptyContractForm);
   const [employeeError, setEmployeeError] = useState<string | null>(null);
@@ -210,6 +212,7 @@ export function RessourcesHumaines() {
     setEmployeeMessage(null);
     setEmployeeError(null);
     setTab("employees");
+    setEmployeeSection("new");
     window.requestAnimationFrame(() =>
       employeeFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
     );
@@ -300,8 +303,16 @@ export function RessourcesHumaines() {
       />
 
       {tab === "employees" ? (
-        <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
-          <section className="premium-panel rounded-2xl p-5">
+        <div className="space-y-5">
+          <UnderlineTabs
+            value={employeeSection}
+            onChange={setEmployeeSection}
+            items={[
+              { key: "new", label: "Nouveau salarié", icon: UserPlus },
+              { key: "list", label: "Salariés", icon: Users },
+            ]}
+          />
+          <section className={cn("premium-panel rounded-2xl p-5", employeeSection !== "list" && "hidden")}>
             <div className="flex items-center gap-2">
               <Users className="h-4 w-4 text-[var(--muted-foreground)]" />
               <h2 className="text-lg font-semibold text-[var(--foreground)]">
@@ -365,7 +376,7 @@ export function RessourcesHumaines() {
             </div>
           </section>
 
-          <section ref={employeeFormRef} className="premium-panel rounded-2xl p-5">
+          <section ref={employeeFormRef} className={cn("premium-panel rounded-2xl p-5", employeeSection !== "new" && "hidden")}>
             <div className="flex items-center gap-2">
               <UserPlus className="h-4 w-4 text-[var(--muted-foreground)]" />
               <h2 className="text-lg font-semibold text-[var(--foreground)]">
@@ -510,8 +521,16 @@ export function RessourcesHumaines() {
           </section>
         </div>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[0.92fr_1.08fr]">
-          <section className="premium-panel rounded-2xl p-5">
+        <div className="space-y-5">
+          <UnderlineTabs
+            value={contractSection}
+            onChange={setContractSection}
+            items={[
+              { key: "new", label: "Nouveau contrat", icon: Sparkles },
+              { key: "history", label: "Historique", icon: FileText },
+            ]}
+          />
+          <section className={cn("premium-panel rounded-2xl p-5", contractSection !== "new" && "hidden")}>
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-[var(--muted-foreground)]" />
               <h2 className="text-lg font-semibold text-[var(--foreground)]">
@@ -570,7 +589,7 @@ export function RessourcesHumaines() {
                       placeholder="Exemple : 2"
                     />
                   </Field>
-                  <Field label="Type de contrat" required>
+                  <Field label="Contrat" required>
                     <Select
                       value={contractForm.type_contrat}
                       onChange={(event) =>
@@ -587,7 +606,7 @@ export function RessourcesHumaines() {
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Document" required>
+                  <Field label="Type de contrat" required>
                     <Select
                       value={contractForm.type_document}
                       onChange={(event) =>
@@ -771,7 +790,7 @@ export function RessourcesHumaines() {
             )}
           </section>
 
-          <section className="premium-panel rounded-2xl p-5">
+          <section className={cn("premium-panel rounded-2xl p-5", contractSection !== "history" && "hidden")}>
             <div className="flex items-center gap-2">
               <FileText className="h-4 w-4 text-[var(--muted-foreground)]" />
               <h2 className="text-lg font-semibold text-[var(--foreground)]">
