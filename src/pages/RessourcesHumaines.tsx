@@ -42,6 +42,7 @@ type ContractHistoryItem = {
   requestedBy: string;
   payload: {
     structure: string;
+    numero_contrat?: string;
     type_contrat: "CDDI" | "CDI-Inclusion" | "CDD-Pec" | "CDI";
     type_document: "contrat_initial" | "avenant_prolong";
     poste: string;
@@ -90,6 +91,7 @@ const emptyEmployeeForm = {
 
 const emptyContractForm = {
   employeeId: "" as Id<"hrEmployees"> | "",
+  numero_contrat: "",
   type_contrat: "CDDI" as (typeof CONTRACT_TYPES)[number],
   type_document: "contrat_initial" as
     | "contrat_initial"
@@ -244,6 +246,7 @@ export function RessourcesHumaines() {
     try {
       await generateContract({
         employeeId: contractForm.employeeId,
+        numero_contrat: contractForm.numero_contrat,
         type_contrat: contractForm.type_contrat,
         type_document: contractForm.type_document,
         date_fin_contrat: contractForm.date_fin_contrat,
@@ -555,6 +558,18 @@ export function RessourcesHumaines() {
                 ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Numéro de contrat" required>
+                    <Input
+                      value={contractForm.numero_contrat}
+                      onChange={(event) =>
+                        setContractForm((current) => ({
+                          ...current,
+                          numero_contrat: event.target.value,
+                        }))
+                      }
+                      placeholder="Ex. CDDI-2026-001"
+                    />
+                  </Field>
                   <Field label="Type de contrat" required>
                     <Select
                       value={contractForm.type_contrat}
@@ -750,6 +765,7 @@ export function RessourcesHumaines() {
                     disabled={
                       sendingContract ||
                       !contractForm.employeeId ||
+                      !contractForm.numero_contrat.trim() ||
                       !contractForm.date_debut_contrat ||
                       !contractForm.date_fin_contrat ||
                       !contractForm.duree_contrat.trim() ||
@@ -812,6 +828,9 @@ export function RessourcesHumaines() {
                           : "Avenant prolongation"}
                       </p>
                       <p>Structure webhook : {contract.payload.structure}</p>
+                      {contract.payload.numero_contrat ? (
+                        <p>Numéro de contrat : {contract.payload.numero_contrat}</p>
+                      ) : null}
                       <p>
                         Contrat : {contract.payload.date_debut_contrat} →{" "}
                         {contract.payload.date_fin_contrat}

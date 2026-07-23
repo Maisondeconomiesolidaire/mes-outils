@@ -35,6 +35,7 @@ const structureValidator = v.union(
 
 const contractPayloadArgs = {
   employeeId: v.id("hrEmployees"),
+  numero_contrat: v.string(),
   type_contrat: v.union(
     v.literal("CDDI"),
     v.literal("CDI-Inclusion"),
@@ -178,6 +179,7 @@ function contractPayloadFromEmployee(
   employee: Doc<"hrEmployees">,
   args: {
     employeeId: Id<"hrEmployees">;
+    numero_contrat: string;
     type_contrat: "CDDI" | "CDI-Inclusion" | "CDD-Pec" | "CDI";
     type_document: "contrat_initial" | "avenant_prolong";
     date_fin_contrat: string;
@@ -199,6 +201,7 @@ function contractPayloadFromEmployee(
     adresse_salarie: employee.address,
     num_sec_sociale: employee.socialSecurityNumber,
     structure: structureForWebhook(employee.structure),
+    numero_contrat: args.numero_contrat.trim(),
     type_contrat: args.type_contrat,
     type_document: args.type_document,
     date_fin_contrat: args.date_fin_contrat.trim(),
@@ -395,6 +398,7 @@ export const recordContractWebhook = internalMutation({
         adresse_salarie: v.string(),
         num_sec_sociale: v.string(),
         structure: v.string(),
+        numero_contrat: v.string(),
         type_contrat: v.string(),
         type_document: v.string(),
         date_fin_contrat: v.string(),
