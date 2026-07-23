@@ -5,11 +5,13 @@ import {
   endOfMonth,
   endOfWeek,
   format,
+  getYear,
   isSameDay,
   isSameMonth,
   parseISO,
   startOfMonth,
   startOfWeek,
+  setYear,
   subMonths,
 } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -50,6 +52,13 @@ export function DatePicker({
       }),
     [viewMonth],
   );
+  const availableYears = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const selectedYear = selected ? getYear(selected) : currentYear;
+    const start = Math.min(currentYear - 30, selectedYear - 5);
+    const end = Math.max(currentYear + 10, selectedYear + 5);
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  }, [selected]);
 
   return (
     <div ref={containerRef} className="relative">
@@ -88,7 +97,17 @@ export function DatePicker({
           </div>
           <div className="mb-2 flex items-center justify-between">
             <button type="button" onClick={() => setViewMonth((c) => subMonths(c, 1))} className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)]"><ChevronLeft className="h-4 w-4" /></button>
-            <span className="text-sm font-semibold capitalize text-[var(--foreground)]">{format(viewMonth, "MMMM yyyy", { locale: fr })}</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-semibold capitalize text-[var(--foreground)]">{format(viewMonth, "MMMM", { locale: fr })}</span>
+              <select
+                aria-label="Choisir une année"
+                value={getYear(viewMonth)}
+                onChange={(event) => setViewMonth((current) => setYear(current, Number(event.target.value)))}
+                className="rounded-lg border border-[var(--border)] bg-[var(--card)] px-1.5 py-1 text-sm font-semibold text-[var(--foreground)] outline-none transition hover:border-brand-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/15"
+              >
+                {availableYears.map((year) => <option key={year} value={year}>{year}</option>)}
+              </select>
+            </div>
             <button type="button" onClick={() => setViewMonth((c) => addMonths(c, 1))} className="rounded-lg p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)]"><ChevronRight className="h-4 w-4" /></button>
           </div>
           <div className="grid grid-cols-7 gap-1 pb-1">

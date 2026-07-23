@@ -1,6 +1,6 @@
 import { useAction, useMutation, useQuery } from "convex/react";
-import { useEffect, useMemo, useState } from "react";
-import { FileText, Search, Sparkles, UserPlus, Users } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, FileText, Search, Sparkles, UserPlus, Users } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -475,24 +475,17 @@ export function RessourcesHumaines() {
             ) : (
               <div className="mt-4 grid gap-4">
                 <Field label="Salarié" required>
-                  <Select
+                  <EmployeeCombobox
+                    employees={employees}
                     value={contractForm.employeeId}
-                    onChange={(event) =>
+                    onChange={(employee) =>
                       setContractForm((current) => ({
                         ...current,
-                        employeeId: event.target.value as Id<"hrEmployees">,
-                        PREMIER_CONTRAT:
-                          employees.find((employee) => employee._id === event.target.value)
-                            ?.firstContractDate || "",
+                        employeeId: employee._id,
+                        PREMIER_CONTRAT: employee.firstContractDate || "",
                       }))
                     }
-                  >
-                    {employees.map((employee) => (
-                      <option key={employee._id} value={employee._id}>
-                        {employee.fullName}
-                      </option>
-                    ))}
-                  </Select>
+                  />
                 </Field>
 
                 {selectedContractEmployee ? (
@@ -788,6 +781,109 @@ export function RessourcesHumaines() {
           </section>
         </div>
       )}
+    </div>
+  );
+}
+
+function EmployeeCombobox({
+  employees,
+  value,
+  onChange,
+}: {
+  employees: Employee[];
+  value: Id<"hrEmployees"> | "";
+  onChange: (employee: Employee) => void;
+}) {
+  const selectedEmployee = employees.find((employee) => employee._id === value) ?? null;
+  const [query, setQuery] = useState(selectedEmployee?.fullName ?? "");
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const closeTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!open) setQuery(selectedEmployee?.fullName ?? "");
+  }, [open, selectedEmployee]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+  }, []);
+
+  const results = useMemo(() => {
+    const normalizedQuery = query.trim().toLocaleLowerCase("fr");
+    if (!normalizedQuery) return employees;
+    return employees.filter((employee) =>
+      [employee.fullName, employee.structure, employee.address]
+        .some((value) => value.toLocaleLowerCase("fr").includes(normalizedQuery)),
+    );
+  }, [employees, query]);
+
+  function closeLater() {
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+  }
+
+  function choose(employee: Employee) {
+    if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+    onChange(employee);
+    setQuery(employee.fullName);
+    setOpen(false);
+  }
+
+  return (
+    <div ref={containerRef} className="relative">
+      <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+      <Input
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        aria-controls="employee-search-results"
+        className="pl-9 pr-10"
+        value={query}
+        onFocus={() => {
+          if (closeTimerRef.current) window.clearTimeout(closeTimerRef.current);
+          setQuery((current) => current === selectedEmployee?.fullName ? "" : current);
+          setOpen(true);
+        }}
+        onBlur={closeLater}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setOpen(true);
+        }}
+        placeholder="Rechercher un salarié…"
+      />
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+      {open ? (
+        <div
+          id="employee-search-results"
+          role="listbox"
+          className="absolute z-30 mt-2 max-h-72 w-full overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--card)] p-1.5 shadow-[var(--shadow-strong)]"
+        >
+          {results.length > 0 ? results.map((employee) => {
+            const isSelected = employee._id === value;
+            return (
+              <button
+                key={employee._id}
+                role="option"
+                aria-selected={isSelected}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => choose(employee)}
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition hover:bg-[var(--accent)]"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-500/10 text-sm font-bold text-brand-700 dark:text-brand-300">
+                  {employee.firstName.slice(0, 1)}{employee.lastName.slice(0, 1)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-[var(--foreground)]">{employee.fullName}</span>
+                  <span className="block truncate text-xs text-[var(--muted-foreground)]">{employee.structure} · {employee.address}</span>
+                </span>
+                {isSelected ? <Check className="h-4 w-4 shrink-0 text-brand-600" /> : null}
+              </button>
+            );
+          }) : (
+            <p className="px-3 py-4 text-center text-sm text-[var(--muted-foreground)]">Aucun salarié ne correspond à cette recherche.</p>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
