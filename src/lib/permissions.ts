@@ -18,6 +18,7 @@ import {
   Tag,
   Trophy,
   Truck,
+  UsersRound,
   Wrench,
   type LucideIcon,
 } from "lucide-react";
@@ -510,6 +511,7 @@ export const PORTAL_NAV = [
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
   { to: "/equipements", label: "Équipements", pageKey: "mesoutils:equipements", icon: Boxes },
   { to: "/conges", label: "Congés", pageKey: "mesoutils:conges", icon: CalendarDays },
+  { to: "/rh", label: "Ressources humaines", pageKey: "mesoutils:rh", icon: UsersRound },
   { to: "/messagerie", label: "Messagerie", icon: MessageCircle },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },

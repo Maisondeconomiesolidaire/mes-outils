@@ -9,6 +9,7 @@ import { Messagerie } from "./pages/Messagerie";
 import { Notifications } from "./pages/Notifications";
 import { Portail } from "./pages/Portail";
 import { Conges } from "./pages/Conges";
+import { RessourcesHumaines } from "./pages/RessourcesHumaines";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
 import { Equipements } from "./pages/Equipements";
@@ -71,6 +72,14 @@ export default function App() {
           element={
             <RequirePermission pageKey="mesoutils:conges">
               <Conges />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/rh"
+          element={
+            <RequirePermission pageKey="mesoutils:rh">
+              <RessourcesHumaines />
             </RequirePermission>
           }
         />
