@@ -28,6 +28,15 @@ type RemarkSnapshot = {
     issues?: string;
     notes?: string;
   }>;
+  /** Interventions clôturées : contexte pour éviter de proposer un travail déjà effectué. */
+  completedTasks: Array<{
+    title: string;
+    description?: string;
+    performedAt?: number;
+    odometerKm?: number;
+    laborMinutes?: number;
+    partsCost?: number;
+  }>;
   latestFeedbackAt?: number;
 };
 
@@ -53,6 +62,7 @@ function fallbackAnalysis(snapshot: RemarkSnapshot) {
 const ANALYST_INSTRUCTIONS = [
   "Tu es un mécanicien automobile senior spécialisé dans le diagnostic de véhicules utilitaires et voitures de flotte.",
   "Tu analyses les retours d'utilisation d'UN SEUL véhicule et tu aides une équipe non technique à décider des prochaines maintenances.",
+  "L'historique `completedTasks` liste les interventions déjà réalisées sur ce véhicule. Utilise-le comme contexte : rapproche les retours d'une réparation récente, signale une récidive si elle est cohérente, et ne propose jamais une intervention déjà effectuée sauf si les nouveaux symptômes justifient explicitement un nouveau contrôle.",
   "Réponds uniquement en français et en JSON valide, sans markdown.",
   "Tu as accès à une recherche web : utilise-la systématiquement lorsque la marque et le modèle sont renseignés, afin de rechercher les défauts récurrents et les recommandations techniques correspondant au véhicule, à son année et aux symptômes signalés.",
   "N'utilise les informations trouvées sur le web que si elles concernent bien la marque, le modèle, la génération et, si connue, l'année du véhicule. Une information générale ou concernant une autre motorisation ne suffit pas.",
@@ -82,6 +92,11 @@ export const snapshot = internalQuery({
       .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
       .order("desc")
       .take(100);
+    const maintenanceTasks = await ctx.db
+      .query("vehicleMaintenanceTasks")
+      .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
+      .order("desc")
+      .take(100);
     const feedbackReservations = reservations
       .filter((reservation) => reservation.feedbackSubmittedAt)
       .sort((a, b) => (b.feedbackSubmittedAt ?? 0) - (a.feedbackSubmittedAt ?? 0))
@@ -98,6 +113,18 @@ export const snapshot = internalQuery({
         issues: reservation.feedbackIssues,
         notes: reservation.feedbackNotes,
       }));
+    const completedTasks = maintenanceTasks
+      .filter((task) => task.status === "done")
+      .map((task) => ({
+        title: task.title,
+        description: task.description,
+        // Une tâche clôturée renseigne `dueDate` comme date d'intervention ;
+        // on garde `updatedAt` comme repli pour les historiques plus anciens.
+        performedAt: task.dueDate ?? task.updatedAt,
+        odometerKm: task.odometerKm,
+        laborMinutes: task.laborMinutes,
+        partsCost: task.partsCost,
+      }));
     return {
       vehicle: {
         name: vehicle.name,
@@ -109,6 +136,7 @@ export const snapshot = internalQuery({
         odometerKm: vehicle.odometerKm,
       },
       remarks,
+      completedTasks,
       latestFeedbackAt: feedbackReservations[0]?.feedbackSubmittedAt,
     };
   },
