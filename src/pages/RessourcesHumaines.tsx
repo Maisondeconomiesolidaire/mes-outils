@@ -1,6 +1,6 @@
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, FileText, Search, Sparkles, UserPlus, Users } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ExternalLink, FileText, Loader2, Search, Sparkles, UserPlus, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -124,6 +124,7 @@ export function RessourcesHumaines() {
   const [contractError, setContractError] = useState<string | null>(null);
   const [employeeMessage, setEmployeeMessage] = useState<string | null>(null);
   const [contractMessage, setContractMessage] = useState<string | null>(null);
+  const [contractDocumentUrl, setContractDocumentUrl] = useState<string | null>(null);
   const [savingEmployee, setSavingEmployee] = useState(false);
   const [sendingContract, setSendingContract] = useState(false);
   const [employeeSearch, setEmployeeSearch] = useState("");
@@ -239,8 +240,9 @@ export function RessourcesHumaines() {
     setSendingContract(true);
     setContractError(null);
     setContractMessage(null);
+    setContractDocumentUrl(null);
     try {
-      await generateContract({
+      const result = await generateContract({
         employeeId: contractForm.employeeId,
         numero_contrat: contractForm.numero_contrat,
         type_contrat: contractForm.type_contrat,
@@ -260,7 +262,10 @@ export function RessourcesHumaines() {
           selectedContractEmployee?.firstContractDate ||
           "",
       });
-      setContractMessage("Contrat généré.");
+      setContractDocumentUrl(result.contractUrl ?? null);
+      if (!result.contractUrl) {
+        setContractMessage("Contrat généré, mais le lien SharePoint n'a pas été reçu.");
+      }
       setContractForm((current) => ({
         ...emptyContractForm,
         employeeId: current.employeeId,
@@ -819,6 +824,62 @@ export function RessourcesHumaines() {
           </section>
         </div>
       )}
+      {sendingContract ? <ContractGenerationOverlay /> : null}
+      {contractDocumentUrl ? (
+        <ContractReadyOverlay
+          url={contractDocumentUrl}
+          onClose={() => setContractDocumentUrl(null)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ContractGenerationOverlay() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/35 p-5 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-3xl border border-white/60 bg-[var(--card)] p-8 text-center shadow-[var(--shadow-strong)]">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-500/10 text-brand-600">
+          <Loader2 className="h-7 w-7 animate-spin" />
+        </span>
+        <h2 className="mt-5 text-xl font-bold text-[var(--foreground)]">Génération du contrat</h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+          Le document est en cours de création et d’enregistrement dans SharePoint.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ContractReadyOverlay({ url, onClose }: { url: string; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/35 p-5 backdrop-blur-sm">
+      <div className="relative w-full max-w-sm rounded-3xl border border-white/60 bg-[var(--card)] p-8 text-center shadow-[var(--shadow-strong)]">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Fermer"
+          className="absolute right-4 top-4 rounded-full p-2 text-[var(--muted-foreground)] transition hover:bg-[var(--accent)]"
+        >
+          <X className="h-4 w-4" />
+        </button>
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600">
+          <CheckCircle2 className="h-7 w-7" />
+        </span>
+        <h2 className="mt-5 text-xl font-bold text-[var(--foreground)]">Contrat généré</h2>
+        <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">
+          Le contrat est bien enregistré dans SharePoint.
+        </p>
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-3 text-sm font-bold text-white transition hover:bg-brand-600"
+        >
+          Cliquez pour le voir
+          <ExternalLink className="h-4 w-4" />
+        </a>
+      </div>
     </div>
   );
 }

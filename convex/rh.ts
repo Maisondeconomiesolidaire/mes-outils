@@ -238,6 +238,28 @@ function todayInParis() {
   return `${byType.year}-${byType.month}-${byType.day}`;
 }
 
+function sharePointUrlFromWebhookResponse(responseText: string) {
+  const text = responseText.trim();
+  const candidates = [text];
+  try {
+    const body = JSON.parse(text) as Record<string, unknown>;
+    for (const key of ["url", "webUrl", "web_url", "link"]) {
+      if (typeof body[key] === "string") candidates.push(body[key]);
+    }
+  } catch {
+    // Le module Webhook response de Make renvoie généralement l'URL en texte brut.
+  }
+
+  return candidates.find((candidate) => {
+    try {
+      const url = new URL(candidate);
+      return url.protocol === "https:";
+    } catch {
+      return false;
+    }
+  }) ?? null;
+}
+
 export const listEmployees = query({
   args: {},
   handler: async (ctx) => {
@@ -476,7 +498,7 @@ export const generateContract = action({
       throw new Error(`Webhook Make en échec (${response.status}).`);
     }
 
-    return { ok: true };
+    return { ok: true, contractUrl: sharePointUrlFromWebhookResponse(responseText) };
   },
 });
 
