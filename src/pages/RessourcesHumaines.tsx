@@ -17,7 +17,7 @@ type Employee = {
   firstName: string;
   lastName: string;
   fullName: string;
-  gender: "homme" | "femme";
+  gender: "Monsieur" | "Madame";
   address: string;
   structure:
     | "Pays de Bray Services 60"
@@ -59,8 +59,8 @@ const STRUCTURES = [
 ] as const;
 
 const GENDERS = [
-  { value: "homme", label: "Homme" },
-  { value: "femme", label: "Femme" },
+  { value: "Monsieur", label: "Monsieur" },
+  { value: "Madame", label: "Madame" },
 ] as const;
 
 const CONTRACT_TYPES = [
@@ -80,7 +80,7 @@ const emptyEmployeeForm = {
   firstName: "",
   lastName: "",
   socialSecurityNumber: "",
-  gender: "homme" as "homme" | "femme",
+  gender: "Monsieur" as "Monsieur" | "Madame",
   address: "",
   structure: "Recyclerie 60" as Employee["structure"],
   firstContractDate: "",
@@ -100,11 +100,16 @@ const emptyContractForm = {
   duree_periode_essai: "",
   date_debut_periode_essai: "",
   date_fin_periode_essai: "",
-  remuneration_brute_horaire: "",
+  remuneration_brute_horaire: "12.31",
   duree_mensuel_travail: "",
   salaire_brut_mensuel: "",
   PREMIER_CONTRAT: "",
 };
+
+function parseFrenchNumber(value: string) {
+  const number = Number(value.trim().replace(/\s/g, "").replace(",", "."));
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
 
 export function RessourcesHumaines() {
   const employees = useQuery(api.rh.listEmployees) as Employee[] | undefined;
@@ -195,6 +200,23 @@ export function RessourcesHumaines() {
     setEmployeeMessage(null);
     setEmployeeError(null);
     setTab("employees");
+  }
+
+  function updateContractCompensation(
+    updates: Partial<Pick<typeof emptyContractForm, "remuneration_brute_horaire" | "duree_mensuel_travail">>,
+  ) {
+    setContractForm((current) => {
+      const next = { ...current, ...updates };
+      const hourlyRate = parseFrenchNumber(next.remuneration_brute_horaire);
+      const monthlyHours = parseFrenchNumber(next.duree_mensuel_travail);
+      return {
+        ...next,
+        salaire_brut_mensuel:
+          hourlyRate !== null && monthlyHours !== null
+            ? (hourlyRate * monthlyHours).toFixed(2)
+            : "",
+      };
+    });
   }
 
   async function handleContractSubmit() {
@@ -295,7 +317,7 @@ export function RessourcesHumaines() {
                         </p>
                       </div>
                       <span className="rounded-full bg-brand-500/10 px-2.5 py-1 text-xs font-medium text-brand-700 dark:text-brand-300">
-                        {employee.gender === "homme" ? "Homme" : "Femme"}
+                        {employee.gender}
                       </span>
                     </div>
                     <div className="mt-3 grid gap-1 text-sm text-[var(--muted-foreground)]">
@@ -362,7 +384,7 @@ export function RessourcesHumaines() {
                     onChange={(event) =>
                       setEmployeeForm((current) => ({
                         ...current,
-                        gender: event.target.value as "homme" | "femme",
+                        gender: event.target.value as "Monsieur" | "Madame",
                       }))
                     }
                   >
@@ -643,24 +665,16 @@ export function RessourcesHumaines() {
                   <Field label="Rémunération brute horaire" required>
                     <Input
                       value={contractForm.remuneration_brute_horaire}
-                      onChange={(event) =>
-                        setContractForm((current) => ({
-                          ...current,
-                          remuneration_brute_horaire: event.target.value,
-                        }))
-                      }
-                      placeholder="Ex. 11.88"
+                      onChange={(event) => updateContractCompensation({ remuneration_brute_horaire: event.target.value })}
+                      inputMode="decimal"
+                      placeholder="12.31"
                     />
                   </Field>
                   <Field label="Durée mensuelle de travail" required>
                     <Input
                       value={contractForm.duree_mensuel_travail}
-                      onChange={(event) =>
-                        setContractForm((current) => ({
-                          ...current,
-                          duree_mensuel_travail: event.target.value,
-                        }))
-                      }
+                      onChange={(event) => updateContractCompensation({ duree_mensuel_travail: event.target.value })}
+                      inputMode="decimal"
                       placeholder="Ex. 151.67 h"
                     />
                   </Field>
@@ -670,13 +684,9 @@ export function RessourcesHumaines() {
                   <Field label="Salaire brut mensuel" required>
                     <Input
                       value={contractForm.salaire_brut_mensuel}
-                      onChange={(event) =>
-                        setContractForm((current) => ({
-                          ...current,
-                          salaire_brut_mensuel: event.target.value,
-                        }))
-                      }
-                      placeholder="Ex. 1802.25"
+                      readOnly
+                      className="cursor-not-allowed bg-[var(--accent)]"
+                      placeholder="Calculé automatiquement"
                     />
                   </Field>
                   <Field label="PREMIER_CONTRAT" required>

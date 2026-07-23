@@ -22,7 +22,7 @@ const RH_PAGE_KEY = "mesoutils:rh";
 const CONTRACT_WEBHOOK_URL =
   "https://hook.eu2.make.com/huqlb8dif2n27j5bpnp5tycwniqrt1ow";
 
-const genderValidator = v.union(v.literal("homme"), v.literal("femme"));
+const genderValidator = v.union(v.literal("Monsieur"), v.literal("Madame"));
 const structureValidator = v.union(
   v.literal("Pays de Bray Services 60"),
   v.literal("Pays de Bray Services 76"),
@@ -70,7 +70,7 @@ function normalizeAddress(value: string) {
 function normalizeEmployeeInput(args: {
   firstName: string;
   lastName: string;
-  gender: "homme" | "femme";
+  gender: "Monsieur" | "Madame";
   address: string;
   structure:
     | "Pays de Bray Services 60"
@@ -199,6 +199,7 @@ function contractPayloadFromEmployee(
     genre_salarie: employee.gender,
     nom_prenom_salarie: employee.fullName,
     Nom_contrat: `${employee.lastName.replace(/\s+/g, "")}-${employee.firstName.replace(/\s+/g, "")}`,
+    nom_contrat: `${employee.lastName.replace(/\s+/g, "")}-${employee.firstName.replace(/\s+/g, "")}-${args.type_document}-${todayInParis()}`,
     adresse_salarie: employee.address,
     num_sec_sociale: employee.socialSecurityNumber,
     structure: structureForWebhook(employee.structure),
@@ -224,6 +225,17 @@ function contractPayloadFromEmployee(
     PREMIER_CONTRAT:
       args.PREMIER_CONTRAT.trim() || employee.firstContractDate?.trim() || "",
   };
+}
+
+function todayInParis() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${byType.year}-${byType.month}-${byType.day}`;
 }
 
 export const listEmployees = query({
@@ -397,6 +409,7 @@ export const recordContractWebhook = internalMutation({
         genre_salarie: v.string(),
         nom_prenom_salarie: v.string(),
         Nom_contrat: v.string(),
+        nom_contrat: v.string(),
         adresse_salarie: v.string(),
         num_sec_sociale: v.string(),
         structure: v.string(),
@@ -530,8 +543,8 @@ export const importEmployeesFromLegacyCsv = mutation({
           socialSecurityNumber: row.socialSecurityNumber,
           gender:
             (row.genderLabel.trim().toLowerCase() === "madame"
-              ? "femme"
-              : "homme") as "homme" | "femme",
+              ? "Madame"
+              : "Monsieur") as "Monsieur" | "Madame",
           address: row.address.trim(),
           structure,
           firstContractDate: row.firstContractDate?.trim() || undefined,
