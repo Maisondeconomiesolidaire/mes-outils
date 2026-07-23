@@ -567,7 +567,7 @@ export function RessourcesHumaines() {
                           numero_contrat: event.target.value,
                         }))
                       }
-                      placeholder="Ex. CDDI-2026-001"
+                      placeholder="Exemple : 2"
                     />
                   </Field>
                   <Field label="Type de contrat" required>
