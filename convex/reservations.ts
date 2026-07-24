@@ -117,7 +117,13 @@ async function approvedReservationsForVehicle(
     .query("vehicleReservations")
     .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
     .collect();
-  return reservations.filter((reservation) => reservation.status === "approved");
+  // Un retour enregistré clôt la réservation opérationnellement : elle reste
+  // dans l'historique, mais ne doit plus jamais entrer dans les conflits de
+  // disponibilité, quelle que soit l'heure à laquelle le formulaire a été
+  // envoyé.
+  return reservations.filter(
+    (reservation) => reservation.status === "approved" && !reservation.feedbackSubmittedAt,
+  );
 }
 
 /**
