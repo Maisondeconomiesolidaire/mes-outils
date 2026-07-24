@@ -1,11 +1,15 @@
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "./_generated/server";
+import { action, env, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import { formatUserName, livePhoto, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
+import { internal } from "./_generated/api";
+import { esc, resendSend } from "./emails";
+import { clerkPrimaryEmail, fetchAllClerkUsers, formatUserName, INTERNAL_EMAIL_DOMAIN, livePhoto, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const POSTS_PAGE_KEY = "mesoutils:actualites";
+const POST_EMAIL_FROM = "Mes Outils <no-reply@mesoutils.eco-solidaire.fr>";
+const POST_EMAIL_RECIPIENTS_PER_SEND = 50;
 const POST_EDITOR_EMAILS = new Set(["lahmerselim@gmail.com"]);
 const AIRTABLE_AUTHOR_EMAILS: Record<string, string> = {
   "henry gwendal": "g.henry@eco-solidaire.fr",
@@ -121,6 +125,7 @@ async function enrichPost(
     likedByMe: likes.some((like) => like.clerkId === currentClerkId),
     commentsCount: commentsWithMeta.length,
     canManage: post.authorClerkId === currentClerkId || canEditAnyPost(currentEmail),
+    canEmail: post.authorClerkId === currentClerkId,
   };
 }
 
@@ -204,6 +209,98 @@ export const create = mutation({
       pinned: false,
       createdAt: Date.now(),
     });
+  },
+});
+
+type EmailPostSnapshot = {
+  authorName: string;
+  title?: string;
+  body: string;
+  externalLink?: string;
+};
+
+/** Lecture privée du contenu d'un post, réservée à son auteur pour l'envoi email. */
+export const emailSnapshot = internalQuery({
+  args: { postId: v.id("posts") },
+  handler: async (ctx, args): Promise<EmailPostSnapshot> => {
+    await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
+    const identity = await requireUser(ctx);
+    const post = await ctx.db.get(args.postId);
+    if (!post) throw new Error("Post introuvable.");
+    if (post.authorClerkId !== identity.subject) {
+      throw new Error("Seul l'auteur du post peut l'envoyer par email.");
+    }
+    return {
+      authorName: post.authorName,
+      title: post.title,
+      body: post.body,
+      externalLink: post.externalLink,
+    };
+  },
+});
+
+function externalPostHref(value: string | undefined) {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const href = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(href);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function postEmailHtml(post: EmailPostSnapshot) {
+  const title = post.title?.trim();
+  const content = post.body.trim();
+  const href = externalPostHref(post.externalLink);
+  return `<!doctype html><html lang="fr"><body style="margin:0;background:#f6f5f3;padding:24px;font-family:Arial,Helvetica,sans-serif;color:#18181b;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
+      <table role="presentation" width="600" style="max-width:600px;background:#ffffff;border-radius:16px;overflow:hidden;">
+        <tr><td style="padding:28px 30px 10px;">
+          <p style="margin:0 0 14px;color:#71717a;font-size:13px;">Nouvelle publication de Mes Outils</p>
+          <h1 style="margin:0;font-size:24px;line-height:1.3;">${esc(title || "Nouvelle publication")}</h1>
+          <p style="margin:14px 0 0;color:#52525b;font-size:14px;">Publié par ${esc(post.authorName)}</p>
+        </td></tr>
+        ${content ? `<tr><td style="padding:18px 30px 28px;font-size:16px;line-height:1.65;white-space:normal;">${esc(content).replace(/\n/g, "<br />")}</td></tr>` : ""}
+        ${href ? `<tr><td style="padding:0 30px 30px;"><a href="${esc(href)}" target="_blank" style="display:inline-block;border-radius:10px;background:#e11d48;padding:12px 18px;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;">Voir le lien partagé</a></td></tr>` : ""}
+      </table>
+    </td></tr></table>
+  </body></html>`;
+}
+
+/** Diffuse un post à tous les comptes internes, sans exposer les destinataires. */
+export const emailToInternalUsers = action({
+  args: { postId: v.id("posts") },
+  handler: async (ctx, args) => {
+    const post: EmailPostSnapshot = await ctx.runQuery(internal.posts.emailSnapshot, {
+      postId: args.postId,
+    });
+    const secret = env.CLERK_SECRET_KEY;
+    if (!secret) throw new Error("Envoi indisponible : CLERK_SECRET_KEY manquante.");
+    const recipients = Array.from(
+      new Set(
+        (await fetchAllClerkUsers(secret))
+          .map(clerkPrimaryEmail)
+          .filter((email) => email.endsWith(INTERNAL_EMAIL_DOMAIN)),
+      ),
+    );
+    if (recipients.length === 0) throw new Error("Aucun destinataire interne n'a été trouvé.");
+
+    const subject = `${post.authorName} a partagé une publication${post.title?.trim() ? ` · ${post.title.trim()}` : ""}`;
+    const html = postEmailHtml(post);
+    for (let index = 0; index < recipients.length; index += POST_EMAIL_RECIPIENTS_PER_SEND) {
+      const group = recipients.slice(index, index + POST_EMAIL_RECIPIENTS_PER_SEND);
+      const [to, ...bcc] = group;
+      const sent = await resendSend(to, subject, html, POST_EMAIL_FROM, undefined, { bcc });
+      if (!sent) throw new Error("L'email n'a pas pu être envoyé.");
+      if (index + POST_EMAIL_RECIPIENTS_PER_SEND < recipients.length) {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
+    }
+    return { recipients: recipients.length };
   },
 });
 

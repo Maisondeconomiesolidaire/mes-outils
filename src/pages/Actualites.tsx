@@ -9,6 +9,8 @@ import {
   ChevronRight,
   Image as ImageIcon,
   MapPin,
+  Mail,
+  Loader2,
   MessageCircle,
   MessagesSquare,
   PartyPopper,
@@ -141,6 +143,7 @@ type Post = {
   commentsCount: number;
   comments: Comment[];
   canManage: boolean;
+  canEmail: boolean;
 };
 type PostMedia = { kind: "image" | "video"; url: string };
 type PostLike = { _id: Id<"postLikes">; name: string; imageUrl?: string; createdAt: number };
@@ -156,6 +159,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
   const removePost = useMutation(api.posts.remove);
   const pinPost = useMutation(api.posts.pin);
   const updatePost = useMutation(api.posts.update);
+  const emailPost = useAction(api.posts.emailToInternalUsers);
 
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
@@ -276,6 +280,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             onPin={() => pinPost({ postId: post._id, pinned: !post.pinned })}
             onRemove={() => removePostWithConfirmation(post._id)}
             onUpdate={(next) => updatePost({ postId: post._id, ...next })}
+            onEmail={() => emailPost({ postId: post._id })}
             onAddComment={(text) => addComment({ postId: post._id, body: text })}
             onRemoveComment={removeCommentWithConfirmation}
           />
@@ -286,10 +291,11 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
 }
 
 function PostCard({
-  post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onUpdate, onAddComment, onRemoveComment,
+  post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onUpdate, onEmail, onAddComment, onRemoveComment,
 }: {
   post: Post; currentName: string; currentImage?: string; canManage: boolean; canCreate: boolean;
   onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (next: { title?: string; body: string; externalLink?: string; images: Id<"_storage">[] }) => Promise<unknown>;
+  onEmail: () => Promise<{ recipients: number }>;
   onAddComment: (text: string) => Promise<unknown>; onRemoveComment: (commentId: Id<"postComments">) => void;
 }) {
   const [showComments, setShowComments] = useState(false);
@@ -303,6 +309,7 @@ function PostCard({
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [likesOpen, setLikesOpen] = useState(false);
   const [bodyExpanded, setBodyExpanded] = useState(false);
+  const [emailStatus, setEmailStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const likes = useQuery(api.posts.listLikes, likesOpen ? { postId: post._id } : "skip") as
     | PostLike[]
     | undefined;
@@ -344,6 +351,16 @@ function PostCard({
     await onAddComment(text);
     setDraft("");
     setShowComments(true);
+  }
+
+  async function sendPostByEmail() {
+    setEmailStatus("sending");
+    try {
+      await onEmail();
+      setEmailStatus("sent");
+    } catch {
+      setEmailStatus("error");
+    }
   }
 
   return (
@@ -501,13 +518,24 @@ function PostCard({
       ) : null}
 
       {canCreate ? (
-        <div className="mx-2 grid grid-cols-2 border-t border-[var(--border)]">
+        <div className={cn("mx-2 grid border-t border-[var(--border)]", post.canEmail ? "grid-cols-3" : "grid-cols-2")}>
           <SocialButton active={post.likedByMe} onClick={onToggleLike}>
             <ThumbsUp className={`h-[18px] w-[18px] ${post.likedByMe ? "fill-current" : ""}`} /> J'aime
           </SocialButton>
           <SocialButton onClick={() => setShowComments((c) => !c)}>
             <MessageCircle className="h-[18px] w-[18px]" /> Commenter
           </SocialButton>
+          {post.canEmail ? (
+            <button
+              type="button"
+              onClick={sendPostByEmail}
+              disabled={emailStatus === "sending" || emailStatus === "sent"}
+              className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-semibold text-[var(--muted-foreground)] transition hover:bg-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {emailStatus === "sending" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mail className="h-4 w-4" />}
+              {emailStatus === "sending" ? "Envoi..." : emailStatus === "sent" ? "Email envoyé" : "Envoyer par mail"}
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className="mx-2 border-t border-[var(--border)]">
@@ -558,6 +586,16 @@ function PostCard({
       <PostMediaViewer media={media} index={viewerIndex} onIndexChange={setViewerIndex} onClose={() => setViewerIndex(null)} />
     ) : null}
     <LikesModal open={likesOpen} likes={likes} onClose={() => setLikesOpen(false)} />
+    {emailStatus === "sent" ? (
+      <div role="status" className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg border border-emerald-200 bg-white px-4 py-3 text-sm font-medium text-emerald-700 shadow-lg">
+        <Mail className="h-5 w-5" /> Email envoyé aux utilisateurs internes.
+      </div>
+    ) : null}
+    {emailStatus === "error" ? (
+      <div role="alert" className="fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-3 text-sm font-medium text-red-700 shadow-lg">
+        <Mail className="h-5 w-5" /> L'email n'a pas pu être envoyé.
+      </div>
+    ) : null}
     </>
   );
 }
