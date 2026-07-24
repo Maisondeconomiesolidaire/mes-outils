@@ -12,6 +12,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAnyCrmPermission, requireCrmPermission } from "./lib";
 import { esc, resendSend } from "./emails";
+import { KLYDE_GENDERS, KLYDE_TAXONOMY, isKlydeTaxonomyChoice, klydeAverageWeightKg, klydeCategories, klydeSubcategories, klydeSubsubcategories } from "./klydeTaxonomy";
 
 const CONDITIONS = [
   "Neuf avec étiquette",
@@ -22,65 +23,6 @@ const CONDITIONS = [
 ] as const;
 
 const PARCEL_SIZES = ["Petit", "Moyen", "Grand"] as const;
-
-const CATEGORIES = {
-  Vêtements: [
-    "Manteaux et vestes",
-    "Blousons et bombers",
-    "Doudounes et parkas",
-    "Trenchs et imperméables",
-    "Pulls et gilets",
-    "Sweats",
-    "Chemises et blouses",
-    "T-shirts et tops",
-    "Tops et débardeurs",
-    "Robes",
-    "Combinaisons",
-    "Jupes",
-    "Pantalons",
-    "Jeans",
-    "Chinos et toiles",
-    "Shorts",
-    "Tailleurs et costumes",
-    "Ensembles",
-    "Joggings et survêtements",
-    "Leggings",
-    "Sport",
-    "Maillots de bain",
-    "Sous-vêtements",
-    "Lingerie",
-    "Pyjamas",
-  ],
-  Chaussures: [
-    "Baskets",
-    "Bottes et bottines",
-    "Sandales",
-    "Tongs et claquettes",
-    "Escarpins",
-    "Ballerines",
-    "Mocassins",
-    "Espadrilles",
-    "Chaussures de ville",
-    "Chaussures de sport",
-    "Chaussons",
-  ],
-  Accessoires: [
-    "Sacs",
-    "Sacs à dos",
-    "Portefeuilles et maroquinerie",
-    "Ceintures",
-    "Chapeaux et bonnets",
-    "Écharpes et foulards",
-    "Gants",
-    "Bijoux",
-    "Montres",
-    "Lunettes",
-    "Cravates et nœuds papillon",
-    "Accessoires cheveux",
-  ],
-} as const;
-
-const GENDERS = ["Femme", "Homme", "Unisexe"] as const;
 
 const itemStatus = v.union(
   v.literal("stock"),
@@ -97,6 +39,8 @@ type KlydeAIResult = {
   description: string;
   category: string;
   subcategory?: string | null;
+  subsubcategory?: string | null;
+  weightKg?: number | null;
   brand?: string | null;
   size?: string | null;
   condition: string;
@@ -186,15 +130,17 @@ function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
   const parcelSize = PARCEL_SIZES.includes(result.parcelSize as (typeof PARCEL_SIZES)[number])
     ? result.parcelSize
     : undefined;
-  const category = Object.keys(CATEGORIES).includes(result.category)
+  const gender = KLYDE_GENDERS.includes(result.gender as (typeof KLYDE_GENDERS)[number])
+    ? result.gender
+    : "Unisexe";
+  const category = isKlydeTaxonomyChoice(gender, result.category)
     ? result.category
-    : "Vêtements";
-  const subcategories = CATEGORIES[category as keyof typeof CATEGORIES] as readonly string[];
-  const subcategory = subcategories.includes(result.subcategory ?? "")
+    : klydeCategories(gender)[0] ?? "Vêtements";
+  const subcategory = klydeSubcategories(gender, category).includes(result.subcategory ?? "")
     ? result.subcategory
     : undefined;
-  const gender = GENDERS.includes(result.gender as (typeof GENDERS)[number])
-    ? result.gender
+  const subsubcategory = subcategory && klydeSubsubcategories(gender, category, subcategory).includes(result.subsubcategory ?? "")
+    ? result.subsubcategory
     : undefined;
 
   return {
@@ -204,6 +150,7 @@ function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
       "Article textile d'occasion. Détails à vérifier avant publication.",
     category,
     subcategory,
+    subsubcategory,
     brand: cleanOptional(result.brand),
     size: cleanOptional(result.size),
     condition,
@@ -216,6 +163,7 @@ function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
     aiConfidence:
       result.aiConfidence == null ? undefined : Math.max(0, Math.min(1, result.aiConfidence)),
     aiNotes: cleanOptional(result.aiNotes),
+    weightKg: klydeAverageWeightKg(category, subcategory, subsubcategory),
   };
 }
 
@@ -270,6 +218,7 @@ export const list = query({
             item.description,
             item.category,
             item.subcategory,
+            item.subsubcategory,
             item.brand,
             item.size,
             item.color,
@@ -534,6 +483,8 @@ export const create = mutation({
     description: v.string(),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    subsubcategory: v.optional(v.string()),
+    weightKg: v.optional(v.number()),
     brand: v.optional(v.string()),
     size: v.optional(v.string()),
     condition: v.string(),
@@ -576,6 +527,10 @@ export const create = mutation({
       description: args.description.trim(),
       category: (args.category.trim() || "Vêtements").normalize("NFC"),
       subcategory: cleanOptional(args.subcategory)?.normalize("NFC"),
+      subsubcategory: cleanOptional(args.subsubcategory)?.normalize("NFC"),
+      weightKg: typeof args.weightKg === "number" && args.weightKg > 0
+        ? Math.round(args.weightKg * 1000) / 1000
+        : klydeAverageWeightKg(args.category, args.subcategory, args.subsubcategory),
       brand: cleanOptional(args.brand),
       size: cleanOptional(args.size),
       condition: args.condition.trim() || "Bon état",
@@ -755,6 +710,8 @@ export const update = mutation({
     description: v.string(),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    subsubcategory: v.optional(v.string()),
+    weightKg: v.optional(v.number()),
     brand: v.optional(v.string()),
     size: v.optional(v.string()),
     condition: v.string(),
@@ -790,6 +747,10 @@ export const update = mutation({
       description: args.description.trim(),
       category: (args.category.trim() || "Vêtements").normalize("NFC"),
       subcategory: cleanOptional(args.subcategory)?.normalize("NFC"),
+      subsubcategory: cleanOptional(args.subsubcategory)?.normalize("NFC"),
+      weightKg: typeof args.weightKg === "number" && args.weightKg > 0
+        ? Math.round(args.weightKg * 1000) / 1000
+        : klydeAverageWeightKg(args.category, args.subcategory, args.subsubcategory),
       brand: cleanOptional(args.brand),
       size: cleanOptional(args.size),
       condition: args.condition.trim() || "Bon état",
@@ -897,8 +858,10 @@ Retourne uniquement un JSON valide avec ces champs:
 {
   "title": "titre boutique clair, max 80 caractères",
   "description": "description prête à publier, objective, mentionne l'état et les défauts visibles",
-  "category": "une de: Vêtements | Chaussures | Accessoires",
+  "gender": "Femme | Homme | Enfant | Unisexe",
+  "category": "une catégorie exacte de la taxonomie fournie",
   "subcategory": "une sous-catégorie exacte de la catégorie choisie",
+  "subsubcategory": "une sous-sous-catégorie exacte, ou null si aucun niveau plus précis n'existe",
   "brand": "marque si visible ou null",
   "size": "taille si visible ou estimée prudemment, sinon null",
   "condition": "une de: Neuf avec étiquette | Neuf sans étiquette | Très bon état | Bon état | Satisfaisant",
@@ -906,15 +869,12 @@ Retourne uniquement un JSON valide avec ces champs:
   "material": "matière si visible/probable, sinon null",
   "price": prix conseillé en euros pour la boutique, nombre ou null,
   "parcelSize": "Petit | Moyen | Grand",
-  "gender": "une de: Femme | Homme | Unisexe",
   "style": "style/mots utiles: vintage, casual, sport, chic... ou null",
   "aiConfidence": nombre entre 0 et 1,
   "aiNotes": "points à vérifier humainement"
 }
-Sous-catégories autorisées:
-- Vêtements: Manteaux et vestes, Blousons et bombers, Doudounes et parkas, Trenchs et imperméables, Pulls et gilets, Sweats, Chemises et blouses, T-shirts et tops, Tops et débardeurs, Robes, Combinaisons, Jupes, Pantalons, Jeans, Chinos et toiles, Shorts, Tailleurs et costumes, Ensembles, Joggings et survêtements, Leggings, Sport, Maillots de bain, Sous-vêtements, Lingerie, Pyjamas
-- Chaussures: Baskets, Bottes et bottines, Sandales, Tongs et claquettes, Escarpins, Ballerines, Mocassins, Espadrilles, Chaussures de ville, Chaussures de sport, Chaussons
-- Accessoires: Sacs, Sacs à dos, Portefeuilles et maroquinerie, Ceintures, Chapeaux et bonnets, Écharpes et foulards, Gants, Bijoux, Montres, Lunettes, Cravates et nœuds papillon, Accessoires cheveux
+Taxonomie autorisée (genre → catégorie → sous-catégorie → sous-sous-catégorie):
+${JSON.stringify(KLYDE_TAXONOMY)}
 Sois prudent: si marque, taille ou matière ne sont pas visibles, mets null.
 ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim()}` : ""}`;
 

@@ -1492,6 +1492,10 @@ export default defineSchema(
     description: v.string(),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    /** Niveau le plus précis de la taxonomie Klyd (ex. Robes courtes). */
+    subsubcategory: v.optional(v.string()),
+    /** Poids estimé ou corrigé de l'article, en kilogrammes. */
+    weightKg: v.optional(v.number()),
     brand: v.optional(v.string()),
     size: v.optional(v.string()),
     condition: v.string(),
