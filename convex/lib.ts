@@ -654,27 +654,22 @@ export async function fetchInternalClerkDirectory(
  * Fin effective d'une réservation de véhicule, pour tout calcul de
  * disponibilité.
  *
- * C'est le retour de l'utilisateur qui libère le véhicule, pas la date de fin
- * prévue : rendu en avance, il redevient réservable immédiatement ; pas encore
- * rendu, il reste occupé au-delà du créneau initial. Sans cette règle, un
- * véhicule non rendu réapparaissait comme libre à la fin du créneau et pouvait
- * être réservé — ou affecté à une tournée recyclerie — alors qu'il n'était pas
- * revenu au dépôt.
+ * Un retour renseigné en avance libère immédiatement le véhicule. Sans retour,
+ * le créneau prévu reste la limite d'occupation : l'absence de formulaire de
+ * retour déclenche une relance, mais ne doit pas immobiliser toute la flotte
+ * après l'heure de fin annoncée.
  *
  * Règle unique pour les 7 apps : Mes Outils, recycapp et cycleenbray planifient
  * les mêmes véhicules physiques.
  */
 export function vehicleReservationBusyEnd(
   reservation: { start: number; end: number; feedbackSubmittedAt?: number },
-  now: number,
+  _now: number,
 ) {
   if (typeof reservation.feedbackSubmittedAt === "number") {
     return Math.max(reservation.start, reservation.feedbackSubmittedAt);
   }
-  // Réservations antérieures à la règle : on s'en tient à la fin prévue (cf.
-  // MANDATORY_RETURN_SINCE), sinon 11 véhicules seraient immobilisés d'un coup.
-  if (reservation.end < MANDATORY_RETURN_SINCE) return reservation.end;
-  return Math.max(reservation.end, now);
+  return reservation.end;
 }
 
 /**

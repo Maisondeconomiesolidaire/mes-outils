@@ -1328,10 +1328,10 @@ function FleetCalendar({
     const entry = entries.find((item) => item.id === id);
     if (!entry) return;
     setSelectedDay(startOfDayTimestamp((day ?? new Date(entry.date)).getTime()));
-    if (entry.kind === "reservation") setSelectedReservationId(entry.reservation._id);
-    else if (entry.kind === "service") setSelectedServiceId(entry.service._id);
-    else if (entry.kind === "control") onOpenVehicle(entry.vehicle._id);
-    else setSelectedTaskId(entry.task._id);
+    // Cliquer sur le jour — y compris directement sur l'une de ses pastilles —
+    // ouvre toujours la liste complète des réservations et événements du jour.
+    // Les fiches individuelles restent accessibles depuis le bouton « Détails ».
+    setDayPanelOpen(true);
   }
 
   function openReservationDetailsFromPanel(reservationId: Id<"vehicleReservations">) {
@@ -1389,6 +1389,9 @@ function FleetCalendar({
         onSelect={openDayPanel}
         onEventClick={handleEventClick}
       />
+      <p className="-mt-2 text-sm text-[var(--muted-foreground)]">
+        Cliquez sur une journée pour afficher toutes ses réservations et événements.
+      </p>
       <div className={`fixed inset-0 z-[70] transition ${dayPanelOpen ? "pointer-events-auto" : "pointer-events-none"}`}>
         <button
           type="button"
