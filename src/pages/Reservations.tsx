@@ -974,7 +974,7 @@ function MyReservations() {
               <Textarea
                 value={feedbackForm.issues}
                 onChange={(event) => setFeedbackForm((current) => ({ ...current, issues: event.target.value }))}
-                placeholder="Décrivez un incident, une dégradation, un voyant, un bruit, un problème rencontré..."
+                placeholder="Décrivez uniquement un incident ou une remarque (voyant, bruit, dégradation…). Laissez vide s'il n'y a rien à signaler."
               />
             </Field>
             <Field label="Autres commentaires">
