@@ -667,7 +667,13 @@ export function vehicleReservationBusyEnd(
   _now: number,
 ) {
   if (typeof reservation.feedbackSubmittedAt === "number") {
-    return Math.max(reservation.start, reservation.feedbackSubmittedAt);
+    // Un retour peut être saisi après coup. Il libère donc plus tôt quand il
+    // est fait avant la fin prévue, mais ne doit jamais rallonger le créneau
+    // au-delà de son heure de fin (ex. fin à 11 h, formulaire envoyé à 14 h).
+    return Math.min(
+      reservation.end,
+      Math.max(reservation.start, reservation.feedbackSubmittedAt),
+    );
   }
   return reservation.end;
 }
