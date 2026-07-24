@@ -24,6 +24,20 @@ const CONDITIONS = [
 
 const PARCEL_SIZES = ["Petit", "Moyen", "Grand"] as const;
 
+/** Mots-clés recherchés sur Vinted : employés seulement s'ils sont justifiés par l'article. */
+const VINTED_KEYWORDS = [
+  "Vintage", "Retro", "Archive", "Deadstock", "Rare", "Collector", "Iconic", "Timeless", "Classic", "Premium", "Luxe", "Designer", "Minimalist", "Normcore", "Old Money", "Quiet Luxury", "Coquette", "Balletcore", "Cottagecore", "Fairycore", "Angelcore", "Soft Girl", "Clean Girl", "Y2K", "McBling", "Indie Sleaze", "Grunge", "Soft Grunge", "Gorpcore", "Techwear", "Streetwear", "Workwear", "Utility", "Cargo", "Skater", "Skate", "Surf", "Boho", "Bohemian", "Hippie Chic", "Western", "Cowboy", "Rock", "Punk", "Goth", "Emo", "Dark Academia", "Light Academia", "Preppy", "Tenniscore", "Blokecore", "Moto", "Racing", "Sportswear", "Athleisure",
+  "70s", "Seventies", "80s", "Eighties", "90s", "Nineties", "2000s", "2010s", "Vintage 90", "Vintage 2000",
+  "Oversize", "Boxy", "Relaxed Fit", "Loose Fit", "Cropped", "Slim Fit", "Straight", "Wide Leg", "Baggy", "Flare", "Bootcut", "High Waist", "Low Rise", "Maxi", "Mini", "Midi", "Tailored", "Structured", "Overshirt", "Layering", "Statement Piece", "Must Have", "Trend", "Fashion", "Look", "Outfit", "Capsule Wardrobe", "Essential", "Intemporel", "Chic", "Élégant", "Casual", "Authentique",
+  "Denim", "Leather", "Suede", "Wool", "Cashmere", "Linen", "Cotton", "Silk", "Satin", "Velvet", "Corduroy", "Knit", "Crochet", "Lace", "Mesh", "Sheer", "Faux Fur", "Sherpa", "Teddy", "Mohair",
+  "Bomber", "Harrington", "Blazer", "Trench", "Varsity", "Letterman", "Racing Jacket", "Moto Jacket", "Biker", "Windbreaker", "Puffer", "Parka", "Utility Jacket", "Work Jacket", "Denim Jacket",
+  "Carpenter", "Loose", "Barrel", "Balloon", "Baby Tee", "Graphic Tee", "Oversized Tee", "Polo", "Knitwear", "Cardigan", "Hoodie", "Sweatshirt", "Zip Hoodie", "Tank Top", "Corset", "Bustier",
+  "MotoGP", "Racing Team", "Yamaha", "Honda", "Ducati", "Kawasaki", "Vintage Racing", "Leather Jacket", "Motorcycle", "Motorsport",
+] as const;
+const VINTED_KEYWORD_BY_NORMALIZED = new Map(
+  VINTED_KEYWORDS.map((keyword) => [keyword.normalize("NFC").toLocaleLowerCase("fr"), keyword]),
+);
+
 const itemStatus = v.union(
   v.literal("stock"),
   v.literal("stock_b"),
@@ -50,6 +64,7 @@ type KlydeAIResult = {
   parcelSize?: string | null;
   gender?: string | null;
   style?: string | null;
+  vintedKeywords?: string[] | null;
   aiConfidence?: number | null;
   aiNotes?: string | null;
 };
@@ -91,6 +106,16 @@ function normalizePrice(value?: number | null) {
 function normalizeQuantity(value?: number) {
   if (!value || Number.isNaN(value) || value < 1) return 1;
   return Math.floor(value);
+}
+
+function vintedKeywordsFrom(value?: string[] | null) {
+  const seen = new Set<string>();
+  for (const keyword of value ?? []) {
+    const canonical = VINTED_KEYWORD_BY_NORMALIZED.get(keyword.trim().normalize("NFC").toLocaleLowerCase("fr"));
+    if (canonical) seen.add(canonical);
+    if (seen.size === 6) break;
+  }
+  return [...seen];
 }
 
 function workflowRank(status: string) {
@@ -142,12 +167,16 @@ function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
   const subsubcategory = subcategory && klydeSubsubcategories(gender, category, subcategory).includes(result.subsubcategory ?? "")
     ? result.subsubcategory
     : undefined;
+  const keywords = vintedKeywordsFrom(result.vintedKeywords);
+  const description =
+    cleanOptional(result.description)?.slice(0, 1050) ||
+    "Article textile d'occasion. Détails à vérifier avant publication.";
 
   return {
     title: cleanOptional(result.title)?.slice(0, 80) || "Article textile",
-    description:
-      cleanOptional(result.description)?.slice(0, 1200) ||
-      "Article textile d'occasion. Détails à vérifier avant publication.",
+    description: keywords.length > 0
+      ? `${description}\n\nMots-clés Vinted : ${keywords.join(" · ")}`
+      : description,
     category,
     subcategory,
     subsubcategory,
@@ -870,12 +899,16 @@ Retourne uniquement un JSON valide avec ces champs:
   "price": prix conseillé en euros pour la boutique, nombre ou null,
   "parcelSize": "Petit | Moyen | Grand",
   "style": "style/mots utiles: vintage, casual, sport, chic... ou null",
+  "vintedKeywords": ["3 à 6 mots-clés Vinted exacts, pertinents et justifiés par l'article"],
   "aiConfidence": nombre entre 0 et 1,
   "aiNotes": "points à vérifier humainement"
 }
 Taxonomie autorisée (genre → catégorie → sous-catégorie → sous-sous-catégorie):
 ${JSON.stringify(KLYDE_TAXONOMY)}
 Sois prudent: si marque, taille ou matière ne sont pas visibles, mets null.
+Optimise la description pour la recherche Vinted : sélectionne entre 3 et 6 mots-clés strictement pertinents dans la liste ci-dessous. Ne les invente jamais, n'ajoute pas de marque absente, et n'utilise pas de mots-clés sans rapport avec la photo. La réponse doit les mettre dans \`vintedKeywords\`; ils seront ajoutés proprement à la description.
+Mots-clés Vinted autorisés :
+${JSON.stringify(VINTED_KEYWORDS)}
 ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim()}` : ""}`;
 
     const result = await callOpenAI<KlydeAIResult>(apiKey, {
