@@ -749,14 +749,7 @@ export const createDepot = mutation({
       .first();
     const depotNumber = (last?.depotNumber ?? 0) + 1;
 
-    // Seul le DIB est facturé, au poids (kg / tonne), au tarif courant.
-    const weightKg = dibWeightKg(args.items);
-    const priceCentsPerKg = await readDibPrice(ctx);
-    const amountCents = Math.round(weightKg * priceCentsPerKg);
-    const billing =
-      amountCents > 0
-        ? { weightKg, priceCentsPerKg, amountCents, vatRate: DIB_VAT_RATE, status: "pending" as const }
-        : undefined;
+    const billing = await buildBilling(ctx, args.items);
 
     const depotId = await ctx.db.insert("bpDepots", {
       ...args,
@@ -772,28 +765,57 @@ export const createDepot = mutation({
   },
 });
 
-/* ─── DIB : réglages & facturation Stripe ─────────────────────────────────── */
+/* ─── Matières payantes : réglages & facturation Stripe ───────────────────── */
 
-/** Matériau facturé (seul flux payant, au kg). */
+/** Matières facturées au poids. */
 const DIB_MATERIAL = "Tout venant/DIB non triés";
+const WOOD_MATERIAL = "Bois";
 
 /** Prix par défaut : 32 centimes d'euro le kilo. */
 const DEFAULT_DIB_PRICE_CENTS_PER_KG = 32;
+/** Prix du bois : 17 centimes d'euro le kilo. */
+const WOOD_PRICE_CENTS_PER_KG = 17;
 const DIB_VAT_RATE = 20;
 
 const SETTINGS_KEY = "bennespro";
 
 type DepotItems = Array<{ material: string; unit: string; quantity: number }>;
 
-/** Poids DIB facturable en kg (les lignes en m³ / unité ne sont pas facturables). */
-function dibWeightKg(items: DepotItems): number {
+/** Poids facturable d'une matière en kg (m³ et unités exclus). */
+function materialWeightKg(items: DepotItems, material: string): number {
   let kg = 0;
   for (const item of items) {
-    if (item.material !== DIB_MATERIAL) continue;
+    if (item.material !== material) continue;
     if (item.unit === "kg") kg += item.quantity;
     else if (item.unit === "tonne") kg += item.quantity * 1000;
   }
   return Math.round(kg * 100) / 100;
+}
+
+async function buildBilling(ctx: QueryCtx | MutationCtx, items: DepotItems) {
+  const dibPriceCentsPerKg = await readDibPrice(ctx);
+  const billableItems = ([
+    { material: DIB_MATERIAL, weightKg: materialWeightKg(items, DIB_MATERIAL), priceCentsPerKg: dibPriceCentsPerKg },
+    { material: WOOD_MATERIAL, weightKg: materialWeightKg(items, WOOD_MATERIAL), priceCentsPerKg: WOOD_PRICE_CENTS_PER_KG },
+  ] satisfies Array<{
+    material: Infer<typeof bpMaterial>;
+    weightKg: number;
+    priceCentsPerKg: number;
+  }>)
+    .filter((item) => item.weightKg > 0)
+    .map((item) => ({ ...item, amountCents: Math.round(item.weightKg * item.priceCentsPerKg) }));
+  const amountCents = billableItems.reduce((sum, item) => sum + item.amountCents, 0);
+  if (amountCents <= 0) return undefined;
+  const weightKg = billableItems.reduce((sum, item) => sum + item.weightKg, 0);
+  return {
+    weightKg,
+    // Compatibilité avec les dépôts historiques et les affichages existants.
+    priceCentsPerKg: billableItems.length === 1 ? billableItems[0].priceCentsPerKg : amountCents / weightKg,
+    amountCents,
+    items: billableItems,
+    vatRate: DIB_VAT_RATE,
+    status: "pending" as const,
+  };
 }
 
 async function readDibPrice(ctx: QueryCtx | MutationCtx): Promise<number> {
@@ -810,6 +832,7 @@ export const getDibSettings = query({
     await requireCrmPermission(ctx, "bennespro:depots", "read");
     return {
       priceCentsPerKg: await readDibPrice(ctx),
+      woodPriceCentsPerKg: WOOD_PRICE_CENTS_PER_KG,
       stripeConfigured: Boolean(env.BENNESPRO_STRIPE_SECRET_KEY),
     };
   },
@@ -845,7 +868,7 @@ export const setDibPrice = mutation({
   },
 });
 
-/** (Re)facture le DIB d'un dépôt — utilisé pour les dépôts anciens ou en erreur. */
+/** (Re)facture les matières payantes d'un dépôt — utilisé pour les dépôts anciens ou en erreur. */
 export const billDepot = mutation({
   args: { depotId: v.id("bpDepots") },
   handler: async (ctx, { depotId }) => {
@@ -855,14 +878,12 @@ export const billDepot = mutation({
     if (depot.billing?.status === "invoiced") {
       throw new Error("Ce dépôt est déjà facturé.");
     }
-    const weightKg = dibWeightKg(depot.items);
-    if (weightKg <= 0) {
-      throw new Error("Aucun poids DIB facturable (kg ou tonne) sur ce dépôt.");
+    const billing = await buildBilling(ctx, depot.items);
+    if (!billing) {
+      throw new Error("Aucun poids de DIB ou de bois facturable (kg ou tonne) sur ce dépôt.");
     }
-    const priceCentsPerKg = await readDibPrice(ctx);
-    const amountCents = Math.round(weightKg * priceCentsPerKg);
     await ctx.db.patch(depotId, {
-      billing: { weightKg, priceCentsPerKg, amountCents, vatRate: DIB_VAT_RATE, status: "pending" },
+      billing,
     });
     await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
   },
@@ -1026,7 +1047,7 @@ async function refreshStripeInvoiceBilling(
 }
 
 /**
- * Facture le DIB d'un dépôt via Stripe : client (créé au besoin et mémorisé
+ * Facture les matières payantes d'un dépôt via Stripe : client (créé au besoin et mémorisé
  * sur l'entreprise), facture `send_invoice` à 30 jours, envoi par email si
  * l'entreprise a un email de contact.
  */
@@ -1105,16 +1126,26 @@ export const invoiceDepotDib = internalAction({
       });
       const invoiceId = invoice.id as string;
 
-      // 3. Ligne DIB.
-      const priceEuros = (billing.priceCentsPerKg / 100).toFixed(2).replace(".", ",");
-      await stripeRequest(secretKey, "invoiceitems", {
-        customer: customerId,
-        invoice: invoiceId,
-        amount: String(billing.amountCents),
-        currency: "eur",
-        "tax_rates[0]": taxRateId,
-        description: `DIB (tout-venant non trié) — ${billing.weightKg} kg × ${priceEuros} €/kg HT — ${depotRef}`,
-      });
+      // 3. Une ligne Stripe par matière payante. Les anciennes factures sans
+      // détail restent compatibles et sont interprétées comme du DIB.
+      const billableItems = billing.items ?? [{
+        material: DIB_MATERIAL,
+        weightKg: billing.weightKg,
+        priceCentsPerKg: billing.priceCentsPerKg,
+        amountCents: billing.amountCents,
+      }];
+      for (const item of billableItems) {
+        const priceEuros = (item.priceCentsPerKg / 100).toFixed(2).replace(".", ",");
+        const label = item.material === DIB_MATERIAL ? "DIB (tout-venant non trié)" : "Bois";
+        await stripeRequest(secretKey, "invoiceitems", {
+          customer: customerId,
+          invoice: invoiceId,
+          amount: String(item.amountCents),
+          currency: "eur",
+          "tax_rates[0]": taxRateId,
+          description: `${label} — ${item.weightKg} kg × ${priceEuros} €/kg HT — ${depotRef}`,
+        });
+      }
 
       // 4. Finalisation (+ envoi par email si possible).
       const finalized = await stripeRequest(secretKey, `invoices/${invoiceId}/finalize`, {
@@ -1421,7 +1452,7 @@ export const sendInvoiceEmail = action({
         <p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#3d4a46;">Bonjour${company?.contactName ? ` ${company.contactName}` : ""},</p>
         <p style="margin:0 0 18px;font-size:14px;line-height:22px;color:#3d4a46;">
           ${reminder ? "Nous nous permettons de vous relancer concernant votre facture pour le dépôt du" : "Veuillez trouver votre facture pour le dépôt du"} ${date}
-          (DIB&nbsp;: ${depot.billing.weightKg}&nbsp;kg — <strong style="color:${BP_DARK};">${amountHt}&nbsp;€ HT / ${amountTtc}&nbsp;€ TTC</strong>, TVA ${vatRate}%).
+          (matières facturées&nbsp;: ${depot.billing.weightKg}&nbsp;kg — <strong style="color:${BP_DARK};">${amountHt}&nbsp;€ HT / ${amountTtc}&nbsp;€ TTC</strong>, TVA ${vatRate}%).
           La facture et le bon de dépôt sont joints à cet email au format PDF.
         </p>
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr><td style="border-radius:10px;background:${BP_TEAL};">
