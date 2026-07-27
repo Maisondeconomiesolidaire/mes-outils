@@ -173,6 +173,16 @@ export const listVehicleTasks = query({
               (task.attachments ?? []).map((id) => ctx.storage.getUrl(id)),
             )
           ).filter((url): url is string => Boolean(url)),
+          beforePhotoUrls: (
+            await Promise.all(
+              (task.beforePhotos ?? []).map((id) => ctx.storage.getUrl(id)),
+            )
+          ).filter((url): url is string => Boolean(url)),
+          afterPhotoUrls: (
+            await Promise.all(
+              (task.afterPhotos ?? []).map((id) => ctx.storage.getUrl(id)),
+            )
+          ).filter((url): url is string => Boolean(url)),
           vehicle: vehicle
             ? {
                 ...vehicle,
@@ -230,6 +240,10 @@ export const createVehicleTask = mutation({
     laborMinutes: v.optional(v.number()),
     partsCost: v.optional(v.number()),
     attachments: v.optional(v.array(v.id("_storage"))),
+    beforePhotos: v.optional(v.array(v.id("_storage"))),
+    beforeNotes: v.optional(v.string()),
+    afterPhotos: v.optional(v.array(v.id("_storage"))),
+    afterNotes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "create");
@@ -247,6 +261,10 @@ export const createVehicleTask = mutation({
       laborMinutes: args.laborMinutes,
       partsCost: args.partsCost,
       attachments: args.attachments?.length ? args.attachments : undefined,
+      beforePhotos: args.beforePhotos?.length ? args.beforePhotos : undefined,
+      beforeNotes: args.beforeNotes?.trim() || undefined,
+      afterPhotos: args.afterPhotos?.length ? args.afterPhotos : undefined,
+      afterNotes: args.afterNotes?.trim() || undefined,
       createdBy: displayName(identity),
       createdAt: now,
       updatedAt: now,
@@ -348,6 +366,10 @@ export const updateVehicleTask = mutation({
     laborMinutes: v.optional(v.union(v.number(), v.null())),
     partsCost: v.optional(v.union(v.number(), v.null())),
     attachments: v.optional(v.array(v.id("_storage"))),
+    beforePhotos: v.optional(v.array(v.id("_storage"))),
+    beforeNotes: v.optional(v.string()),
+    afterPhotos: v.optional(v.array(v.id("_storage"))),
+    afterNotes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
@@ -395,6 +417,10 @@ export const updateVehicleTask = mutation({
       laborMinutes?: number | undefined;
       partsCost?: number | undefined;
       attachments?: Id<"_storage">[] | undefined;
+      beforePhotos?: Id<"_storage">[] | undefined;
+      beforeNotes?: string | undefined;
+      afterPhotos?: Id<"_storage">[] | undefined;
+      afterNotes?: string | undefined;
       updatedAt: number;
     } = {
       updatedAt: now,
@@ -410,6 +436,18 @@ export const updateVehicleTask = mutation({
     if (args.partsCost !== undefined) patch.partsCost = args.partsCost ?? undefined;
     if (args.attachments !== undefined) {
       patch.attachments = args.attachments.length ? args.attachments : undefined;
+    }
+    if (args.beforePhotos !== undefined) {
+      patch.beforePhotos = args.beforePhotos.length ? args.beforePhotos : undefined;
+    }
+    if (args.beforeNotes !== undefined) {
+      patch.beforeNotes = args.beforeNotes.trim() || undefined;
+    }
+    if (args.afterPhotos !== undefined) {
+      patch.afterPhotos = args.afterPhotos.length ? args.afterPhotos : undefined;
+    }
+    if (args.afterNotes !== undefined) {
+      patch.afterNotes = args.afterNotes.trim() || undefined;
     }
     await ctx.db.patch(args.taskId, patch);
     // On répercute la valeur résultante, pas seulement celle reçue : clôturer

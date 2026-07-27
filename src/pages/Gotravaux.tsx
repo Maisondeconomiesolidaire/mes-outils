@@ -97,6 +97,12 @@ type VehicleTask = {
   attachments?: Id<"_storage">[];
   /** URLs signées, résolues par `listVehicleTasks` (les storageId seuls ne s'affichent pas). */
   attachmentUrls?: string[];
+  beforePhotos?: Id<"_storage">[];
+  beforePhotoUrls?: string[];
+  beforeNotes?: string;
+  afterPhotos?: Id<"_storage">[];
+  afterPhotoUrls?: string[];
+  afterNotes?: string;
   createdBy: string;
   createdAt: number;
   updatedAt: number;
@@ -723,6 +729,10 @@ function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClos
   const [laborMins, setLaborMins] = useState("");
   const [partsCost, setPartsCost] = useState("");
   const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
+  const [beforePhotos, setBeforePhotos] = useState<Id<"_storage">[]>([]);
+  const [beforeNotes, setBeforeNotes] = useState("");
+  const [afterPhotos, setAfterPhotos] = useState<Id<"_storage">[]>([]);
+  const [afterNotes, setAfterNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -752,8 +762,12 @@ function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClos
         laborMinutes: laborMinutesValue,
         partsCost: partsCost.trim() ? Number(partsCost) : undefined,
         attachments: attachments.length ? attachments : undefined,
+        beforePhotos: beforePhotos.length ? beforePhotos : undefined,
+        beforeNotes: beforeNotes.trim() || undefined,
+        afterPhotos: afterPhotos.length ? afterPhotos : undefined,
+        afterNotes: afterNotes.trim() || undefined,
       });
-      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm(""); setLaborHours(""); setLaborMins(""); setPartsCost(""); setAttachments([]);
+      setVehicleId(""); setTitle(""); setDescription(""); setPriority("medium"); setRange({ start: null, end: null }); setOdometerKm(""); setLaborHours(""); setLaborMins(""); setPartsCost(""); setAttachments([]); setBeforePhotos([]); setBeforeNotes(""); setAfterPhotos([]); setAfterNotes("");
       onClose();
     } finally {
       setSaving(false);
@@ -794,7 +808,25 @@ function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClos
             <Input type="number" inputMode="decimal" min="0" step="0.01" value={partsCost} onChange={(e) => setPartsCost(e.target.value)} placeholder="Ex: 45,00" />
           </Field>
         </div>
-        <Field label="Photos">
+        <div className="grid gap-3 rounded-2xl border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-500/40 dark:bg-amber-500/10">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-700 dark:text-amber-300">Avant l'intervention</p>
+          <Field label="Descriptif (constat, symptômes)">
+            <Textarea value={beforeNotes} onChange={(e) => setBeforeNotes(e.target.value)} placeholder="État du véhicule, panne constatée, symptômes..." />
+          </Field>
+          <Field label="Photos avant">
+            <MediaUpload images={beforePhotos} onChange={setBeforePhotos} />
+          </Field>
+        </div>
+        <div className="grid gap-3 rounded-2xl border border-emerald-300 bg-emerald-50/60 p-4 dark:border-emerald-500/40 dark:bg-emerald-500/10">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Après l'intervention</p>
+          <Field label="Descriptif des opérations réalisées">
+            <Textarea value={afterNotes} onChange={(e) => setAfterNotes(e.target.value)} placeholder="Opérations effectuées, pièces changées, réglages..." />
+          </Field>
+          <Field label="Photos après">
+            <MediaUpload images={afterPhotos} onChange={setAfterPhotos} />
+          </Field>
+        </div>
+        <Field label="Autres pièces jointes (factures, devis...)">
           <MediaUpload images={attachments} onChange={setAttachments} />
         </Field>
         <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
@@ -1646,6 +1678,10 @@ function MaintenanceDetailsModal({
   const [laborMins, setLaborMins] = useState("");
   const [partsCost, setPartsCost] = useState("");
   const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
+  const [beforePhotos, setBeforePhotos] = useState<Id<"_storage">[]>([]);
+  const [beforeNotes, setBeforeNotes] = useState("");
+  const [afterPhotos, setAfterPhotos] = useState<Id<"_storage">[]>([]);
+  const [afterNotes, setAfterNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -1662,6 +1698,10 @@ function MaintenanceDetailsModal({
     setLaborMins(task.laborMinutes ? String(task.laborMinutes % 60) : "");
     setPartsCost(typeof task.partsCost === "number" ? String(task.partsCost) : "");
     setAttachments(task.attachments ?? []);
+    setBeforePhotos(task.beforePhotos ?? []);
+    setBeforeNotes(task.beforeNotes ?? "");
+    setAfterPhotos(task.afterPhotos ?? []);
+    setAfterNotes(task.afterNotes ?? "");
     setError(null);
     // Ouvert depuis une tentative de clôture sans coût : on démarre en édition,
     // statut « Terminée » présélectionné, pour que l'utilisateur saisisse le
@@ -1725,6 +1765,10 @@ function MaintenanceDetailsModal({
         laborMinutes: laborMinutesValue,
         partsCost: partsCostValue,
         attachments,
+        beforePhotos,
+        beforeNotes,
+        afterPhotos,
+        afterNotes,
       });
       setEditing(false);
     } catch (e) {
@@ -1841,10 +1885,46 @@ function MaintenanceDetailsModal({
             </div>
           ) : null}
 
+          {!editing && (currentTask.beforeNotes || (currentTask.beforePhotoUrls?.length ?? 0) > 0) ? (
+            <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-700 dark:text-amber-300">Avant l'intervention</p>
+              {currentTask.beforeNotes ? (
+                <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{currentTask.beforeNotes}</p>
+              ) : null}
+              {(currentTask.beforePhotoUrls?.length ?? 0) > 0 ? (
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {currentTask.beforePhotoUrls?.map((url) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer" title="Ouvrir en grand">
+                      <img src={url} alt="" className="h-24 w-full rounded-lg object-cover transition hover:opacity-90" />
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!editing && (currentTask.afterNotes || (currentTask.afterPhotoUrls?.length ?? 0) > 0) ? (
+            <div className="rounded-xl border border-emerald-300 bg-emerald-50/60 p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Après l'intervention</p>
+              {currentTask.afterNotes ? (
+                <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--foreground)]">{currentTask.afterNotes}</p>
+              ) : null}
+              {(currentTask.afterPhotoUrls?.length ?? 0) > 0 ? (
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {currentTask.afterPhotoUrls?.map((url) => (
+                    <a key={url} href={url} target="_blank" rel="noreferrer" title="Ouvrir en grand">
+                      <img src={url} alt="" className="h-24 w-full rounded-lg object-cover transition hover:opacity-90" />
+                    </a>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {!editing && (currentTask.attachmentUrls?.length ?? 0) > 0 ? (
             <div className="rounded-xl border border-[var(--border)] p-3">
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
-                Photos ({currentTask.attachmentUrls?.length})
+                Autres pièces jointes ({currentTask.attachmentUrls?.length})
               </p>
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {currentTask.attachmentUrls?.map((url) => (
@@ -1892,10 +1972,42 @@ function MaintenanceDetailsModal({
                   <Input type="number" inputMode="decimal" min="0" step="0.01" value={partsCost} onChange={(event) => setPartsCost(event.target.value)} placeholder="Ex: 45,00" />
                 </Field>
               </div>
-              <Field label="Photos">
-                {/* `initialMedia` réaffiche les photos déjà enregistrées : sans
-                    lui, l'édition repartirait d'une galerie vide et un
-                    enregistrement les effacerait. */}
+              <div className="grid gap-3 rounded-xl border border-amber-300 bg-amber-50/60 p-3 dark:border-amber-500/40 dark:bg-amber-500/10">
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-700 dark:text-amber-300">Avant l'intervention</p>
+                <Field label="Descriptif (constat, symptômes)">
+                  <Textarea value={beforeNotes} onChange={(event) => setBeforeNotes(event.target.value)} placeholder="État du véhicule, panne constatée, symptômes..." />
+                </Field>
+                <Field label="Photos avant">
+                  {/* `initialMedia` réaffiche les photos déjà enregistrées : sans
+                      lui, l'édition repartirait d'une galerie vide et un
+                      enregistrement les effacerait. */}
+                  <MediaUpload
+                    images={beforePhotos}
+                    initialMedia={(currentTask.beforePhotos ?? []).map((storageId, index) => ({
+                      storageId,
+                      previewUrl: currentTask.beforePhotoUrls?.[index] ?? "",
+                    }))}
+                    onChange={setBeforePhotos}
+                  />
+                </Field>
+              </div>
+              <div className="grid gap-3 rounded-xl border border-emerald-300 bg-emerald-50/60 p-3 dark:border-emerald-500/40 dark:bg-emerald-500/10">
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">Après l'intervention</p>
+                <Field label="Descriptif des opérations réalisées">
+                  <Textarea value={afterNotes} onChange={(event) => setAfterNotes(event.target.value)} placeholder="Opérations effectuées, pièces changées, réglages..." />
+                </Field>
+                <Field label="Photos après">
+                  <MediaUpload
+                    images={afterPhotos}
+                    initialMedia={(currentTask.afterPhotos ?? []).map((storageId, index) => ({
+                      storageId,
+                      previewUrl: currentTask.afterPhotoUrls?.[index] ?? "",
+                    }))}
+                    onChange={setAfterPhotos}
+                  />
+                </Field>
+              </div>
+              <Field label="Autres pièces jointes (factures, devis...)">
                 <MediaUpload
                   images={attachments}
                   initialMedia={(currentTask.attachments ?? []).map((storageId, index) => ({

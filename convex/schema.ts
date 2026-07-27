@@ -1224,6 +1224,14 @@ export default defineSchema(
     partsCost: v.optional(v.number()),
     /** Pièces jointes : photos de la panne, de la réparation, factures… */
     attachments: v.optional(v.array(v.id("_storage"))),
+    /** Photos de l'état AVANT intervention (constat, panne). */
+    beforePhotos: v.optional(v.array(v.id("_storage"))),
+    /** Descriptif AVANT intervention : constat, symptômes, état relevé. */
+    beforeNotes: v.optional(v.string()),
+    /** Photos APRÈS intervention (réparation, pièces posées). */
+    afterPhotos: v.optional(v.array(v.id("_storage"))),
+    /** Descriptif des opérations réalisées pendant l'intervention. */
+    afterNotes: v.optional(v.string()),
     createdBy: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
