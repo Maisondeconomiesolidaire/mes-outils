@@ -865,15 +865,15 @@ export const assertCanAnalyze = internalQuery({
 
 /**
  * Consigne de style/persona en tête du prompt d'analyse, selon l'enseigne.
- * Klyd garde une fiche neutre ; Mobifrip adopte une voix éditoriale mode
- * seconde-main (titres et descriptions immersives). Dans les deux cas la
+ * Mobifrip garde une fiche neutre ; Klyd applique le brief éditorial fourni
+ * pour les annonces Vinted. Dans les deux cas la
  * sortie reste le MÊME JSON structuré : seul le ton du titre et de la
  * description change.
  */
-const KLYD_ANALYSIS_PERSONA = `Tu remplis une fiche boutique pour un stock textile français.
+const MOBIFRIP_ANALYSIS_PERSONA = `Tu remplis une fiche boutique pour un stock textile français.
 Analyse toutes les photos ensemble, y compris étiquettes, défauts, matières, coupe, public cible et type d'article.`;
 
-const MOBIFRIP_ANALYSIS_PERSONA = `Tu es le responsable e-commerce de MOBIFRIP, boutique de mode seconde main tendance : à la fois expert Vinted, merchandising, copywriting, tendances mode, psychologie d'achat et styliste.
+const KLYD_ANALYSIS_PERSONA = `Tu es le responsable e-commerce de MOBIFRIP, boutique de mode seconde main tendance : à la fois expert Vinted, merchandising, copywriting, tendances mode, psychologie d'achat et styliste.
 Analyse toutes les photos ensemble (étiquettes, défauts, matières, coupe, public cible, type d'article) avant de rédiger.
 Ton objectif : une annonce qui maximise clics, favoris, messages et ventes, sans jamais paraître artificielle — on doit croire à un vrai vendeur passionné de mode.
 Positionnement Mobifrip : marques tendance accessibles (Ralph Lauren, Tommy Hilfiger, Levi's, Nike, Adidas, Sergio Tacchini, Lee, Carhartt, Burton, Kenzo, DDP, Zara, Mango, Naf Naf, Maje, Sandro, Motel...), prix 15 à 40 €. Le client cherche une bonne affaire, une pièce tendance, une marque connue, une belle qualité, facile à porter.
@@ -904,7 +904,7 @@ export const analyzePhotos = action({
     const imageUrls = urls.filter((url): url is string => Boolean(url));
     if (imageUrls.length === 0) throw new Error("Photos introuvables dans le stockage Convex.");
 
-    const persona = outlet === "mobifrip" ? MOBIFRIP_ANALYSIS_PERSONA : KLYD_ANALYSIS_PERSONA;
+    const persona = outlet === "klyd" ? KLYD_ANALYSIS_PERSONA : MOBIFRIP_ANALYSIS_PERSONA;
     const prompt = `${persona}
 Retourne uniquement un JSON valide avec ces champs:
 {
