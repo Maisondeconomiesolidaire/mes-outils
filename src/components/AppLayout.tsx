@@ -15,7 +15,12 @@ import { FullSpinner } from "./ui/Spinner";
 
 /** Style "bouton primaire" appliqué à l'élément de navigation actif. */
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
-const CLERK_APPEARANCE = { variables: { colorPrimary: "#47c667" } };
+const CLERK_APPEARANCE = {
+  variables: { colorPrimary: "#47c667" },
+  // L'instance utilise la connexion par code : ce lien Clerk ne mène pas à un
+  // parcours utile dans notre écran local.
+  elements: { formFieldAction__forgotPassword: "hidden" },
+};
 
 type ClerkUser = NonNullable<ReturnType<typeof useUser>["user"]>;
 
