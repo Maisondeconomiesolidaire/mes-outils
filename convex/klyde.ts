@@ -24,20 +24,6 @@ const CONDITIONS = [
 
 const PARCEL_SIZES = ["Petit", "Moyen", "Grand"] as const;
 
-/** Mots-clés recherchés sur Vinted : employés seulement s'ils sont justifiés par l'article. */
-const VINTED_KEYWORDS = [
-  "Vintage", "Retro", "Archive", "Deadstock", "Rare", "Collector", "Iconic", "Timeless", "Classic", "Premium", "Luxe", "Designer", "Minimalist", "Normcore", "Old Money", "Quiet Luxury", "Coquette", "Balletcore", "Cottagecore", "Fairycore", "Angelcore", "Soft Girl", "Clean Girl", "Y2K", "McBling", "Indie Sleaze", "Grunge", "Soft Grunge", "Gorpcore", "Techwear", "Streetwear", "Workwear", "Utility", "Cargo", "Skater", "Skate", "Surf", "Boho", "Bohemian", "Hippie Chic", "Western", "Cowboy", "Rock", "Punk", "Goth", "Emo", "Dark Academia", "Light Academia", "Preppy", "Tenniscore", "Blokecore", "Moto", "Racing", "Sportswear", "Athleisure",
-  "70s", "Seventies", "80s", "Eighties", "90s", "Nineties", "2000s", "2010s", "Vintage 90", "Vintage 2000",
-  "Oversize", "Boxy", "Relaxed Fit", "Loose Fit", "Cropped", "Slim Fit", "Straight", "Wide Leg", "Baggy", "Flare", "Bootcut", "High Waist", "Low Rise", "Maxi", "Mini", "Midi", "Tailored", "Structured", "Overshirt", "Layering", "Statement Piece", "Must Have", "Trend", "Fashion", "Look", "Outfit", "Capsule Wardrobe", "Essential", "Intemporel", "Chic", "Élégant", "Casual", "Authentique",
-  "Denim", "Leather", "Suede", "Wool", "Cashmere", "Linen", "Cotton", "Silk", "Satin", "Velvet", "Corduroy", "Knit", "Crochet", "Lace", "Mesh", "Sheer", "Faux Fur", "Sherpa", "Teddy", "Mohair",
-  "Bomber", "Harrington", "Blazer", "Trench", "Varsity", "Letterman", "Racing Jacket", "Moto Jacket", "Biker", "Windbreaker", "Puffer", "Parka", "Utility Jacket", "Work Jacket", "Denim Jacket",
-  "Carpenter", "Loose", "Barrel", "Balloon", "Baby Tee", "Graphic Tee", "Oversized Tee", "Polo", "Knitwear", "Cardigan", "Hoodie", "Sweatshirt", "Zip Hoodie", "Tank Top", "Corset", "Bustier",
-  "MotoGP", "Racing Team", "Yamaha", "Honda", "Ducati", "Kawasaki", "Vintage Racing", "Leather Jacket", "Motorcycle", "Motorsport",
-] as const;
-const VINTED_KEYWORD_BY_NORMALIZED = new Map(
-  VINTED_KEYWORDS.map((keyword) => [keyword.normalize("NFC").toLocaleLowerCase("fr"), keyword]),
-);
-
 const itemStatus = v.union(
   v.literal("stock"),
   v.literal("stock_b"),
@@ -64,7 +50,6 @@ type KlydeAIResult = {
   parcelSize?: string | null;
   gender?: string | null;
   style?: string | null;
-  vintedKeywords?: string[] | null;
   aiConfidence?: number | null;
   aiNotes?: string | null;
 };
@@ -106,33 +91,6 @@ function normalizePrice(value?: number | null) {
 function normalizeQuantity(value?: number) {
   if (!value || Number.isNaN(value) || value < 1) return 1;
   return Math.floor(value);
-}
-
-function vintedKeywordsFrom(value?: string[] | null) {
-  const seen = new Set<string>();
-  for (const keyword of value ?? []) {
-    const canonical = VINTED_KEYWORD_BY_NORMALIZED.get(keyword.trim().normalize("NFC").toLocaleLowerCase("fr"));
-    if (canonical) seen.add(canonical);
-    if (seen.size === 6) break;
-  }
-  return [...seen];
-}
-
-function vintedHashtags(keywords: string[]) {
-  const tags = new Set<string>();
-  for (const keyword of keywords) {
-    const normalized = keyword
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "");
-    if (normalized) tags.add(`#${normalized}`);
-  }
-  // Ces deux tags décrivent toujours le canal et le caractère seconde main,
-  // sans attribuer de caractéristique non vérifiée à l'article.
-  tags.add("#secondemain");
-  tags.add("#vinted");
-  return [...tags].join(" ");
 }
 
 function workflowRank(status: string) {
@@ -184,13 +142,9 @@ function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
   const subsubcategory = subcategory && klydeSubsubcategories(gender, category, subcategory).includes(result.subsubcategory ?? "")
     ? result.subsubcategory
     : undefined;
-  const keywords = vintedKeywordsFrom(result.vintedKeywords);
-  const rawDescription =
+  const description =
     cleanOptional(result.description)?.slice(0, 1800) ||
     "Article textile d'occasion. Détails à vérifier avant publication.";
-  const description = keywords.length > 0 && !/mots[-\s]*clés\s*:/i.test(rawDescription)
-    ? `${rawDescription}\n\nMots-clés : ${keywords.join(", ")}\n\n${vintedHashtags(keywords)}`
-    : rawDescription;
 
   return {
     title: cleanOptional(result.title)?.slice(0, 80) || "Article textile",
@@ -890,12 +844,12 @@ export const assertCanAnalyze = internalQuery({
 const MOBIFRIP_ANALYSIS_PERSONA = `Tu es le responsable e-commerce de MOBIFRIP, boutique française de mode seconde main tendance. Tu es expert Vinted, merchandising, copywriting et stylisme.
 Analyse toutes les photos ensemble, y compris étiquettes, défauts, matières, coupe, public cible et type d'article. Rédige comme un vrai vendeur passionné de mode, jamais comme une fiche automatique.
 
-DESCRIPTION (champ "description") : ne rédige JAMAIS une seule phrase suivie de hashtags. Produis une vraie annonce Vinted prête à publier, riche, chaleureuse et précise, composée de 3 paragraphes distincts :
+DESCRIPTION (champ "description") : ne rédige JAMAIS une seule phrase. Produis une vraie annonce prête à publier, riche, chaleureuse et précise, composée de 3 paragraphes distincts :
 1. Une accroche qui présente clairement la pièce, sa marque si visible, sa coupe et ses éléments remarquables.
 2. Un paragraphe détaillé sur le tombé, les couleurs, motifs, finitions et le style, puis une ou deux idées de look et d'occasions réalistes.
 3. Un paragraphe de positionnement mode, uniquement avec les esthétiques réellement cohérentes avec la pièce (bohème, Y2K, vintage, preppy, workwear, etc.).
-Ajoute ensuite un bloc factuel avec une information par ligne, seulement lorsqu'elle est visible ou fournie : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». Puis ajoute « Mots-clés : » avec 8 à 15 termes précis utiles à la recherche, et une dernière ligne de 6 à 12 hashtags Vinted en minuscules. Utilise des hashtags simples, sans URL.
-La qualité attendue est celle d'une annonce éditoriale du type : « Magnifique jupe longue bohème… coupe longue et fluide… look bohème chic, romantique ou festival… statement piece… Marque / Fabrication / Taille / État… Mots-clés… hashtags ». Adapte toujours cette structure à l'article réel : ne reprends jamais la jupe, la marque, la taille ou les tendances de cet exemple si elles ne sont pas visibles.
+Ajoute ensuite un bloc factuel avec une information par ligne, seulement lorsqu'elle est visible ou fournie : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». Ne mets jamais de rubrique « Mots-clés », de hashtags, de symbole # ni de lien URL dans la description. Intègre plutôt les termes de recherche modernes et les esthétiques pertinentes naturellement dans les phrases. Quand le genre est connu, indique clairement « pour femme » ou « pour homme » dans le texte.
+La qualité attendue est celle d'une annonce éditoriale du type : « Magnifique jupe longue bohème… coupe longue et fluide… look bohème chic, romantique ou festival… statement piece… Marque / Fabrication / Taille / État ». Adapte toujours cette structure à l'article réel : ne reprends jamais la jupe, la marque, la taille ou les tendances de cet exemple si elles ne sont pas visibles.
 Évite les banalités creuses comme « idéale pour un look casual », « matière légère et confortable » ou « parfaite pour les journées chaudes » sauf si elles sont démontrables à partir des photos ou du contexte. N'invente jamais matière, provenance, marque, taille, époque, défaut, état, prix neuf, rareté ou édition limitée. Si une donnée est inconnue, omets-la. Vise 600 à 1 600 caractères quand les photos fournissent assez d'informations.`;
 
 const KLYD_ANALYSIS_PERSONA = `Tu es le responsable e-commerce de MOBIFRIP, boutique de mode seconde main tendance : à la fois expert Vinted, merchandising, copywriting, tendances mode, psychologie d'achat et styliste.
@@ -906,8 +860,8 @@ N'invente JAMAIS composition, matière, provenance, année, prix neuf, rareté, 
 
 TITRE (champ "title") : naturel et lisible, max 60 caractères, commençant par ce que l'acheteur recherche vraiment. Ordre conseillé : type de vêtement, marque, caractéristique principale, couleur, taille. Ex : « Chemise Ralph Lauren à carreaux bleu XL ». Jamais une rafale de tendances (« Old Money Quiet Luxury Preppy... »).
 
-DESCRIPTION (champ "description") : écris une vraie annonce Vinted prête à publier, fluide et immersive, comme cet exemple de niveau attendu : accroche valorisante ; un paragraphe qui décrit précisément la coupe, les couleurs, l'imprimé, les détails et le mouvement ; un paragraphe qui propose des associations et des occasions ; un dernier paragraphe qui positionne la pièce dans les tendances pertinentes. Ensuite ajoute un bloc factuel, une information par ligne, uniquement avec ce qui est connu : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». Termine par « Mots-clés : » suivi de 8 à 15 termes de recherche factuels et pertinents, puis une dernière ligne de 6 à 12 hashtags Vinted en minuscules, par exemple « #fairycore #bohochic #vintage #secondemain #vinted ». Les hashtags sont du texte simple : ne mets jamais de liens URL.
-La structure, le ton et la richesse doivent se rapprocher d'une annonce telle que : « Magnifique jupe longue bohème… coupe longue et fluide… look bohème chic, romantique ou festival… statement piece… Marque / Fabrication / Taille / État… Mots-clés… hashtags ». Adapte-la toujours à l'article photographié : n'imite ni la jupe, ni la marque, ni la taille de cet exemple.
+DESCRIPTION (champ "description") : écris une vraie annonce prête à publier, fluide et immersive, comme cet exemple de niveau attendu : accroche valorisante ; un paragraphe qui décrit précisément la coupe, les couleurs, l'imprimé, les détails et le mouvement ; un paragraphe qui propose des associations et des occasions ; un dernier paragraphe qui positionne la pièce dans les tendances pertinentes. Ensuite ajoute un bloc factuel, une information par ligne, uniquement avec ce qui est connu : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». N'ajoute jamais de rubrique « Mots-clés », de hashtags, de symbole # ni de lien URL dans la description. Intègre naturellement les termes de recherche jeunes, actuels et vendeurs dans les phrases. Quand le genre est connu, indique clairement « pour femme » ou « pour homme » dans le texte.
+La structure, le ton et la richesse doivent se rapprocher d'une annonce telle que : « Magnifique jupe longue bohème… coupe longue et fluide… look bohème chic, romantique ou festival… statement piece… Marque / Fabrication / Taille / État ». Adapte-la toujours à l'article photographié : n'imite ni la jupe, ni la marque, ni la taille de cet exemple.
 Mentionne l'état et les défauts visibles. Si une donnée est inconnue, omets simplement sa ligne : ne mets ni « inconnu », ni une supposition.
 Garde une longueur maximale d'environ 1 600 caractères, espaces compris.
 Intègre naturellement une tendance seulement si pertinent (Y2K, Old Money, Preppy, Tenniscore, Workwear, Streetwear, Quiet Luxury, French Riviera, Vintage, 90s, 2000s...) sans jamais en faire une liste. Inspire-toi de l'univers de la marque quand c'est cohérent : Ralph Lauren → Hamptons, voile, polo, coucher de soleil, élégance décontractée ; Levi's → Copenhague, café de quartier, denim intemporel ; Tommy Hilfiger → université américaine, Cape Cod, preppy ; Carhartt → atelier, workwear, créatifs ; Nike vintage → années 90, playground, street culture ; Sergio Tacchini → tennis vintage, Riviera italienne ; Maje → Paris, dîner en terrasse, féminité moderne ; Desigual → voyage, couleurs, Méditerranée.
@@ -937,7 +891,7 @@ export const analyzePhotos = action({
 Retourne uniquement un JSON valide avec ces champs:
 {
   "title": "titre boutique clair, max 80 caractères",
-  "description": "annonce Vinted structurée, prête à publier, avec état/défauts visibles, bloc factuel, mots-clés et hashtags",
+  "description": "annonce structurée, prête à publier, avec état/défauts visibles et bloc factuel, sans mots-clés ni hashtags",
   "gender": "Femme | Homme | Enfant | Unisexe",
   "category": "une catégorie exacte de la taxonomie fournie",
   "subcategory": "une sous-catégorie exacte de la catégorie choisie",
@@ -950,16 +904,13 @@ Retourne uniquement un JSON valide avec ces champs:
   "price": prix conseillé en euros pour la boutique, nombre ou null,
   "parcelSize": "Petit | Moyen | Grand",
   "style": "style/mots utiles: vintage, casual, sport, chic... ou null",
-  "vintedKeywords": ["3 à 6 mots-clés Vinted exacts, pertinents et justifiés par l'article"],
   "aiConfidence": nombre entre 0 et 1,
   "aiNotes": "points à vérifier humainement"
 }
 Taxonomie autorisée (genre → catégorie → sous-catégorie → sous-sous-catégorie):
 ${JSON.stringify(KLYDE_TAXONOMY)}
 Sois prudent: si marque, taille ou matière ne sont pas visibles, mets null.
-Optimise la description pour la recherche Vinted : sélectionne entre 3 et 6 mots-clés strictement pertinents dans la liste ci-dessous. Ne les invente jamais, n'ajoute pas de marque absente, et n'utilise pas de mots-clés sans rapport avec la photo. La réponse doit les mettre dans \`vintedKeywords\`. Dans le texte de description, les mots-clés et hashtags peuvent aussi inclure des faits visibles (type de vêtement, couleur, marque, taille), mais jamais une information inventée.
-Mots-clés Vinted autorisés :
-${JSON.stringify(VINTED_KEYWORDS)}
+Optimise la recherche avec des termes modernes, jeunes et vendeurs, mais emploie-les seulement s'ils sont justifiés par l'article. N'ajoute jamais de marque absente ni d'information inventée. Pour le genre, écris toujours « pour femme » ou « pour homme » lorsque la photo permet de le déterminer.
 ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim()}` : ""}`;
 
     const result = await callOpenAI<KlydeAIResult>(apiKey, {
