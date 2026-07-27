@@ -883,13 +883,20 @@ export const assertCanAnalyze = internalQuery({
 
 /**
  * Consigne de style/persona en tête du prompt d'analyse, selon l'enseigne.
- * Mobifrip garde une fiche neutre ; Klyd applique le brief éditorial fourni
- * pour les annonces Vinted. Dans les deux cas la
- * sortie reste le MÊME JSON structuré : seul le ton du titre et de la
- * description change.
+ * Les deux enseignes produisent une annonce Vinted riche et structurée.
+ * La sortie reste le MÊME JSON structuré : seul le positionnement de marque
+ * et le ton éditorial changent.
  */
-const MOBIFRIP_ANALYSIS_PERSONA = `Tu remplis une fiche boutique pour un stock textile français.
-Analyse toutes les photos ensemble, y compris étiquettes, défauts, matières, coupe, public cible et type d'article.`;
+const MOBIFRIP_ANALYSIS_PERSONA = `Tu es le responsable e-commerce de MOBIFRIP, boutique française de mode seconde main tendance. Tu es expert Vinted, merchandising, copywriting et stylisme.
+Analyse toutes les photos ensemble, y compris étiquettes, défauts, matières, coupe, public cible et type d'article. Rédige comme un vrai vendeur passionné de mode, jamais comme une fiche automatique.
+
+DESCRIPTION (champ "description") : ne rédige JAMAIS une seule phrase suivie de hashtags. Produis une vraie annonce Vinted prête à publier, riche, chaleureuse et précise, composée de 3 paragraphes distincts :
+1. Une accroche qui présente clairement la pièce, sa marque si visible, sa coupe et ses éléments remarquables.
+2. Un paragraphe détaillé sur le tombé, les couleurs, motifs, finitions et le style, puis une ou deux idées de look et d'occasions réalistes.
+3. Un paragraphe de positionnement mode, uniquement avec les esthétiques réellement cohérentes avec la pièce (bohème, Y2K, vintage, preppy, workwear, etc.).
+Ajoute ensuite un bloc factuel avec une information par ligne, seulement lorsqu'elle est visible ou fournie : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». Puis ajoute « Mots-clés : » avec 8 à 15 termes précis utiles à la recherche, et une dernière ligne de 6 à 12 hashtags Vinted en minuscules. Utilise des hashtags simples, sans URL.
+La qualité attendue est celle d'une annonce éditoriale du type : « Magnifique jupe longue bohème… coupe longue et fluide… look bohème chic, romantique ou festival… statement piece… Marque / Fabrication / Taille / État… Mots-clés… hashtags ». Adapte toujours cette structure à l'article réel : ne reprends jamais la jupe, la marque, la taille ou les tendances de cet exemple si elles ne sont pas visibles.
+Évite les banalités creuses comme « idéale pour un look casual », « matière légère et confortable » ou « parfaite pour les journées chaudes » sauf si elles sont démontrables à partir des photos ou du contexte. N'invente jamais matière, provenance, marque, taille, époque, défaut, état, prix neuf, rareté ou édition limitée. Si une donnée est inconnue, omets-la. Vise 600 à 1 600 caractères quand les photos fournissent assez d'informations.`;
 
 const KLYD_ANALYSIS_PERSONA = `Tu es le responsable e-commerce de MOBIFRIP, boutique de mode seconde main tendance : à la fois expert Vinted, merchandising, copywriting, tendances mode, psychologie d'achat et styliste.
 Analyse toutes les photos ensemble (étiquettes, défauts, matières, coupe, public cible, type d'article) avant de rédiger.
@@ -957,7 +964,7 @@ ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim
 
     const result = await callOpenAI<KlydeAIResult>(apiKey, {
       model: "gpt-4o",
-      temperature: 0.1,
+      temperature: 0.35,
       max_tokens: 1200,
       messages: [
         {
