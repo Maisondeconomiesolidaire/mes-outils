@@ -485,7 +485,7 @@ export const APPS: AppDefinition[] = [
     description: "Gestion déchet'lab",
     icon: Truck,
     logoSrc: "/bennespro-logo.png",
-    href: "https://dechetlab.groupemes.fr",
+    href: "https://materiosol.groupemes.fr",
     external: true,
     accent: "from-amber-500 to-zinc-900",
     cardBg: "#a4cebe",

@@ -84,7 +84,7 @@ const APPS: PortalApp[] = [
     label: "Bennes & Pro",
     description: "Gestion déchet'lab",
     logoSrc: "/bennespro-logo.png",
-    href: appUrl("VITE_BENNESPRO_URL", "https://dechetlab.groupemes.fr"),
+    href: appUrl("VITE_BENNESPRO_URL", "https://materiosol.groupemes.fr"),
     cardBg: "#a4cebe",
   },
   {
