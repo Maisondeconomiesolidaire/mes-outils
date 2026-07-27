@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useSignIn, useUser } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { CircleHelp, LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
@@ -65,9 +65,8 @@ function AuthPanel() {
   const navigate = useNavigate();
   const isSignIn = location.pathname.startsWith("/sign-in");
   const isSignUp = location.pathname.startsWith("/sign-up");
-  const isPasswordReset = location.pathname.startsWith("/reset-password");
 
-  if (!isSignIn && !isSignUp && !isPasswordReset) {
+  if (!isSignIn && !isSignUp) {
     return (
       <div className="grid gap-3">
         <button
@@ -91,8 +90,6 @@ function AuthPanel() {
   // On passe aussi l'apparence directement aux composants Clerk :
   // certaines transitions SignIn -> SignUp ne réappliquent pas toujours
   // l'héritage du provider avant le premier rendu du nouveau composant.
-  if (isPasswordReset) return <PasswordResetPanel />;
-
   return isSignUp ? (
     <SignUp
       routing="hash"
@@ -101,219 +98,12 @@ function AuthPanel() {
       appearance={CLERK_APPEARANCE}
     />
   ) : (
-    <div className="grid gap-4">
-      <SignIn
-        routing="hash"
-        fallbackRedirectUrl="/"
-        signUpUrl="/sign-up"
-        appearance={CLERK_APPEARANCE}
-      />
-      <button
-        type="button"
-        onClick={() => navigate("/reset-password")}
-        className="mx-auto text-sm font-semibold text-brand-600 transition hover:text-brand-700 hover:underline"
-      >
-        Mot de passe oublié ?
-      </button>
-    </div>
-  );
-}
-
-/**
- * Clerk peut privilégier la connexion par code e-mail pour certains comptes.
- * On conserve donc ici un accès direct et homogène au flux de réinitialisation
- * (e-mail → code → nouveau mot de passe), sans dépendre de l'étape affichée
- * par le composant SignIn préfabriqué.
- */
-function PasswordResetPanel() {
-  const navigate = useNavigate();
-  const { isLoaded, signIn } = useSignIn();
-  const { setActive } = useClerk();
-  const [step, setStep] = useState<"email" | "code" | "password">("email");
-  const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmation, setConfirmation] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function displayError(reason: unknown, fallback: string) {
-    const clerkError = reason as { errors?: Array<{ longMessage?: string; message?: string }> };
-    return clerkError.errors?.[0]?.longMessage ?? clerkError.errors?.[0]?.message ?? fallback;
-  }
-
-  async function sendCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!isLoaded || !signIn) return;
-    setError(null);
-    setSubmitting(true);
-    try {
-      const attempt = await signIn.create({ identifier: email.trim() });
-      const resetFactor = attempt.supportedFirstFactors?.find(
-        (factor) => factor.strategy === "reset_password_email_code",
-      );
-
-      if (!resetFactor || resetFactor.strategy !== "reset_password_email_code") {
-        setError("La réinitialisation du mot de passe n'est pas disponible pour cette adresse.");
-        return;
-      }
-
-      await signIn.prepareFirstFactor({
-        strategy: "reset_password_email_code",
-        emailAddressId: resetFactor.emailAddressId,
-      });
-      setStep("code");
-    } catch (reason) {
-      setError(displayError(reason, "Impossible d'envoyer le code. Réessayez dans un instant."));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function verifyCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!isLoaded || !signIn) return;
-    setError(null);
-    setSubmitting(true);
-    try {
-      const attempt = await signIn.attemptFirstFactor({
-        strategy: "reset_password_email_code",
-        code: code.trim(),
-      });
-      if (attempt.status !== "needs_new_password") {
-        setError("Le code est invalide ou a expiré. Vérifiez-le puis réessayez.");
-        return;
-      }
-      setStep("password");
-    } catch (reason) {
-      setError(displayError(reason, "Le code est invalide ou a expiré."));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function updatePassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!isLoaded || !signIn) return;
-    if (password !== confirmation) {
-      setError("Les deux mots de passe ne correspondent pas.");
-      return;
-    }
-    setError(null);
-    setSubmitting(true);
-    try {
-      const attempt = await signIn.resetPassword({ password, signOutOfOtherSessions: true });
-      if (attempt.status !== "complete" || !attempt.createdSessionId) {
-        setError("Impossible de mettre à jour le mot de passe. Réessayez dans un instant.");
-        return;
-      }
-      await setActive({ session: attempt.createdSessionId });
-      navigate("/");
-    } catch (reason) {
-      setError(displayError(reason, "Impossible de mettre à jour le mot de passe."));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const description =
-    step === "email"
-      ? "Saisissez votre adresse e-mail pour recevoir un code de réinitialisation."
-      : step === "code"
-        ? `Saisissez le code envoyé à ${email.trim()}.`
-        : "Choisissez un nouveau mot de passe pour votre compte.";
-
-  return (
-    <div className="grid gap-6">
-      <div>
-        <h1 className="text-2xl font-bold text-[var(--foreground)]">Réinitialiser le mot de passe</h1>
-        <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{description}</p>
-      </div>
-
-      {step === "email" ? (
-        <form className="grid gap-4" onSubmit={sendCode}>
-          <Field label="Adresse e-mail" required>
-            <Input
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              required
-              autoFocus
-            />
-          </Field>
-          <Button type="submit" disabled={!isLoaded || submitting || !email.trim()}>
-            {submitting ? "Envoi du code..." : "Recevoir un code"}
-          </Button>
-        </form>
-      ) : null}
-
-      {step === "code" ? (
-        <form className="grid gap-4" onSubmit={verifyCode}>
-          <Field label="Code reçu par e-mail" required>
-            <Input
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              required
-              autoFocus
-            />
-          </Field>
-          <Button type="submit" disabled={submitting || !code.trim()}>
-            {submitting ? "Vérification..." : "Continuer"}
-          </Button>
-          <button
-            type="button"
-            onClick={() => {
-              setStep("email");
-              setCode("");
-              setError(null);
-            }}
-            className="text-sm font-semibold text-brand-600 hover:underline"
-          >
-            Utiliser une autre adresse e-mail
-          </button>
-        </form>
-      ) : null}
-
-      {step === "password" ? (
-        <form className="grid gap-4" onSubmit={updatePassword}>
-          <Field label="Nouveau mot de passe" required>
-            <Input
-              type="password"
-              autoComplete="new-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-              autoFocus
-            />
-          </Field>
-          <Field label="Confirmer le mot de passe" required>
-            <Input
-              type="password"
-              autoComplete="new-password"
-              value={confirmation}
-              onChange={(event) => setConfirmation(event.target.value)}
-              required
-            />
-          </Field>
-          <Button type="submit" disabled={submitting || !password || !confirmation}>
-            {submitting ? "Mise à jour..." : "Enregistrer mon mot de passe"}
-          </Button>
-        </form>
-      ) : null}
-
-      {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
-
-      <button
-        type="button"
-        onClick={() => navigate("/sign-in")}
-        className="justify-self-start text-sm font-semibold text-[var(--muted-foreground)] transition hover:text-brand-600 hover:underline"
-      >
-        Retour à la connexion
-      </button>
-    </div>
+    <SignIn
+      routing="hash"
+      fallbackRedirectUrl="/"
+      signUpUrl="/sign-up"
+      appearance={CLERK_APPEARANCE}
+    />
   );
 }
 
