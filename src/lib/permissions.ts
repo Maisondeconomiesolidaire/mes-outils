@@ -202,8 +202,15 @@ export const RECYCAPP_PAGES: PermissionPage[] = [
   {
     app: "recycapp",
     key: "equipe",
-    label: "Equipe",
-    description: "Gestion des membres.",
+    label: "Agents permanents",
+    description: "Gestion des agents permanents (salariés).",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "recycapp",
+    key: "agents-polyvalents",
+    label: "Agents polyvalents",
+    description: "Ouvriers polyvalents : tâches, ouvriers et planning d'activités.",
     actions: ["read", "create", "update", "delete"],
   },
   {

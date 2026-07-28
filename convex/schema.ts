@@ -1988,6 +1988,36 @@ export default defineSchema(
     fromTeam: v.boolean(),
     createdAt: v.number(),
   }).index("by_feedback_and_createdAt", ["feedbackId", "createdAt"]),
+
+  /* ─── Agents polyvalents (Recyclerie) ─────────────────────────────────────
+   * Gestion des ouvriers polyvalents : un catalogue de tâches, une liste
+   * d'ouvriers (nom/prénom), et des activités qui affectent un ouvrier à une
+   * tâche sur un créneau daté. Distinct de `teamMembers` (agents permanents). */
+  polyvalentTasks: defineTable({
+    name: v.string(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }).index("by_name", ["name"]),
+
+  polyvalentWorkers: defineTable({
+    firstName: v.string(),
+    lastName: v.string(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }),
+
+  polyvalentActivities: defineTable({
+    taskId: v.id("polyvalentTasks"),
+    workerId: v.id("polyvalentWorkers"),
+    /** Début et fin du créneau, en millisecondes epoch (date + heure). */
+    startAt: v.number(),
+    endAt: v.number(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_worker", ["workerId"])
+    .index("by_task", ["taskId"])
+    .index("by_startAt", ["startAt"]),
   },
   { schemaValidation: false },
 );

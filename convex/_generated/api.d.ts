@@ -41,6 +41,7 @@ import type * as notifications from "../notifications.js";
 import type * as permissions from "../permissions.js";
 import type * as pointeuse from "../pointeuse.js";
 import type * as points from "../points.js";
+import type * as polyvalents from "../polyvalents.js";
 import type * as posts from "../posts.js";
 import type * as processes from "../processes.js";
 import type * as requestAnalysis from "../requestAnalysis.js";
@@ -95,6 +96,7 @@ declare const fullApi: ApiFromModules<{
   permissions: typeof permissions;
   pointeuse: typeof pointeuse;
   points: typeof points;
+  polyvalents: typeof polyvalents;
   posts: typeof posts;
   processes: typeof processes;
   requestAnalysis: typeof requestAnalysis;
