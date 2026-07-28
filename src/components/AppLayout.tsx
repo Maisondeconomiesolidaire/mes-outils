@@ -1,7 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { CircleHelp, LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
+import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "../../convex/_generated/api";
 import { PORTAL_NAV, canAccess } from "../lib/permissions";
@@ -254,7 +254,9 @@ function ProfileSync() {
 function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {
   const access = usePermissionsAccess();
   const { user } = useUser();
-  const points = useQuery(api.points.myPoints, {}) ?? 100;
+  // Système de points masqué pour les utilisateurs : les points continuent
+  // d'exister et de s'accumuler en arrière-plan (ensureMine + awards backend),
+  // mais aucune valeur n'est affichée pour le moment.
   const ensurePoints = useMutation(api.points.ensureMine);
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -304,7 +306,6 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
       theme={theme}
       setTheme={setTheme}
       userName={user?.firstName ?? user?.fullName ?? user?.primaryEmailAddress?.emailAddress ?? "Moi"}
-      points={points}
       userImage={user?.imageUrl}
       currentPath={location.pathname}
     />
@@ -375,7 +376,6 @@ function SidebarContent({
   theme,
   setTheme,
   userName,
-  points,
   userImage,
   currentPath,
 }: {
@@ -384,7 +384,6 @@ function SidebarContent({
   theme: "light" | "dark";
   setTheme: (t: "light" | "dark") => void;
   userName: string;
-  points: number;
   userImage?: string | null;
   currentPath: string;
 }) {
@@ -435,11 +434,6 @@ function SidebarContent({
             <UserAvatar name={userName} src={userImage} />
             <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
               <p className="truncate text-sm font-semibold text-[var(--foreground)]">{userName}</p>
-              <span className="group relative inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-bold text-brand-700 dark:bg-brand-500/20 dark:text-brand-200">
-                {points} pts
-                <CircleHelp className="h-3 w-3" />
-                <span role="tooltip" className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 hidden w-64 rounded-lg bg-zinc-900 px-3 py-2 text-left text-xs font-medium text-white shadow-lg group-hover:block">Les points récompensent vos réservations, retours et participations utiles. Ils pourront bientôt débloquer des cadeaux et des récompenses.</span>
-              </span>
             </div>
         </Link>
         <SignOutButton />
