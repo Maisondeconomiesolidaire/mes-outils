@@ -30,6 +30,7 @@ const DEFAULT_TRAVEL_RATE_PER_KM = 1; // 1 € / km
 const POINTEUSE_DEPOT_ADDRESS = "4 rue de la prairie 60650 Lachapelle-aux-Pots";
 const DASHBOARD_PAGE_KEY = "pointeuse:dashboard";
 const TIME_ENTRIES_PAGE_KEY = "pointeuse:pointages";
+const TASKS_PAGE_KEY = "pointeuse:taches";
 const PROJECTS_PAGE_KEY = "pointeuse:projets";
 const CLIENTS_PAGE_KEY = "pointeuse:clients";
 const EMPLOYEES_PAGE_KEY = "pointeuse:salaries";
@@ -618,6 +619,165 @@ export const deleteTimeEntry = mutation({
   handler: async (ctx, { entryId }) => {
     await requireCrmPermission(ctx, TIME_ENTRIES_PAGE_KEY, "delete");
     await ctx.db.delete(entryId);
+  },
+});
+
+/* ─── Tâches (nouveau flux : estimé à la création, réel confirmé) ─────────── */
+
+export const listTasks = query({
+  args: { projectId: v.optional(v.id("ptProjects")) },
+  handler: async (ctx, { projectId }) => {
+    // Lisible depuis la page Tâches ET depuis Pointages (confirmation).
+    await requireAnyCrmPermission(ctx, [
+      [TASKS_PAGE_KEY, "read"],
+      [TIME_ENTRIES_PAGE_KEY, "read"],
+    ]);
+    const tasks = projectId
+      ? await ctx.db
+          .query("ptTasks")
+          .withIndex("by_project", (q) => q.eq("projectId", projectId))
+          .order("desc")
+          .collect()
+      : await ctx.db.query("ptTasks").order("desc").collect();
+
+    const [projects, clients, employees] = await Promise.all([
+      ctx.db.query("ptProjects").collect(),
+      ctx.db.query("ptClients").collect(),
+      ctx.db.query("ptEmployees").collect(),
+    ]);
+    const projectName = new Map(projects.map((p) => [p._id, p.name]));
+    const clientName = new Map(clients.map((c) => [c._id, c.name]));
+    const empName = new Map(
+      employees.map((e) => [e._id, `${e.firstName} ${e.lastName}`]),
+    );
+
+    return tasks.map((task) => {
+      const assignments = task.assignments.map((a) => {
+        const confirmed = typeof a.confirmedHours === "number";
+        return {
+          ...a,
+          employeeName: empName.get(a.employeeId) ?? "—",
+          confirmed,
+          estimatedCost: round2(a.estimatedHours * a.hourlyRate),
+          confirmedCost: confirmed ? round2((a.confirmedHours ?? 0) * a.hourlyRate) : 0,
+        };
+      });
+      const travelCost = task.travel?.cost ?? 0;
+      const estimatedLabor = round2(
+        assignments.reduce((s, a) => s + a.estimatedCost, 0),
+      );
+      const confirmedLabor = round2(
+        assignments.reduce((s, a) => s + a.confirmedCost, 0),
+      );
+      return {
+        ...task,
+        projectName: projectName.get(task.projectId) ?? "—",
+        clientName: clientName.get(task.clientId) ?? "—",
+        assignments,
+        travelCost,
+        estimatedTotal: round2(estimatedLabor + travelCost),
+        // Coût réel = temps confirmés + déplacement (le déplacement est acté à la création).
+        confirmedTotal: round2(confirmedLabor + travelCost),
+      };
+    });
+  },
+});
+
+export const createTask = mutation({
+  args: {
+    projectId: v.id("ptProjects"),
+    date: v.number(),
+    assignments: v.array(
+      v.object({ employeeId: v.id("ptEmployees"), estimatedHours: v.number() }),
+    ),
+    roundTrips: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    documentIds: v.optional(v.array(v.id("ptDocuments"))),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, TASKS_PAGE_KEY, "create");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Non authentifié.");
+    const project = await ctx.db.get(args.projectId);
+    if (!project) throw new Error("Projet introuvable.");
+
+    const assignments = [];
+    for (const assignment of args.assignments) {
+      if (assignment.estimatedHours <= 0) continue;
+      const employee = await ctx.db.get(assignment.employeeId);
+      if (!employee) throw new Error("Salarié introuvable.");
+      assignments.push({
+        employeeId: assignment.employeeId,
+        hourlyRate: employee.hourlyRate,
+        estimatedHours: assignment.estimatedHours,
+      });
+    }
+    if (assignments.length === 0) {
+      throw new Error("Affectez au moins un salarié avec un temps estimé.");
+    }
+
+    const roundTrips = args.roundTrips ?? 0;
+    const ratePerKm = project.travelRatePerKm ?? DEFAULT_TRAVEL_RATE_PER_KM;
+    const travel =
+      roundTrips > 0
+        ? {
+            roundTrips,
+            distanceKm: project.distanceKm,
+            ratePerKm,
+            cost: round2(roundTrips * project.distanceKm * 2 * ratePerKm),
+          }
+        : undefined;
+
+    const taskId = await ctx.db.insert("ptTasks", {
+      projectId: args.projectId,
+      clientId: project.clientId,
+      date: args.date,
+      travel,
+      notes: args.notes,
+      documentIds: args.documentIds ?? [],
+      assignments,
+      status: "pending",
+      createdAt: Date.now(),
+      createdBy: identity.email ?? undefined,
+    });
+    // Les documents portent déjà le projet ; on les laisse rattachés à la tâche
+    // via `documentIds` sans toucher à `timeEntryId` (réservé aux pointages).
+    return taskId;
+  },
+});
+
+/** Confirmation du temps réel d'un salarié affecté (depuis « Pointages »). */
+export const confirmTaskHours = mutation({
+  args: {
+    taskId: v.id("ptTasks"),
+    employeeId: v.id("ptEmployees"),
+    confirmedHours: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, TIME_ENTRIES_PAGE_KEY, "update");
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Tâche introuvable.");
+    if (args.confirmedHours < 0) throw new Error("Heures invalides.");
+    const now = Date.now();
+    let found = false;
+    const assignments = task.assignments.map((a) => {
+      if (a.employeeId !== args.employeeId) return a;
+      found = true;
+      return { ...a, confirmedHours: args.confirmedHours, confirmedAt: now };
+    });
+    if (!found) throw new Error("Ce salarié n'est pas affecté à cette tâche.");
+    const status = assignments.every((a) => typeof a.confirmedHours === "number")
+      ? "confirmed"
+      : "pending";
+    await ctx.db.patch(args.taskId, { assignments, status });
+  },
+});
+
+export const deleteTask = mutation({
+  args: { taskId: v.id("ptTasks") },
+  handler: async (ctx, { taskId }) => {
+    await requireCrmPermission(ctx, TASKS_PAGE_KEY, "delete");
+    await ctx.db.delete(taskId);
   },
 });
 

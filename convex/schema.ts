@@ -1825,6 +1825,48 @@ export default defineSchema(
     .index("by_project", ["projectId"])
     .index("by_date", ["date"]),
 
+  /**
+   * Tâches planifiées (nouveau flux) : un encadrant crée une tâche (projet,
+   * date, déplacement, salariés affectés + temps estimé). Chaque salarié
+   * affecté confirme ensuite son temps réel depuis « Pointages ». Distinct de
+   * `ptTimeEntries` (pointages historiques, inchangés).
+   */
+  ptTasks: defineTable({
+    projectId: v.id("ptProjects"),
+    /** Dénormalisé depuis le projet à la création. */
+    clientId: v.id("ptClients"),
+    date: v.number(),
+    travel: v.optional(
+      v.object({
+        roundTrips: v.number(),
+        distanceKm: v.number(),
+        ratePerKm: v.optional(v.number()),
+        cost: v.number(),
+      }),
+    ),
+    notes: v.optional(v.string()),
+    documentIds: v.array(v.id("ptDocuments")),
+    assignments: v.array(
+      v.object({
+        employeeId: v.id("ptEmployees"),
+        /** Snapshot du taux horaire à la création de la tâche. */
+        hourlyRate: v.number(),
+        /** Temps estimé à la création (heures). */
+        estimatedHours: v.number(),
+        /** Temps réel confirmé par le salarié (heures). */
+        confirmedHours: v.optional(v.number()),
+        confirmedAt: v.optional(v.number()),
+      }),
+    ),
+    /** « confirmed » dès que toutes les affectations ont un temps réel. */
+    status: v.union(v.literal("pending"), v.literal("confirmed")),
+    createdAt: v.number(),
+    createdBy: v.optional(v.string()),
+  })
+    .index("by_project", ["projectId"])
+    .index("by_date", ["date"])
+    .index("by_status", ["status"]),
+
   /** Fournisseurs. */
   ptSuppliers: defineTable({
     name: v.string(),

@@ -372,7 +372,14 @@ export const POINTEUSE_PAGES: PermissionPage[] = [
     app: "pointeuse",
     key: "pointeuse:pointages",
     label: "Pointages",
-    description: "Saisie et suivi des heures des salariés.",
+    description: "Suivi des heures et confirmation du temps réel par les salariés.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "pointeuse",
+    key: "pointeuse:taches",
+    label: "Tâches",
+    description: "Création des tâches (projet, salariés affectés, temps estimé).",
     actions: ["read", "create", "update", "delete"],
   },
   {
