@@ -36,6 +36,16 @@ export const createTask = mutation({
   },
 });
 
+export const updateTask = mutation({
+  args: { id: v.id("polyvalentTasks"), name: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    const name = args.name.trim();
+    if (!name) throw new Error("Le nom de la tâche est requis.");
+    await ctx.db.patch(args.id, { name });
+  },
+});
+
 export const deleteTask = mutation({
   args: { id: v.id("polyvalentTasks") },
   handler: async (ctx, args) => {
@@ -75,6 +85,17 @@ export const createWorker = mutation({
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
+  },
+});
+
+export const updateWorker = mutation({
+  args: { id: v.id("polyvalentWorkers"), firstName: v.string(), lastName: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    const firstName = args.firstName.trim();
+    const lastName = args.lastName.trim();
+    if (!firstName && !lastName) throw new Error("Le nom de l'ouvrier est requis.");
+    await ctx.db.patch(args.id, { firstName, lastName });
   },
 });
 
@@ -151,6 +172,37 @@ export const createActivity = mutation({
       endAt: args.endAt,
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
+    });
+  },
+});
+
+export const updateActivity = mutation({
+  args: {
+    id: v.id("polyvalentActivities"),
+    taskId: v.id("polyvalentTasks"),
+    workerId: v.id("polyvalentWorkers"),
+    startAt: v.number(),
+    endAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    if (!Number.isFinite(args.startAt) || !Number.isFinite(args.endAt)) {
+      throw new Error("Dates de début et de fin requises.");
+    }
+    if (args.endAt < args.startAt) {
+      throw new Error("La fin doit être après le début.");
+    }
+    const [task, worker] = await Promise.all([
+      ctx.db.get(args.taskId),
+      ctx.db.get(args.workerId),
+    ]);
+    if (!task) throw new Error("Tâche introuvable.");
+    if (!worker) throw new Error("Ouvrier introuvable.");
+    await ctx.db.patch(args.id, {
+      taskId: args.taskId,
+      workerId: args.workerId,
+      startAt: args.startAt,
+      endAt: args.endAt,
     });
   },
 });
