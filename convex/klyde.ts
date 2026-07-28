@@ -50,6 +50,7 @@ type KlydeAIResult = {
   parcelSize?: string | null;
   gender?: string | null;
   style?: string | null;
+  hashtags?: string[] | null;
   aiConfidence?: number | null;
   aiNotes?: string | null;
 };
@@ -93,6 +94,43 @@ function normalizeQuantity(value?: number) {
   return Math.floor(value);
 }
 
+function slugifyHashtag(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("fr")
+    .replace(/^#/, "")
+    .replace(/[^a-z0-9]+/g, "")
+    .slice(0, 32);
+}
+
+function saleHashtags(
+  suggestions: string[] | null | undefined,
+  gender: string,
+  category: string,
+  subcategory: string | null | undefined,
+  style: string | null | undefined,
+) {
+  const tags = new Set<string>();
+  const add = (value?: string | null) => {
+    if (!value) return;
+    const tag = slugifyHashtag(value);
+    // #vinted n'est jamais ajouté aux annonces ; les autres hashtags doivent
+    // rester liés à l'article et ne jamais servir de bourrage de mots-clés.
+    if (tag && !tag.startsWith("vinted")) tags.add(`#${tag}`);
+  };
+
+  for (const tag of suggestions ?? []) add(tag);
+  add(gender === "Femme" ? "femme" : gender === "Homme" ? "homme" : gender === "Enfant" ? "enfant" : "unisexe");
+  add(category);
+  add(subcategory);
+  add(style);
+  add("secondemain");
+  add("mode");
+
+  return [...tags].slice(0, 10);
+}
+
 function workflowRank(status: string) {
   return {
     stock: 0,
@@ -131,7 +169,7 @@ function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
     ? result.parcelSize
     : undefined;
   const gender = KLYDE_GENDERS.includes(result.gender as (typeof KLYDE_GENDERS)[number])
-    ? result.gender
+    ? result.gender ?? "Unisexe"
     : "Unisexe";
   const category = isKlydeTaxonomyChoice(gender, result.category)
     ? result.category
@@ -142,9 +180,19 @@ function sanitizeAnalysis(result: KlydeAIResult): KlydeAIResult {
   const subsubcategory = subcategory && klydeSubsubcategories(gender, category, subcategory).includes(result.subsubcategory ?? "")
     ? result.subsubcategory
     : undefined;
-  const description =
+  const rawDescription =
     cleanOptional(result.description)?.slice(0, 1800) ||
     "Article textile d'occasion. Détails à vérifier avant publication.";
+  // Le modèle ne gère pas directement la ligne finale : on retire toute
+  // tentative de hashtag dans son texte et on ajoute une liste contrôlée.
+  const descriptionWithoutHashtags = rawDescription
+    .replace(/(?:^|\s)#[\p{L}\p{N}_]+/gu, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .trim();
+  const hashtags = saleHashtags(result.hashtags, gender, category, subcategory, result.style);
+  const description = hashtags.length > 0
+    ? `${descriptionWithoutHashtags.slice(0, 1600).trim()}\n\n${hashtags.join(" ")}`
+    : descriptionWithoutHashtags;
 
   return {
     title: cleanOptional(result.title)?.slice(0, 80) || "Article textile",
@@ -848,7 +896,7 @@ DESCRIPTION (champ "description") : ne rédige JAMAIS une seule phrase. Produis 
 1. Une accroche qui présente clairement la pièce, sa marque si visible, sa coupe et ses éléments remarquables.
 2. Un paragraphe détaillé sur le tombé, les couleurs, motifs, finitions et le style, puis une ou deux idées de look et d'occasions réalistes.
 3. Un paragraphe de positionnement mode, uniquement avec les esthétiques réellement cohérentes avec la pièce (bohème, Y2K, vintage, preppy, workwear, etc.).
-Ajoute ensuite un bloc factuel avec une information par ligne, seulement lorsqu'elle est visible ou fournie : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». Ne mets jamais de rubrique « Mots-clés », de hashtags, de symbole # ni de lien URL dans la description. Intègre plutôt les termes de recherche modernes et les esthétiques pertinentes naturellement dans les phrases. Quand le genre est connu, indique clairement « pour femme » ou « pour homme » dans le texte.
+Ajoute ensuite un bloc factuel avec une information par ligne, seulement lorsqu'elle est visible ou fournie : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». N'ajoute pas toi-même de hashtags au texte : renvoie-les dans le champ JSON dédié. Ils doivent être modernes, jeunes, désirables et vraiment pertinents pour l'article (Y2K, fairycore, oldmoney, streetwear, vintage, coquette, gorpcore, etc. seulement lorsque justifiés), sans jamais inclure #vinted. Intègre plutôt les termes de recherche et les esthétiques pertinentes naturellement dans les phrases. Quand le genre est connu, indique clairement « pour femme » ou « pour homme » dans le texte.
 La qualité attendue est celle d'une annonce éditoriale du type : « Magnifique jupe longue bohème… coupe longue et fluide… look bohème chic, romantique ou festival… statement piece… Marque / Fabrication / Taille / État ». Adapte toujours cette structure à l'article réel : ne reprends jamais la jupe, la marque, la taille ou les tendances de cet exemple si elles ne sont pas visibles.
 Évite les banalités creuses comme « idéale pour un look casual », « matière légère et confortable » ou « parfaite pour les journées chaudes » sauf si elles sont démontrables à partir des photos ou du contexte. N'invente jamais matière, provenance, marque, taille, époque, défaut, état, prix neuf, rareté ou édition limitée. Si une donnée est inconnue, omets-la. Vise 600 à 1 600 caractères quand les photos fournissent assez d'informations.`;
 
@@ -860,7 +908,7 @@ N'invente JAMAIS composition, matière, provenance, année, prix neuf, rareté, 
 
 TITRE (champ "title") : naturel et lisible, max 60 caractères, commençant par ce que l'acheteur recherche vraiment. Ordre conseillé : type de vêtement, marque, caractéristique principale, couleur, taille. Ex : « Chemise Ralph Lauren à carreaux bleu XL ». Jamais une rafale de tendances (« Old Money Quiet Luxury Preppy... »).
 
-DESCRIPTION (champ "description") : écris une vraie annonce prête à publier, fluide et immersive, comme cet exemple de niveau attendu : accroche valorisante ; un paragraphe qui décrit précisément la coupe, les couleurs, l'imprimé, les détails et le mouvement ; un paragraphe qui propose des associations et des occasions ; un dernier paragraphe qui positionne la pièce dans les tendances pertinentes. Ensuite ajoute un bloc factuel, une information par ligne, uniquement avec ce qui est connu : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». N'ajoute jamais de rubrique « Mots-clés », de hashtags, de symbole # ni de lien URL dans la description. Intègre naturellement les termes de recherche jeunes, actuels et vendeurs dans les phrases. Quand le genre est connu, indique clairement « pour femme » ou « pour homme » dans le texte.
+DESCRIPTION (champ "description") : écris une vraie annonce prête à publier, fluide et immersive, comme cet exemple de niveau attendu : accroche valorisante ; un paragraphe qui décrit précisément la coupe, les couleurs, l'imprimé, les détails et le mouvement ; un paragraphe qui propose des associations et des occasions ; un dernier paragraphe qui positionne la pièce dans les tendances pertinentes. Ensuite ajoute un bloc factuel, une information par ligne, uniquement avec ce qui est connu : « Marque : … », « Fabrication : … », « Taille : … », « État : … ». N'ajoute pas toi-même de hashtags au texte : renvoie-les dans le champ JSON dédié. Ils doivent être modernes, jeunes, désirables et pertinents pour l'article ; #vinted est strictement interdit. Intègre naturellement les termes de recherche jeunes, actuels et vendeurs dans les phrases. Quand le genre est connu, indique clairement « pour femme » ou « pour homme » dans le texte.
 La structure, le ton et la richesse doivent se rapprocher d'une annonce telle que : « Magnifique jupe longue bohème… coupe longue et fluide… look bohème chic, romantique ou festival… statement piece… Marque / Fabrication / Taille / État ». Adapte-la toujours à l'article photographié : n'imite ni la jupe, ni la marque, ni la taille de cet exemple.
 Mentionne l'état et les défauts visibles. Si une donnée est inconnue, omets simplement sa ligne : ne mets ni « inconnu », ni une supposition.
 Garde une longueur maximale d'environ 1 600 caractères, espaces compris.
@@ -891,7 +939,7 @@ export const analyzePhotos = action({
 Retourne uniquement un JSON valide avec ces champs:
 {
   "title": "titre boutique clair, max 80 caractères",
-  "description": "annonce structurée, prête à publier, avec état/défauts visibles et bloc factuel, sans mots-clés ni hashtags",
+  "description": "annonce structurée, prête à publier, avec état/défauts visibles et bloc factuel, sans hashtags",
   "gender": "Femme | Homme | Enfant | Unisexe",
   "category": "une catégorie exacte de la taxonomie fournie",
   "subcategory": "une sous-catégorie exacte de la catégorie choisie",
@@ -904,13 +952,14 @@ Retourne uniquement un JSON valide avec ces champs:
   "price": prix conseillé en euros pour la boutique, nombre ou null,
   "parcelSize": "Petit | Moyen | Grand",
   "style": "style/mots utiles: vintage, casual, sport, chic... ou null",
+  "hashtags": ["6 à 10 hashtags modernes et pertinents, sans #vinted ni hashtag de marque non visible"],
   "aiConfidence": nombre entre 0 et 1,
   "aiNotes": "points à vérifier humainement"
 }
 Taxonomie autorisée (genre → catégorie → sous-catégorie → sous-sous-catégorie):
 ${JSON.stringify(KLYDE_TAXONOMY)}
 Sois prudent: si marque, taille ou matière ne sont pas visibles, mets null.
-Optimise la recherche avec des termes modernes, jeunes et vendeurs, mais emploie-les seulement s'ils sont justifiés par l'article. N'ajoute jamais de marque absente ni d'information inventée. Pour le genre, écris toujours « pour femme » ou « pour homme » lorsque la photo permet de le déterminer.
+Optimise la recherche avec des termes modernes, jeunes et vendeurs, mais emploie-les seulement s'ils sont justifiés par l'article. N'ajoute jamais de marque absente ni d'information inventée. Pour le genre, écris toujours « pour femme » ou « pour homme » lorsque la photo permet de le déterminer. Le tableau \`hashtags\` doit contenir des tags sans # : l'application les ajoute à la fin, filtre #vinted et ajoute le hashtag de genre.
 ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim()}` : ""}`;
 
     const result = await callOpenAI<KlydeAIResult>(apiKey, {
