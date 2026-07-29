@@ -11,8 +11,8 @@ import {
   formatUserName,
   hasCrmPermission,
   isReservationParticipant,
+  isVehicleReturnOverdue,
   photoForClerkId,
-  MANDATORY_RETURN_SINCE,
   requireCrmPermission,
   requireUser,
   vehicleReservationBusyEnd,
@@ -60,11 +60,39 @@ function overlaps(startA: number, endA: number, startB: number, endB: number) {
   return startA < endB && endA > startB;
 }
 
+/**
+ * Réservation approuvée qui occupe le véhicule sur `[start, end[`, ou
+ * `undefined`. L'occupation est calculée par `vehicleReservationBusyEnd` :
+ * retour anticipé = libéré plus tôt, retour manquant = occupé sans limite.
+ */
+function conflictingVehicleReservation(
+  reservations: Doc<"vehicleReservations">[],
+  start: number,
+  end: number,
+  now: number,
+  excludeId?: Id<"vehicleReservations">,
+) {
+  return reservations
+    .filter((reservation) => reservation._id !== excludeId)
+    .sort((a, b) => a.start - b.start)
+    .find((reservation) =>
+      overlaps(reservation.start, vehicleReservationBusyEnd(reservation, now), start, end),
+    );
+}
+
+/** Message d'erreur d'un conflit : « déjà réservé » ou « pas encore rendu ». */
+function vehicleConflictMessage(reservation: Doc<"vehicleReservations">, now: number) {
+  return isVehicleReturnOverdue(reservation, now)
+    ? `Ce véhicule n'a pas encore été rendu par ${reservation.userName} : le retour doit être enregistré avant toute nouvelle réservation.`
+    : "Ce véhicule est déjà réservé sur ce créneau.";
+}
+
 async function ensureVehicleAvailable(
   ctx: QueryCtx | MutationCtx,
   vehicleId: Id<"vehicles">,
   start: number,
   end: number,
+  excludeId?: Id<"vehicleReservations">,
 ) {
   const dayMs = 86_400_000;
   for (
@@ -77,10 +105,10 @@ async function ensureVehicleAvailable(
     const reason = await vehicleBusyReason(ctx, vehicleId, cursor, { ignoreReservations: true });
     if (reason) throw new Error(reason);
   }
+  const now = Date.now();
   const approved = await approvedReservationsForVehicle(ctx, vehicleId);
-  if (approved.some((reservation) => overlaps(reservation.start, reservation.end, start, end))) {
-    throw new Error("Ce véhicule est déjà réservé sur ce créneau.");
-  }
+  const conflict = conflictingVehicleReservation(approved, start, end, now, excludeId);
+  if (conflict) throw new Error(vehicleConflictMessage(conflict, now));
 }
 
 function displayName(identity: {
@@ -117,13 +145,11 @@ async function approvedReservationsForVehicle(
     .query("vehicleReservations")
     .withIndex("by_vehicleId", (q) => q.eq("vehicleId", vehicleId))
     .collect();
-  // Un retour enregistré clôt la réservation opérationnellement : elle reste
-  // dans l'historique, mais ne doit plus jamais entrer dans les conflits de
-  // disponibilité, quelle que soit l'heure à laquelle le formulaire a été
-  // envoyé.
-  return reservations.filter(
-    (reservation) => reservation.status === "approved" && !reservation.feedbackSubmittedAt,
-  );
+  // Les réservations rendues sont conservées ici : c'est
+  // `vehicleReservationBusyEnd` qui les ramène à leur occupation réelle
+  // (libérées à l'heure du retour). Une seule règle d'occupation, un seul
+  // endroit où la lire.
+  return reservations.filter((reservation) => reservation.status === "approved");
 }
 
 /**
@@ -152,10 +178,7 @@ async function overdueVehicleReturnsFor(ctx: QueryCtx | MutationCtx, clerkId: st
   const now = Date.now();
   return [...byId.values()].filter(
     (reservation) =>
-      reservation.status === "approved" &&
-      !reservation.feedbackSubmittedAt &&
-      reservation.end < now &&
-      reservation.end >= MANDATORY_RETURN_SINCE,
+      reservation.status === "approved" && isVehicleReturnOverdue(reservation, now),
   );
 }
 
@@ -498,15 +521,7 @@ async function isVehicleFree(
     if (await vehicleBusyReason(ctx, vehicleId, cursor, { ignoreReservations: true })) return false;
   }
   const approved = await approvedReservationsForVehicle(ctx, vehicleId);
-  const now = Date.now();
-  if (
-    approved.some((reservation) =>
-      overlaps(reservation.start, vehicleReservationBusyEnd(reservation, now), start, end),
-    )
-  ) {
-    return false;
-  }
-  return true;
+  return conflictingVehicleReservation(approved, start, end, Date.now()) === undefined;
 }
 
 export const availableRooms = query({
@@ -583,16 +598,7 @@ export const listVehiclesForSlot = query({
       withPhotos.map(async (vehicle) => {
         const approved = await approvedReservationsForVehicle(ctx, vehicle._id);
         const nowMs = Date.now();
-        const conflict = approved
-          .filter((reservation) =>
-            overlaps(
-              reservation.start,
-              vehicleReservationBusyEnd(reservation, nowMs),
-              args.start,
-              args.end,
-            ),
-          )
-          .sort((a, b) => a.start - b.start)[0];
+        const conflict = conflictingVehicleReservation(approved, args.start, args.end, nowMs);
         let unavailableReason: string | null = null;
         if (!conflict && !(await isVehicleFree(ctx, vehicle._id, args.start, args.end))) {
           unavailableReason = "Indisponible sur ce créneau";
@@ -604,7 +610,7 @@ export const listVehiclesForSlot = query({
                 userName: conflict.userName,
                 start: conflict.start,
                 end: conflict.end,
-                returnRequired: conflict.end < nowMs && !conflict.feedbackSubmittedAt,
+                returnRequired: isVehicleReturnOverdue(conflict, nowMs),
               }
             : null,
           unavailableReason,
@@ -1244,14 +1250,6 @@ export const requestVehicle = mutation({
 
     await ensureVehicleAvailable(ctx, args.vehicleId, args.start, args.end);
 
-    const approvedReservations = await approvedReservationsForVehicle(ctx, args.vehicleId);
-    const conflict = approvedReservations.find((reservation) =>
-      overlaps(reservation.start, reservation.end, args.start, args.end),
-    );
-    if (conflict) {
-      throw new Error("Ce véhicule est déjà réservé sur ce créneau.");
-    }
-
     const target = await resolveReservationTarget(ctx, identity, args.forClerkId, args.forName);
     const willTransport = args.willTransport ?? false;
     const transportDetails = willTransport
@@ -1377,14 +1375,15 @@ async function applyVehicleReservationDecision(
   }
 
   if (args.decision === "approved") {
-    await ensureVehicleAvailable(ctx, reservation.vehicleId, reservation.start, reservation.end);
-    const approvedReservations = await approvedReservationsForVehicle(ctx, reservation.vehicleId);
-    const conflict = approvedReservations.find(
-      (item) =>
-        item._id !== reservation._id &&
-        overlaps(item.start, item.end, reservation.start, reservation.end),
+    // La réservation elle-même est exclue du contrôle : une demande déjà
+    // approuvée puis re-décidée ne doit pas entrer en conflit avec elle-même.
+    await ensureVehicleAvailable(
+      ctx,
+      reservation.vehicleId,
+      reservation.start,
+      reservation.end,
+      reservation._id,
     );
-    if (conflict) throw new Error("Le véhicule est déjà réservé sur ce créneau.");
   }
 
   await ctx.db.patch(args.reservationId, {

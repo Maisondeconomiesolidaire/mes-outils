@@ -651,34 +651,6 @@ export async function fetchInternalClerkDirectory(
 }
 
 /**
- * Fin effective d'une réservation de véhicule, pour tout calcul de
- * disponibilité.
- *
- * Un retour renseigné en avance libère immédiatement le véhicule. Sans retour,
- * le créneau prévu reste la limite d'occupation : l'absence de formulaire de
- * retour déclenche une relance, mais ne doit pas immobiliser toute la flotte
- * après l'heure de fin annoncée.
- *
- * Règle unique pour les 7 apps : Mes Outils, recycapp et cycleenbray planifient
- * les mêmes véhicules physiques.
- */
-export function vehicleReservationBusyEnd(
-  reservation: { start: number; end: number; feedbackSubmittedAt?: number },
-  _now: number,
-) {
-  if (typeof reservation.feedbackSubmittedAt === "number") {
-    // Un retour peut être saisi après coup. Il libère donc plus tôt quand il
-    // est fait avant la fin prévue, mais ne doit jamais rallonger le créneau
-    // au-delà de son heure de fin (ex. fin à 11 h, formulaire envoyé à 14 h).
-    return Math.min(
-      reservation.end,
-      Math.max(reservation.start, reservation.feedbackSubmittedAt),
-    );
-  }
-  return reservation.end;
-}
-
-/**
  * Entrée en vigueur du retour obligatoire.
  *
  * Les réservations terminées avant cette date n'ont jamais eu de retour à
@@ -688,3 +660,56 @@ export function vehicleReservationBusyEnd(
  * ne vaut donc que pour les emprunts qui se terminent après sa mise en service.
  */
 export const MANDATORY_RETURN_SINCE = Date.parse("2026-07-20T00:00:00.000Z");
+
+/**
+ * Fin effective d'une réservation de véhicule, pour tout calcul de
+ * disponibilité. Trois cas, dans cet ordre :
+ *
+ * 1. **Retour enregistré** → le véhicule est physiquement revenu : il est libre
+ *    à partir de l'heure du retour. Le retour peut être saisi après coup, donc
+ *    on ne rallonge jamais au-delà de la fin prévue (fin à 11 h, formulaire
+ *    envoyé à 14 h ⇒ libre depuis 11 h).
+ * 2. **Créneau terminé sans retour** → la personne a toujours le véhicule :
+ *    l'occupation devient **ouverte** (`Infinity`) et le véhicule n'est
+ *    réservable par personne, à aucune date, tant que le retour n'est pas
+ *    enregistré (par l'emprunteur ou manuellement par un gestionnaire).
+ * 3. **Créneau en cours ou à venir** → la fin prévue fait foi ; on peut
+ *    réserver après, comme n'importe quelle réservation planifiée.
+ *
+ * Le cas 2 ne vaut que pour les emprunts soumis au retour obligatoire
+ * (cf. `MANDATORY_RETURN_SINCE`) : sans ce garde-fou, de vieilles réservations
+ * d'avant la règle immobiliseraient définitivement la flotte.
+ *
+ * ⚠️ Peut renvoyer `Infinity` : réservé aux comparaisons de chevauchement,
+ * jamais à stocker ni à renvoyer tel quel à un frontend.
+ *
+ * Règle unique pour les 7 apps : Mes Outils, recycapp et cycleenbray planifient
+ * les mêmes véhicules physiques.
+ */
+export function vehicleReservationBusyEnd(
+  reservation: { start: number; end: number; feedbackSubmittedAt?: number },
+  now: number,
+) {
+  if (typeof reservation.feedbackSubmittedAt === "number") {
+    return Math.min(
+      reservation.end,
+      Math.max(reservation.start, reservation.feedbackSubmittedAt),
+    );
+  }
+  if (reservation.end <= now && reservation.end >= MANDATORY_RETURN_SINCE) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return reservation.end;
+}
+
+/** Réservation terminée dont le retour manque encore : véhicule non rendu. */
+export function isVehicleReturnOverdue(
+  reservation: { end: number; feedbackSubmittedAt?: number },
+  now: number,
+) {
+  return (
+    reservation.feedbackSubmittedAt === undefined &&
+    reservation.end <= now &&
+    reservation.end >= MANDATORY_RETURN_SINCE
+  );
+}

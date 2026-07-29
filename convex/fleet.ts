@@ -2,7 +2,12 @@ import { mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
-import { requireAnyCrmPermission, requireCrmPermission, vehicleReservationBusyEnd } from "./lib";
+import {
+  isVehicleReturnOverdue,
+  requireAnyCrmPermission,
+  requireCrmPermission,
+  vehicleReservationBusyEnd,
+} from "./lib";
 
 const vehicleKind = v.union(
   v.literal("utilitaire"),
@@ -77,7 +82,7 @@ export async function vehicleBusyReason(
       // immédiatement le véhicule pour toutes les vues de disponibilité.
       if (reservation.status !== "approved" || reservation.feedbackSubmittedAt) continue;
       if (overlapsUtcDay(reservation.start, vehicleReservationBusyEnd(reservation, now), date)) {
-        return reservation.end < now
+        return isVehicleReturnOverdue(reservation, now)
           ? "Non rendu (retour non effectué)"
           : "Réservé via Mes Outils";
       }
