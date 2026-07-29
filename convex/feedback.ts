@@ -105,7 +105,8 @@ export const pendingCount = query({
 /** Dépôt d'un retour — réservé aux comptes ayant `feedback:retours`. */
 export const submit = mutation({
   args: {
-    app: feedbackApp,
+    /** Absente pour un retour « nouvelle application » : cf. schema.ts. */
+    app: v.optional(feedbackApp),
     type: feedbackType,
     description: v.string(),
     attachments: v.optional(v.array(v.id("_storage"))),
@@ -118,6 +119,11 @@ export const submit = mutation({
     if (description.length === 0) {
       throw new Error("La description est obligatoire.");
     }
+    // Tous les autres types visent une app existante : sans elle, le retour
+    // n'est rattachable à rien dans le kanban.
+    if (args.type !== "nouvelle_application" && args.app === undefined) {
+      throw new Error("L'application concernée est obligatoire.");
+    }
 
     const email = normalizeEmail(identity.email);
     if (email === "") {
@@ -126,7 +132,7 @@ export const submit = mutation({
 
     const now = Date.now();
     const feedbackId = await ctx.db.insert("feedback", {
-      app: args.app,
+      app: args.type === "nouvelle_application" ? undefined : args.app,
       type: args.type,
       description,
       attachments: args.attachments?.slice(0, 8),
@@ -146,7 +152,7 @@ export const submit = mutation({
     });
 
     await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendFeedbackCreatedEmail, {
-      app: args.app,
+      app: args.type === "nouvelle_application" ? undefined : args.app,
       feedbackType: args.type,
       description,
       authorName: feedbackDisplayName(identity),
