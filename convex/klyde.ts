@@ -966,6 +966,7 @@ ${extraDetails?.trim() ? `Contexte fourni par l'utilisateur: ${extraDetails.trim
       model: "gpt-4o",
       temperature: 0.35,
       max_tokens: 1200,
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "user",
