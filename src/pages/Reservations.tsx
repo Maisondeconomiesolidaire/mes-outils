@@ -4,7 +4,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Boxes, CalendarCheck, CarFront, Clock, DoorOpen, MapPin, MessagesSquare, Search, Users } from "lucide-react";
+import { Boxes, CalendarCheck, CarFront, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -21,6 +21,7 @@ import { formatDateTime } from "../lib/format";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { confirmPermanentDelete, alertDialog } from "../lib/confirm";
+import { useUpload } from "../lib/useUpload";
 import { BookEquipment } from "./Equipements";
 
 const ROOM_USAGES = [
@@ -34,6 +35,10 @@ const ROOM_USAGES = [
   "Travail",
   "Autre",
 ] as const;
+
+/** Pièces jointes d'un retour véhicule : quelques photos ou une courte vidéo. */
+const MAX_FEEDBACK_MEDIA = 6;
+const MAX_FEEDBACK_MEDIA_BYTES = 50 * 1024 * 1024;
 
 const FULL_DAY_START_TIME = "08:00";
 const FULL_DAY_END_TIME = "18:00";
@@ -738,6 +743,12 @@ function MyReservations() {
   };
   const [feedbackForm, setFeedbackForm] = useState(emptyFeedback);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const upload = useUpload();
+  // Pièces jointes du retour véhicule : sélectionnées localement (aperçu
+  // immédiat), envoyées au stockage seulement à la validation du formulaire.
+  const [feedbackMedia, setFeedbackMedia] = useState<
+    Array<{ id: string; file: File; previewUrl: string; isVideo: boolean }>
+  >([]);
   const feedbackMileageValue = Number(feedbackForm.mileage);
   const minMileageError =
     feedbackTarget?.kind === "vehicle" &&
@@ -781,9 +792,59 @@ function MyReservations() {
     }
   }
 
+  function clearFeedbackMedia() {
+    setFeedbackMedia((current) => {
+      current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      return [];
+    });
+  }
+
+  function closeFeedback() {
+    setFeedbackTarget(null);
+    clearFeedbackMedia();
+  }
+
   function openFeedback(reservation: MyReservation) {
     setFeedbackTarget(reservation);
     setFeedbackForm(emptyFeedback);
+    clearFeedbackMedia();
+  }
+
+  function addFeedbackMedia(files: FileList | null) {
+    if (!files?.length) return;
+    const accepted: typeof feedbackMedia = [];
+    let rejectedSize = false;
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_FEEDBACK_MEDIA_BYTES) {
+        rejectedSize = true;
+        continue;
+      }
+      accepted.push({
+        id: `${file.name}-${file.lastModified}-${file.size}-${accepted.length}`,
+        file,
+        previewUrl: URL.createObjectURL(file),
+        isVideo: file.type.startsWith("video/"),
+      });
+    }
+    setFeedbackMedia((current) => {
+      const room = Math.max(0, MAX_FEEDBACK_MEDIA - current.length);
+      const kept = accepted.slice(0, room);
+      accepted.slice(room).forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      if (accepted.length > room) {
+        void alertDialog(`Vous pouvez joindre au maximum ${MAX_FEEDBACK_MEDIA} fichiers.`);
+      }
+      return [...current, ...kept];
+    });
+    if (rejectedSize) {
+      void alertDialog("Chaque fichier doit peser moins de 50 Mo. Filmez une courte séquence.");
+    }
+  }
+
+  function removeFeedbackMedia(id: string) {
+    setFeedbackMedia((current) => {
+      current.filter((item) => item.id === id).forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      return current.filter((item) => item.id !== id);
+    });
   }
 
   async function submitFeedback() {
@@ -801,6 +862,13 @@ function MyReservations() {
           setFeedbackSubmitting(false);
           return;
         }
+        const media = await Promise.all(
+          feedbackMedia.map(async (item) => ({
+            storageId: await upload(item.file),
+            contentType: item.file.type || undefined,
+            name: item.file.name || undefined,
+          })),
+        );
         await submitVehicleFeedback({
           reservationId: feedbackTarget._id as Id<"vehicleReservations">,
           mileage,
@@ -809,6 +877,7 @@ function MyReservations() {
           vehicleClean: feedbackForm.vehicleClean,
           issues: feedbackForm.issues.trim() || undefined,
           notes: feedbackForm.notes.trim() || undefined,
+          media: media.length ? media : undefined,
         });
       } else {
         await submitRoomFeedback({
@@ -819,7 +888,7 @@ function MyReservations() {
           notes: feedbackForm.notes.trim() || undefined,
         });
       }
-      setFeedbackTarget(null);
+      closeFeedback();
     } catch (error) {
       void alertDialog(error instanceof Error ? error.message : "Impossible d'envoyer le retour.");
     } finally {
@@ -906,7 +975,7 @@ function MyReservations() {
       )}
       <Modal
         open={Boolean(feedbackTarget)}
-        onClose={() => (feedbackSubmitting ? undefined : setFeedbackTarget(null))}
+        onClose={() => (feedbackSubmitting ? undefined : closeFeedback())}
         title={feedbackTarget?.kind === "room" ? "Retour salle" : "Retour véhicule"}
       >
         {feedbackTarget ? (
@@ -984,8 +1053,65 @@ function MyReservations() {
                 placeholder="Informations utiles pour le prochain utilisateur ou les responsables..."
               />
             </Field>
+            {feedbackTarget.kind === "vehicle" ? (
+              <Field label="Photos ou vidéos (facultatif)">
+                <div className="space-y-3">
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    Illustrez un problème constaté (rayure, voyant allumé, bruit filmé…). {MAX_FEEDBACK_MEDIA} fichiers
+                    maximum, 50 Mo par fichier.
+                  </p>
+                  {feedbackMedia.length ? (
+                    <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+                      {feedbackMedia.map((item) => (
+                        <div
+                          key={item.id}
+                          className="group relative aspect-square overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--accent)]"
+                        >
+                          {item.isVideo ? (
+                            <video src={item.previewUrl} className="h-full w-full object-cover" muted playsInline />
+                          ) : (
+                            <img src={item.previewUrl} alt="" className="h-full w-full object-cover" />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => removeFeedbackMedia(item.id)}
+                            disabled={feedbackSubmitting}
+                            aria-label="Retirer ce fichier"
+                            className="absolute right-1 top-1 rounded-full bg-black/60 p-1 text-white transition hover:bg-black/80 disabled:opacity-50"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                          {item.isVideo ? (
+                            <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                              Vidéo
+                            </span>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {feedbackMedia.length < MAX_FEEDBACK_MEDIA ? (
+                    <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-[var(--border)] px-3 py-2 text-sm font-semibold text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]">
+                      <ImagePlus className="h-4 w-4" />
+                      Ajouter une photo ou une vidéo
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        multiple
+                        className="hidden"
+                        disabled={feedbackSubmitting}
+                        onChange={(event) => {
+                          addFeedbackMedia(event.target.files);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+              </Field>
+            ) : null}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button variant="ghost" onClick={() => setFeedbackTarget(null)} disabled={feedbackSubmitting}>
+              <Button variant="ghost" onClick={() => closeFeedback()} disabled={feedbackSubmitting}>
                 Annuler
               </Button>
               <Button onClick={() => void submitFeedback()} disabled={feedbackSubmitting}>

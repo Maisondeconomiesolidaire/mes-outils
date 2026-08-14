@@ -1208,6 +1208,16 @@ export default defineSchema(
     feedbackVehicleClean: v.optional(v.boolean()),
     feedbackIssues: v.optional(v.string()),
     feedbackNotes: v.optional(v.string()),
+    /** Photos / vidéos jointes au retour pour illustrer un problème constaté. */
+    feedbackMedia: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          contentType: v.optional(v.string()),
+          name: v.optional(v.string()),
+        }),
+      ),
+    ),
     createdAt: v.number(),
   })
     .index("by_vehicleId", ["vehicleId"])

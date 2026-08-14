@@ -26,6 +26,8 @@ type Remark = {
   tidy?: boolean;
   issues?: string;
   notes?: string;
+  /** Photos / vidéos jointes par l'utilisateur pour illustrer un problème. */
+  media?: Array<{ url: string; contentType?: string; name?: string }>;
 };
 
 type VehicleAnalysis = {
@@ -292,6 +294,40 @@ export function ReservationRemarks({
                 Commentaire
               </p>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{remark.notes}</p>
+            </div>
+          ) : null}
+          {remark.media?.length ? (
+            <div className="mt-4">
+              <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">
+                Photos / vidéos
+              </p>
+              <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                {remark.media.map((item) =>
+                  item.contentType?.startsWith("video/") ? (
+                    <video
+                      key={item.url}
+                      src={item.url}
+                      controls
+                      playsInline
+                      className="aspect-square w-full rounded-xl border border-[var(--border)] bg-black object-cover"
+                    />
+                  ) : (
+                    <a
+                      key={item.url}
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block aspect-square overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--accent)]"
+                    >
+                      <img
+                        src={item.url}
+                        alt={item.name ?? ""}
+                        className="h-full w-full object-cover transition hover:opacity-80"
+                      />
+                    </a>
+                  ),
+                )}
+              </div>
             </div>
           ) : null}
         </div>

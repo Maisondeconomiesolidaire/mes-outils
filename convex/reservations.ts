@@ -806,6 +806,16 @@ export const submitVehicleFeedback = mutation({
     vehicleClean: v.boolean(),
     issues: v.optional(v.string()),
     notes: v.optional(v.string()),
+    /** Photos / vidéos déjà envoyées via `files.generateUploadUrl`. */
+    media: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          contentType: v.optional(v.string()),
+          name: v.optional(v.string()),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
@@ -847,6 +857,9 @@ export const submitVehicleFeedback = mutation({
       feedbackVehicleClean: args.vehicleClean,
       feedbackIssues: args.issues?.trim() || undefined,
       feedbackNotes: args.notes?.trim() || undefined,
+      // Au plus 6 pièces jointes : de quoi illustrer un problème sans
+      // transformer le retour en album photo.
+      feedbackMedia: args.media?.length ? args.media.slice(0, 6) : undefined,
     });
     await awardEngagementPoints(ctx, {
       clerkId: identity.subject,
@@ -1101,6 +1114,14 @@ export const listVehicleRemarks = query({
             vehicleClean: r.feedbackVehicleClean,
             issues: r.feedbackIssues,
             notes: r.feedbackNotes,
+            media: (
+              await Promise.all(
+                (r.feedbackMedia ?? []).map(async (item) => {
+                  const url = await ctx.storage.getUrl(item.storageId);
+                  return url ? { url, contentType: item.contentType, name: item.name } : null;
+                }),
+              )
+            ).flatMap((item) => (item ? [item] : [])),
           };
         }),
     );
