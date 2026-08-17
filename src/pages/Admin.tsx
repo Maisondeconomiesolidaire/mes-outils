@@ -888,9 +888,133 @@ function AppBlock({
   );
 }
 
+/** Logo de chaque app (Mes Outils et Feedback n'ont pas d'entrée dans `APPS`). */
+const APP_LOGOS: Record<string, string | undefined> = {
+  mesoutils: "/mesoutils-light.png",
+  recycapp: "/recyclerie-logo.png",
+  klyde: "/klyd-logo.png",
+  cycleenbray: "/cycle-en-bray-logo.webp",
+  bennespro: "/bennespro-logo.png",
+  pointeuse: "/logo-lsdb.png",
+  feedback: undefined,
+};
+
+/** Page (droit) → application, pour rattacher un droit à son app. */
+const APP_BY_PAGE_KEY = new Map(ALL_PERMISSION_PAGES.map((page) => [page.key, page.app]));
+
+/** Grande valeur mise en avant en tête du tableau de bord. */
+function KpiTile({ label, value, detail }: { label: string; value: string; detail?: string }) {
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <p className="text-xs font-medium uppercase tracking-wide text-[var(--muted-foreground)]">{label}</p>
+      <p className="mt-2 text-3xl font-bold tracking-tight text-[var(--foreground)]">{value}</p>
+      {detail ? <p className="mt-1 text-xs text-[var(--muted-foreground)]">{detail}</p> : null}
+    </div>
+  );
+}
+
+type AppAudience = {
+  key: string;
+  label: string;
+  clients: number;
+  staff: number;
+  admins: number;
+  pagesGranted: number;
+  record: { label: string; count: number } | null;
+};
+
+/** Carte « Recyclerie : X clients, X staff » d'une application. */
+function AudienceCard({ app }: { app: AppAudience }) {
+  const logo = APP_LOGOS[app.key];
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+      <div className="flex items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--border)] bg-white">
+          {logo ? (
+            <img src={logo} alt="" className="h-7 w-7 object-contain" />
+          ) : (
+            <Layers className="h-5 w-5 text-[var(--muted-foreground)]" />
+          )}
+        </span>
+        <h3 className="text-base font-semibold leading-tight text-[var(--foreground)]">{app.label}</h3>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2 text-center">
+        {[
+          { label: "Clients", value: app.clients },
+          { label: "Staff", value: app.staff },
+          { label: "Admins", value: app.admins },
+        ].map((cell) => (
+          <div key={cell.label} className="rounded-xl bg-[var(--accent)] px-2 py-2.5">
+            <p className="text-xl font-bold tabular-nums text-[var(--foreground)]">{num(cell.value)}</p>
+            <p className="text-[11px] font-medium text-[var(--muted-foreground)]">{cell.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <dl className="mt-3 space-y-1.5 text-xs">
+        {app.record ? (
+          <div className="flex items-baseline justify-between gap-3">
+            <dt className="text-[var(--muted-foreground)]">{app.record.label}</dt>
+            <dd className="font-semibold tabular-nums text-[var(--foreground)]">{num(app.record.count)}</dd>
+          </div>
+        ) : null}
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-[var(--muted-foreground)]">Droits ouverts</dt>
+          <dd className="font-semibold tabular-nums text-[var(--foreground)]">
+            {num(app.pagesGranted)} page{app.pagesGranted > 1 ? "s" : ""}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 function GlobalDashboard() {
   const stats = useQuery(api.dashboard.globalStats);
-  if (stats === undefined) return <FullSpinner label="Chargement du tableau de bord..." />;
+  const audience = useQuery(api.dashboard.appAudience);
+  const permissionsData = useQuery(api.permissions.listManaged);
+
+  /**
+   * Staff et admins par app, déduits des droits : une personne compte pour une
+   * app dès qu'un de ses droits porte sur une page de cette app. Les admins ont
+   * accès à tout, donc ils comptent pour chaque app.
+   */
+  const apps = useMemo<AppAudience[] | undefined>(() => {
+    if (!audience || !permissionsData) return undefined;
+    const active = permissionsData.people.filter((person) => person.permissionActive !== false);
+    const admins = active.filter((person) => person.role === "admin").length;
+
+    return groupPagesByApp().map((group) => {
+      let staff = 0;
+      let pagesGranted = 0;
+      for (const person of active) {
+        if (person.role === "admin") continue;
+        const granted = person.grants.filter(
+          (grant) =>
+            grant.actions.length > 0 && APP_BY_PAGE_KEY.get(grant.pageKey) === group.key,
+        );
+        if (granted.length > 0) {
+          staff += 1;
+          pagesGranted += granted.length;
+        }
+      }
+      const records = audience.records as Record<string, { label: string; count: number }>;
+      return {
+        key: group.key,
+        label: group.label,
+        clients: audience.clientsByApp[group.key] ?? 0,
+        staff,
+        admins,
+        pagesGranted,
+        record: records[group.key] ?? null,
+      };
+    });
+  }, [audience, permissionsData]);
+
+  if (stats === undefined || audience === undefined || apps === undefined) {
+    return <FullSpinner label="Chargement du tableau de bord..." />;
+  }
 
   const shares = [
     { key: "recyclerie", label: "Recyclerie", revenue: stats.recyclerie.revenue, tint: "bg-brand-500" },
@@ -901,6 +1025,52 @@ function GlobalDashboard() {
 
   return (
     <div className="space-y-9">
+      {/* Indicateurs de tête : comptes, internes, activité récente, CA. */}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiTile
+          label="Chiffre d'affaires"
+          value={eur(stats.totalRevenue)}
+          detail="Recyclerie + Klyd + Cycle en Bray"
+        />
+        <KpiTile
+          label="Comptes clients"
+          value={num(audience.accounts.clients)}
+          detail={`${num(audience.accounts.newClientsLast30Days)} inscrits sur 30 jours`}
+        />
+        <KpiTile
+          label="Comptes internes"
+          value={num(audience.accounts.internal)}
+          detail="Adresses @eco-solidaire.fr"
+        />
+        <KpiTile
+          label="Salariés suivis"
+          value={num(audience.workforce.hrEmployees)}
+          detail={`${num(audience.workforce.ptEmployees)} fiches côté Pointeuse`}
+        />
+      </div>
+
+      {/* Clients et équipe par application. */}
+      <div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h3 className="text-lg font-semibold text-[var(--foreground)]">Clients et équipe par application</h3>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Un client est rattaché à l'application depuis laquelle il s'est inscrit.
+          </p>
+        </div>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {apps.map((app) => (
+            <AudienceCard key={app.key} app={app} />
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-[var(--muted-foreground)]">
+          Les admins ont accès à toutes les applications : le même effectif est
+          compté dans chaque carte.
+          {audience.accounts.unknownOrigin > 0
+            ? ` ${num(audience.accounts.unknownOrigin)} compte${audience.accounts.unknownOrigin > 1 ? "s" : ""} client${audience.accounts.unknownOrigin > 1 ? "s" : ""} sans origine connue (inscription antérieure au suivi) ne sont rattachés à aucune application.`
+            : ""}
+        </p>
+      </div>
+
       {/* Chiffre d'affaires total + répartition par application. */}
       <div>
         <p className="text-sm font-medium text-[var(--muted-foreground)]">Chiffre d'affaires total · toutes applications</p>

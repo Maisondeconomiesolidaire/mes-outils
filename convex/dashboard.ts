@@ -86,6 +86,105 @@ export const stats = query({
   },
 });
 
+/** Un compte @eco-solidaire.fr = membre interne, sinon client. */
+function isInternalEmail(email: string) {
+  return email.trim().toLowerCase().endsWith("@eco-solidaire.fr");
+}
+
+/**
+ * Audience par application pour la page admin : d'où viennent les comptes
+ * utilisateurs, et combien de fiches « client » chaque app gère en propre.
+ *
+ * Les comptes sont partagés par les 7 apps (une seule instance Clerk) : ce qui
+ * distingue un « client Recyclerie » d'un « client Klyd », c'est l'app depuis
+ * laquelle il s'est inscrit (`signupApp`). Les comptes internes
+ * (@eco-solidaire.fr) sont comptés à part pour ne pas les mélanger aux clients.
+ *
+ * Le décompte du staff n'est pas ici : il se déduit des droits `crmPermissions`
+ * côté page admin, qui possède déjà le catalogue des pages par app.
+ */
+export const appAudience = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+
+    const [
+      users,
+      crmCustomers,
+      cycleCustomers,
+      klydeOrders,
+      bpCompanies,
+      ptClients,
+      ptEmployees,
+      hrEmployees,
+      feedbackEntries,
+    ] = await Promise.all([
+      ctx.db.query("users").collect(),
+      ctx.db.query("crmCustomers").collect(),
+      ctx.db.query("cycleCustomers").collect(),
+      ctx.db.query("klydeOrders").collect(),
+      ctx.db.query("bpCompanies").collect(),
+      ctx.db.query("ptClients").collect(),
+      ctx.db.query("ptEmployees").collect(),
+      ctx.db.query("hrEmployees").collect(),
+      ctx.db.query("feedback").collect(),
+    ]);
+
+    // Comptes clients (externes) par app d'inscription ; `inconnu` = comptes
+    // créés avant la traçabilité de l'origine.
+    const clientsByApp: Record<string, number> = {};
+    let internalAccounts = 0;
+    let clientAccounts = 0;
+    let unknownOrigin = 0;
+    const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    let newClientsLast30Days = 0;
+
+    for (const user of users) {
+      if (isInternalEmail(user.email)) {
+        internalAccounts += 1;
+        continue;
+      }
+      clientAccounts += 1;
+      if (user.createdAt >= thirtyDaysAgo) newClientsLast30Days += 1;
+      if (user.signupApp) {
+        clientsByApp[user.signupApp] = (clientsByApp[user.signupApp] ?? 0) + 1;
+      } else {
+        unknownOrigin += 1;
+      }
+    }
+
+    const klydeBuyers = new Set(
+      klydeOrders.map((order) => order.clerkId).filter(Boolean),
+    ).size;
+
+    return {
+      accounts: {
+        total: users.length,
+        clients: clientAccounts,
+        internal: internalAccounts,
+        unknownOrigin,
+        newClientsLast30Days,
+      },
+      clientsByApp,
+      /** Fiches gérées en propre par chaque app (≠ comptes utilisateurs). */
+      records: {
+        recycapp: { label: "Fiches clients CRM", count: crmCustomers.length },
+        cycleenbray: { label: "Fiches clients", count: cycleCustomers.length },
+        klyde: { label: "Acheteurs distincts", count: klydeBuyers },
+        bennespro: { label: "Entreprises clientes", count: bpCompanies.length },
+        pointeuse: { label: "Clients chantiers", count: ptClients.length },
+        mesoutils: { label: "Salariés suivis (RH)", count: hrEmployees.length },
+        feedback: { label: "Retours reçus", count: feedbackEntries.length },
+      },
+      /** Effectifs internes suivis, utiles pour situer les chiffres ci-dessus. */
+      workforce: {
+        hrEmployees: hrEmployees.length,
+        ptEmployees: ptEmployees.length,
+      },
+    };
+  },
+});
+
 /**
  * Vue « maison mère » : agrégat du chiffre d'affaires et de l'activité de
  * toutes les applications (Recyclerie, Klyde, Cycle en Bray). Réservé aux
