@@ -7,23 +7,25 @@ import type { Doc, Id } from "./_generated/dataModel";
  * Prévenance de fin de contrat (cron quotidien).
  *
  * On regarde, pour chaque salarié actif, la date de fin de son DERNIER contrat
- * généré, et on prévient les responsables RH de sa structure 22 jours avant
- * l'échéance (délai de prévenance interne).
+ * généré, et on prévient les responsables RH de sa structure à J-22, J-15 et
+ * J-3 de l'échéance.
  *
  * Deux écarts volontaires avec le script Airtable d'origine, qui comparait
  * l'égalité stricte « aujourd'hui === fin - 22 jours » :
  *
- * 1. On envoie dès qu'il reste 22 jours **ou moins** (et que l'échéance n'est
- *    pas passée). Avec l'égalité stricte, un cron en échec ce jour-là faisait
- *    perdre la prévenance pour de bon — pour une échéance de contrat, mieux
- *    vaut prévenir en retard que pas du tout.
- * 2. Un envoi est horodaté sur la ligne de contrat (`endNoticeSentAt`), donc
- *    un salarié n'est prévenu qu'une fois par contrat, même si le cron repasse
- *    chaque jour pendant les 22 jours.
+ * 1. Un palier est déclenché dès qu'il reste ce nombre de jours **ou moins**
+ *    (et que l'échéance n'est pas passée). Avec l'égalité stricte, un cron en
+ *    échec ce jour-là faisait perdre la prévenance pour de bon — pour une
+ *    échéance de contrat, mieux vaut prévenir en retard que pas du tout.
+ * 2. Les paliers déjà envoyés sont mémorisés sur la ligne de contrat
+ *    (`endNoticeSentThresholds`) : un seul email par palier, même si le cron
+ *    repasse tous les jours. Un palier sauté (cron en panne plusieurs jours)
+ *    est absorbé par le palier suivant plutôt que de générer deux emails le
+ *    même jour.
  */
 
-/** Délai de prévenance, en jours avant la fin du contrat. */
-const NOTICE_DAYS = 22;
+/** Paliers de prévenance, en jours avant la fin du contrat (du plus lointain au plus proche). */
+const NOTICE_THRESHOLDS = [22, 15, 3];
 
 /**
  * Responsables prévenus, par structure du salarié.
@@ -90,6 +92,9 @@ function formatDateFr(dateStr: string): string {
 type PendingNotice = {
   contractId: Id<"hrContracts">;
   recipients: string[];
+  /** Palier déclenché (22, 15 ou 3) et paliers à marquer comme couverts. */
+  threshold: number;
+  coveredThresholds: number[];
   employeeName: string;
   structureLabel: string;
   contractType: string;
@@ -124,14 +129,22 @@ export const listContractsNeedingEndNotice = internalQuery({
         .filter((q) => q.eq(q.field("webhookStatus"), "success"))
         .first();
 
-      if (!lastContract || lastContract.endNoticeSentAt) continue;
+      if (!lastContract) continue;
       if (OPEN_ENDED_CONTRACT_TYPES.has(lastContract.payload.type_contrat)) continue;
 
       const dateFin = normalizeDate(lastContract.payload.date_fin_contrat);
       if (!dateFin) continue;
 
       const daysLeft = daysUntil(dateFin, today);
-      if (daysLeft === null || daysLeft < 0 || daysLeft > NOTICE_DAYS) continue;
+      if (daysLeft === null || daysLeft < 0) continue;
+
+      // Paliers atteints aujourd'hui, dont ceux qu'un cron en panne aurait sautés.
+      const reached = NOTICE_THRESHOLDS.filter((threshold) => daysLeft <= threshold);
+      if (reached.length === 0) continue;
+
+      const alreadySent = lastContract.endNoticeSentThresholds ?? [];
+      const pending = reached.filter((threshold) => !alreadySent.includes(threshold));
+      if (pending.length === 0) continue;
 
       const recipients = RECIPIENTS_BY_STRUCTURE[employee.structure] ?? [];
       if (recipients.length === 0) continue;
@@ -139,6 +152,9 @@ export const listContractsNeedingEndNotice = internalQuery({
       notices.push({
         contractId: lastContract._id,
         recipients,
+        // Le palier le plus urgent atteint : c'est lui qui décrit la situation.
+        threshold: Math.min(...pending),
+        coveredThresholds: reached,
         employeeName: employee.fullName,
         structureLabel: employee.structure,
         contractType: lastContract.payload.type_contrat,
@@ -157,9 +173,17 @@ export const listContractsNeedingEndNotice = internalQuery({
 });
 
 export const markEndNoticeSent = internalMutation({
-  args: { contractId: v.id("hrContracts") },
+  args: { contractId: v.id("hrContracts"), thresholds: v.array(v.number()) },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.contractId, { endNoticeSentAt: Date.now() });
+    const contract = await ctx.db.get(args.contractId);
+    if (!contract) return;
+    const merged = Array.from(
+      new Set([...(contract.endNoticeSentThresholds ?? []), ...args.thresholds]),
+    ).sort((a, b) => b - a);
+    await ctx.db.patch(args.contractId, {
+      endNoticeSentAt: Date.now(),
+      endNoticeSentThresholds: merged,
+    });
   },
 });
 
@@ -189,10 +213,12 @@ export const sendContractEndNotices = internalAction({
           dateFin: notice.dateFin,
           dateFinLabel: notice.dateFinLabel,
           daysLeft: notice.daysLeft,
+          threshold: notice.threshold,
         });
         // Marqué seulement après un envoi réussi : un échec sera retenté demain.
         await ctx.runMutation(internal.hrContractNotices.markEndNoticeSent, {
           contractId: notice.contractId,
+          thresholds: notice.coveredThresholds,
         });
         sent += 1;
       } catch (error) {

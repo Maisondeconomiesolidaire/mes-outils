@@ -23,8 +23,8 @@ crons.hourly(
   internal.reservations.requestRoomFeedbackForPastReservations,
 );
 
-// Prévenance de fin de contrat RH : 22 jours avant l'échéance du dernier
-// contrat du salarié, aux responsables de sa structure.
+// Prévenance de fin de contrat RH : à J-22, J-15 et J-3 de l'échéance du
+// dernier contrat du salarié, aux responsables de sa structure.
 crons.daily(
   "prevenance fin de contrat rh",
   { hourUTC: 5, minuteUTC: 30 },
