@@ -40,7 +40,15 @@ type RemarkSnapshot = {
   latestFeedbackAt?: number;
 };
 
-const MECHANICAL_REMARK_PATTERN = /\b(m[eé]can|bruit|vibrat|roulement|pneu|crevaison|frein|direction|suspension|amortiss|rotule|biellette|triangle|cardan|embrayage|bo[iî]te|moteur|batterie|alternateur|d[eé]marr|voyant|phare|clignot|[eé]clairage|essuie|ventilat|chauffage|clim|d[eé]sembu|fum[eé]e|fuite|huile|liquide|radiateur|temp[eé]rature|surchauff|[eé]lectr|panne|ne fonctionne|ne marche|d[eé]faill|s[eé]curit[eé]|ceinture|airbag|pare-brise)\b/i;
+/**
+ * Radicaux techniques déclenchant l'analyse.
+ *
+ * Pas de `\b` final : ce sont des RADICAUX, pas des mots entiers. Avec la borne
+ * de fin, « Revoir les freins » ne déclenchait rien (le `s` de « freins » cassait
+ * la limite de mot) alors que « frein » au singulier passait — d'où des
+ * véhicules absents de l'analyse malgré une remarque explicite.
+ */
+const MECHANICAL_REMARK_PATTERN = /\b(m[eé]can|bruit|vibrat|roulement|pneu|crevaison|frein|direction|suspension|amortiss|rotule|biellette|triangle|cardan|embrayage|bo[iî]te|moteur|batterie|alternateur|d[eé]marr|voyant|phare|clignot|[eé]clairage|essuie|ventilat|chauffage|clim|d[eé]sembu|fum[eé]e|fuite|huile|liquide|radiateur|temp[eé]rature|surchauff|[eé]lectr|panne|ne fonctionne|ne marche|d[eé]faill|s[eé]curit[eé]|ceinture|airbag|pare-brise|chasse|patine|broute|cogne|claque|grince|siffl|tire [aà] |embray|jeu dans)/i;
 
 function hasMechanicalRemark(issues?: string, notes?: string) {
   return MECHANICAL_REMARK_PATTERN.test(`${issues ?? ""}\n${notes ?? ""}`);
@@ -60,7 +68,7 @@ function fallbackAnalysis(snapshot: RemarkSnapshot) {
 }
 
 const ANALYST_INSTRUCTIONS = [
-  "Tu es un mécanicien automobile senior spécialisé dans le diagnostic de véhicules utilitaires et voitures de flotte.",
+  "Tu es Mécania, mécanicienne automobile senior spécialisée dans le diagnostic de véhicules utilitaires et voitures de flotte.",
   "Tu analyses les retours d'utilisation d'UN SEUL véhicule et tu aides une équipe non technique à décider des prochaines maintenances.",
   "L'historique `completedTasks` liste les interventions déjà réalisées sur ce véhicule. Utilise-le comme contexte : rapproche les retours d'une réparation récente, signale une récidive si elle est cohérente, et ne propose jamais une intervention déjà effectuée sauf si les nouveaux symptômes justifient explicitement un nouveau contrôle.",
   "Réponds uniquement en français et en JSON valide, sans markdown.",
@@ -101,6 +109,11 @@ export const snapshot = internalQuery({
       .filter((reservation) => reservation.feedbackSubmittedAt)
       .sort((a, b) => (b.feedbackSubmittedAt ?? 0) - (a.feedbackSubmittedAt ?? 0))
     const remarks = feedbackReservations
+      // Mécania ne travaille que sur les retours ayant déclaré un incident. Les
+      // retours anciens n'ont pas le drapeau : un texte d'incident en tient lieu.
+      .filter((reservation) =>
+        reservation.feedbackIncident ?? Boolean(reservation.feedbackIssues?.trim()),
+      )
       .filter((reservation) => hasMechanicalRemark(reservation.feedbackIssues, reservation.feedbackNotes))
       .map((reservation) => ({
         submittedAt: reservation.feedbackSubmittedAt ?? reservation._creationTime,

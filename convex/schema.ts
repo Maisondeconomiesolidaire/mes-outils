@@ -1125,6 +1125,9 @@ export default defineSchema(
     feedbackSubmittedAt: v.optional(v.number()),
     feedbackClean: v.optional(v.boolean()),
     feedbackTidy: v.optional(v.boolean()),
+    /** L'utilisateur a-t-il déclaré un incident ? Sans incident, le retour ne
+     * remonte pas dans la liste des remarques. */
+    feedbackIncident: v.optional(v.boolean()),
     feedbackIssues: v.optional(v.string()),
     feedbackNotes: v.optional(v.string()),
   })
@@ -1206,6 +1209,9 @@ export default defineSchema(
     feedbackFuelRestored: v.optional(v.boolean()),
     feedbackVehicleEmpty: v.optional(v.boolean()),
     feedbackVehicleClean: v.optional(v.boolean()),
+    /** L'utilisateur a-t-il déclaré un incident ? Sans incident, le retour ne
+     * remonte ni dans les remarques ni chez Mécania. */
+    feedbackIncident: v.optional(v.boolean()),
     feedbackIssues: v.optional(v.string()),
     feedbackNotes: v.optional(v.string()),
     /** Photos / vidéos jointes au retour pour illustrer un problème constaté. */

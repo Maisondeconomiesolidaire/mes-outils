@@ -738,6 +738,7 @@ function MyReservations() {
     vehicleClean: false,
     clean: false,
     tidy: false,
+    incident: false,
     issues: "",
     notes: "",
   };
@@ -851,6 +852,13 @@ function MyReservations() {
     if (!feedbackTarget) return;
     setFeedbackSubmitting(true);
     try {
+      // Un incident coché sans description n'aide personne : on bloque plutôt
+      // que d'enregistrer une remarque vide.
+      if (feedbackForm.incident && !feedbackForm.issues.trim()) {
+        void alertDialog("Merci de décrire l'incident constaté.");
+        setFeedbackSubmitting(false);
+        return;
+      }
       if (feedbackTarget.kind === "vehicle") {
         const mileage = Number(feedbackForm.mileage);
         if (!feedbackForm.mileage.trim() || !Number.isFinite(mileage) || mileage < 0) {
@@ -875,7 +883,8 @@ function MyReservations() {
           fuelRestored: feedbackTarget.usageType === "personal" ? feedbackForm.fuelRestored : undefined,
           vehicleEmpty: feedbackForm.vehicleEmpty,
           vehicleClean: feedbackForm.vehicleClean,
-          issues: feedbackForm.issues.trim() || undefined,
+          incident: feedbackForm.incident,
+          issues: feedbackForm.incident ? feedbackForm.issues.trim() || undefined : undefined,
           notes: feedbackForm.notes.trim() || undefined,
           media: media.length ? media : undefined,
         });
@@ -884,7 +893,8 @@ function MyReservations() {
           reservationId: feedbackTarget._id as Id<"roomReservations">,
           clean: feedbackForm.clean,
           tidy: feedbackForm.tidy,
-          issues: feedbackForm.issues.trim() || undefined,
+          incident: feedbackForm.incident,
+          issues: feedbackForm.incident ? feedbackForm.issues.trim() || undefined : undefined,
           notes: feedbackForm.notes.trim() || undefined,
         });
       }
@@ -1039,14 +1049,29 @@ function MyReservations() {
                 />
               </div>
             )}
-            <Field label="Remarques / incidents constatés">
-              <Textarea
-                value={feedbackForm.issues}
-                onChange={(event) => setFeedbackForm((current) => ({ ...current, issues: event.target.value }))}
-                placeholder="Décrivez uniquement un incident ou une remarque (voyant, bruit, dégradation…). Laissez vide s'il n'y a rien à signaler."
-              />
-            </Field>
-            <Field label="Autres commentaires">
+            <Checkbox
+              checked={feedbackForm.incident}
+              onChange={(incident) =>
+                setFeedbackForm((current) => ({
+                  ...current,
+                  incident,
+                  // Décocher efface le texte : sans incident, rien ne doit être signalé.
+                  issues: incident ? current.issues : "",
+                }))
+              }
+              label="Avez-vous constaté un incident ?"
+              description="Cochez uniquement en cas de problème (voyant, bruit, freinage, dégradation…)."
+            />
+            {feedbackForm.incident ? (
+              <Field label="Incident" required>
+                <Textarea
+                  value={feedbackForm.issues}
+                  onChange={(event) => setFeedbackForm((current) => ({ ...current, issues: event.target.value }))}
+                  placeholder="Décrivez l'incident constaté : ce que vous avez vu, entendu ou ressenti, et dans quelles conditions."
+                />
+              </Field>
+            ) : null}
+            <Field label="Commentaire / remarque">
               <Textarea
                 value={feedbackForm.notes}
                 onChange={(event) => setFeedbackForm((current) => ({ ...current, notes: event.target.value }))}

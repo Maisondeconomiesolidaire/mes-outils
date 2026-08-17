@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "convex/react";
-import { CarFront, Check, DoorOpen, MessageSquareText, X } from "lucide-react";
+import { CarFront, Check, DoorOpen, MessageSquareText, Wrench, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { EmptyState } from "./ui/EmptyState";
@@ -9,6 +9,8 @@ import { formatDate, formatDateTimeWithDay } from "../lib/format";
 
 type Remark = {
   _id: string;
+  /** Présent pour les remarques véhicule : cible du bouton « Nouvelle tâche ». */
+  vehicleId?: Id<"vehicles">;
   assetName: string;
   photoUrl: string | null;
   userName: string;
@@ -49,6 +51,25 @@ type MaintenanceProposal = {
   description: string;
   priority: "low" | "medium" | "high";
 };
+
+/**
+ * Titre de tâche prérempli avec le contenu de l'incident : une seule ligne, car
+ * le champ titre est court. Le texte intégral part dans la description.
+ */
+function taskTitleFromRemark(issues: string) {
+  const oneLine = issues.trim().replace(/\s+/g, " ");
+  return oneLine.length > 90 ? `${oneLine.slice(0, 89).trimEnd()}…` : oneLine;
+}
+
+/** Description préremplie : l'incident tel qu'écrit, plus son origine. */
+function taskDescriptionFromRemark(remark: Remark) {
+  return [
+    remark.issues?.trim(),
+    `Signalé par ${remark.userName} le ${formatDate(remark.submittedAt)} (retour de ${remark.assetName}).`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
 
 /** Petit indicateur oui/non (vert/rouge) pour un point de contrôle. */
 function Check3({ label, value }: { label: string; value?: boolean }) {
@@ -145,7 +166,7 @@ export function ReservationRemarks({
             onClick={() => setVehicleTab("analyses")}
             className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${vehicleTab === "analyses" ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
           >
-            Analyses IA ({vehicleAnalyses?.length ?? 0})
+            Mécania ({vehicleAnalyses?.length ?? 0})
           </button>
         </div>
       ) : null}
@@ -153,7 +174,7 @@ export function ReservationRemarks({
       {kind === "vehicle" && vehicleTab === "analyses" ? (
         vehicleAnalyses?.length ? (
         <section className="space-y-7">
-          <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Synthèse IA des retours</p>
+          <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">Synthèse de Mécania</p>
           <div className="mt-3 space-y-6">
             {vehicleAnalyses.map((analysis) => (
               <div key={analysis._id} className="border-t border-[var(--border)] pt-6 first:border-t-0 first:pt-0">
@@ -173,7 +194,7 @@ export function ReservationRemarks({
                 <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{analysis.summary}</p>
                 {analysis.diagnosis ? (
                   <div className="mt-6 max-w-3xl border-l-4 border-sky-600 pl-4 dark:border-sky-400">
-                    <p className="text-xs font-bold uppercase tracking-wide text-sky-800 dark:text-sky-200">Avis du mécanicien IA · à confirmer en atelier</p>
+                    <p className="text-xs font-bold uppercase tracking-wide text-sky-800 dark:text-sky-200">Avis de Mécania · à confirmer en atelier</p>
                     <MechanicOpinion>{analysis.diagnosis}</MechanicOpinion>
                   </div>
                 ) : null}
@@ -224,7 +245,7 @@ export function ReservationRemarks({
           </div>
         </section>
         ) : (
-          <EmptyState icon={<MessageSquareText className="h-8 w-8" />} title="Aucune analyse IA" description="Une synthèse apparaîtra après le prochain retour de véhicule." />
+          <EmptyState icon={<MessageSquareText className="h-8 w-8" />} title="Rien à signaler pour Mécania" description="Une synthèse apparaîtra dès qu'un retour déclarera un incident technique." />
         )
       ) : null}
       {(kind !== "vehicle" || vehicleTab === "remarks") ? data.map((remark) => (
@@ -282,16 +303,35 @@ export function ReservationRemarks({
 
           {remark.issues ? (
             <div className="mt-4 border-l-4 border-amber-500 pl-4 dark:border-amber-400">
-              <p className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                Incident / remarque
-              </p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <p className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                  Incident
+                </p>
+                {onCreateMaintenance && remark.vehicleId ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onCreateMaintenance({
+                        vehicleId: remark.vehicleId as Id<"vehicles">,
+                        title: taskTitleFromRemark(remark.issues ?? ""),
+                        description: taskDescriptionFromRemark(remark),
+                        priority: "medium",
+                      })
+                    }
+                    className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-xs font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent)]"
+                  >
+                    <Wrench className="h-3.5 w-3.5" />
+                    Nouvelle tâche
+                  </button>
+                ) : null}
+              </div>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{remark.issues}</p>
             </div>
           ) : null}
           {remark.notes ? (
             <div className="mt-4 border-l-2 border-[var(--border)] pl-4">
               <p className="text-xs font-bold uppercase tracking-wide text-[var(--muted-foreground)]">
-                Commentaire
+                Commentaire / remarque
               </p>
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[var(--foreground)]">{remark.notes}</p>
             </div>

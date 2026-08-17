@@ -804,6 +804,8 @@ export const submitVehicleFeedback = mutation({
     fuelRestored: v.optional(v.boolean()),
     vehicleEmpty: v.boolean(),
     vehicleClean: v.boolean(),
+    /** L'utilisateur déclare-t-il un incident ? Détermine `issues`. */
+    incident: v.optional(v.boolean()),
     issues: v.optional(v.string()),
     notes: v.optional(v.string()),
     /** Photos / vidéos déjà envoyées via `files.generateUploadUrl`. */
@@ -855,7 +857,10 @@ export const submitVehicleFeedback = mutation({
         reservation.usageType === "personal" ? Boolean(args.fuelRestored) : undefined,
       feedbackVehicleEmpty: args.vehicleEmpty,
       feedbackVehicleClean: args.vehicleClean,
-      feedbackIssues: args.issues?.trim() || undefined,
+      // Sans incident déclaré, aucun texte d'incident n'est conservé : le retour
+      // ne doit pas remonter dans les remarques.
+      feedbackIncident: Boolean(args.incident),
+      feedbackIssues: args.incident ? args.issues?.trim() || undefined : undefined,
       feedbackNotes: args.notes?.trim() || undefined,
       // Au plus 6 pièces jointes : de quoi illustrer un problème sans
       // transformer le retour en album photo.
@@ -978,6 +983,8 @@ export const submitRoomFeedback = mutation({
     reservationId: v.id("roomReservations"),
     clean: v.boolean(),
     tidy: v.boolean(),
+    /** L'utilisateur déclare-t-il un incident ? Détermine `issues`. */
+    incident: v.optional(v.boolean()),
     issues: v.optional(v.string()),
     notes: v.optional(v.string()),
   },
@@ -996,7 +1003,8 @@ export const submitRoomFeedback = mutation({
       feedbackSubmittedAt: Date.now(),
       feedbackClean: args.clean,
       feedbackTidy: args.tidy,
-      feedbackIssues: args.issues?.trim() || undefined,
+      feedbackIncident: Boolean(args.incident),
+      feedbackIssues: args.incident ? args.issues?.trim() || undefined : undefined,
       feedbackNotes: args.notes?.trim() || undefined,
     });
   },
@@ -1052,7 +1060,12 @@ export const listVehicleRemarks = query({
           .order("desc")
           .collect()
       : await ctx.db.query("vehicleReservations").order("desc").take(300);
-    const reservations = raw.filter((r) => r.feedbackSubmittedAt);
+    // Un retour « tout est ok » n'est pas une remarque : seuls les retours ayant
+    // déclaré un incident remontent ici. Les retours antérieurs au drapeau
+    // `feedbackIncident` sont jugés sur la présence d'un texte d'incident.
+    const reservations = raw.filter(
+      (r) => r.feedbackSubmittedAt && (r.feedbackIncident ?? Boolean(r.feedbackIssues?.trim())),
+    );
     const [vehicles, mileageSource] = await Promise.all([
       ctx.db.query("vehicles").collect(),
       vehicleId ? Promise.resolve(raw) : ctx.db.query("vehicleReservations").collect(),
@@ -1098,6 +1111,7 @@ export const listVehicleRemarks = query({
           const vehicle = byId.get(String(r.vehicleId)) ?? null;
           return {
             _id: r._id,
+            vehicleId: r.vehicleId,
             assetName: vehicle?.name ?? "Véhicule",
             photoUrl:
               (vehicle?.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle?.photoUrl) ?? null,
@@ -1134,7 +1148,7 @@ export const listRoomRemarks = query({
     await requireCrmPermission(ctx, "mesoutils:salles", "read");
     const reservations = (
       await ctx.db.query("roomReservations").order("desc").take(300)
-    ).filter((r) => r.feedbackSubmittedAt);
+    ).filter((r) => r.feedbackSubmittedAt && (r.feedbackIncident ?? Boolean(r.feedbackIssues?.trim())));
     const rooms = await ctx.db.query("rooms").collect();
     const byId = new Map(rooms.map((room) => [String(room._id), room]));
 
