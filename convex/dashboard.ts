@@ -108,31 +108,21 @@ export const appAudience = query({
   handler: async (ctx) => {
     await requireAdmin(ctx);
 
-    const [
-      users,
-      crmCustomers,
-      cycleCustomers,
-      klydeOrders,
-      bpCompanies,
-      ptClients,
-      ptEmployees,
-      hrEmployees,
-      feedbackEntries,
-    ] = await Promise.all([
-      ctx.db.query("users").collect(),
-      ctx.db.query("crmCustomers").collect(),
-      ctx.db.query("cycleCustomers").collect(),
-      ctx.db.query("klydeOrders").collect(),
-      ctx.db.query("bpCompanies").collect(),
-      ctx.db.query("ptClients").collect(),
-      ctx.db.query("ptEmployees").collect(),
-      ctx.db.query("hrEmployees").collect(),
-      ctx.db.query("feedback").collect(),
-    ]);
+    const [users, crmCustomers, cycleCustomers, klydeOrders, bpCompanies, ptClients, feedbackEntries] =
+      await Promise.all([
+        ctx.db.query("users").collect(),
+        ctx.db.query("crmCustomers").collect(),
+        ctx.db.query("cycleCustomers").collect(),
+        ctx.db.query("klydeOrders").collect(),
+        ctx.db.query("bpCompanies").collect(),
+        ctx.db.query("ptClients").collect(),
+        ctx.db.query("feedback").collect(),
+      ]);
 
-    // Comptes clients (externes) par app d'inscription ; `inconnu` = comptes
-    // créés avant la traçabilité de l'origine.
-    const clientsByApp: Record<string, number> = {};
+    // Comptes clients (externes) par app d'inscription ; sans `signupApp`, le
+    // compte est antérieur à la traçabilité de l'origine et n'est rattaché à
+    // aucune app. La liste nominative sert au détail affiché au clic.
+    const clientsByApp: Record<string, Array<{ email: string; name: string; createdAt: number }>> = {};
     let internalAccounts = 0;
     let clientAccounts = 0;
     let unknownOrigin = 0;
@@ -146,11 +136,21 @@ export const appAudience = query({
       }
       clientAccounts += 1;
       if (user.createdAt >= thirtyDaysAgo) newClientsLast30Days += 1;
-      if (user.signupApp) {
-        clientsByApp[user.signupApp] = (clientsByApp[user.signupApp] ?? 0) + 1;
-      } else {
+      if (!user.signupApp) {
         unknownOrigin += 1;
+        continue;
       }
+      const list = (clientsByApp[user.signupApp] ??= []);
+      list.push({
+        email: user.email,
+        name: [user.firstName, user.lastName].filter(Boolean).join(" ").trim(),
+        createdAt: user.createdAt,
+      });
+    }
+
+    for (const list of Object.values(clientsByApp)) {
+      // Les inscriptions les plus récentes d'abord dans le détail.
+      list.sort((a, b) => b.createdAt - a.createdAt);
     }
 
     const klydeBuyers = new Set(
@@ -173,13 +173,7 @@ export const appAudience = query({
         klyde: { label: "Acheteurs distincts", count: klydeBuyers },
         bennespro: { label: "Entreprises clientes", count: bpCompanies.length },
         pointeuse: { label: "Clients chantiers", count: ptClients.length },
-        mesoutils: { label: "Salariés suivis (RH)", count: hrEmployees.length },
         feedback: { label: "Retours reçus", count: feedbackEntries.length },
-      },
-      /** Effectifs internes suivis, utiles pour situer les chiffres ci-dessus. */
-      workforce: {
-        hrEmployees: hrEmployees.length,
-        ptEmployees: ptEmployees.length,
       },
     };
   },

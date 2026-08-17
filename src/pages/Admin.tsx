@@ -1,11 +1,12 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
-import { CalendarDays, Check, CircleDashed, Clock, Info, Layers, LayoutDashboard, LogIn, Mail, MapPin, Save, Search, ShieldCheck, ShieldOff, Trash2, UserRound } from "lucide-react";
+import { CalendarDays, Check, CircleDashed, CircleDollarSign, Clock, Info, Layers, LayoutDashboard, LogIn, Mail, MapPin, Save, Search, ShieldCheck, ShieldOff, Trash2, UserRound } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select } from "../components/ui/Field";
 import { FullSpinner } from "../components/ui/Spinner";
+import { Modal } from "../components/ui/Modal";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { ACTION_LABELS, ALL_PERMISSION_PAGES, type Action, type Grant, KNOWN_PAGE_KEYS, groupPagesByApp } from "../lib/permissions";
 import { cn } from "../lib/cn";
@@ -202,7 +203,7 @@ function relativeTime(ts?: number | null): string | null {
 }
 
 export function Admin() {
-  const [tab, setTab] = useState<"dashboard" | "access">("dashboard");
+  const [tab, setTab] = useState<"dashboard" | "revenue" | "access">("dashboard");
   return (
     <div className="space-y-6">
       <div>
@@ -212,12 +213,19 @@ export function Admin() {
       <UnderlineTabs
         items={[
           { key: "dashboard", label: "Tableau de bord", icon: LayoutDashboard },
+          { key: "revenue", label: "Chiffre d'affaires", icon: CircleDollarSign },
           { key: "access", label: "Accès", icon: ShieldCheck },
         ]}
         value={tab}
         onChange={setTab}
       />
-      {tab === "dashboard" ? <GlobalDashboard /> : <AccessManager />}
+      {tab === "dashboard" ? (
+        <GlobalDashboard />
+      ) : tab === "revenue" ? (
+        <RevenueDashboard />
+      ) : (
+        <AccessManager />
+      )}
     </div>
   );
 }
@@ -913,19 +921,77 @@ function KpiTile({ label, value, detail }: { label: string; value: string; detai
   );
 }
 
+type AudienceMember = { email: string; name?: string; detail?: string };
+
+type AudienceGroup = {
+  /** Libellé au singulier/pluriel déjà résolu, ex. « 4 admins ». */
+  label: string;
+  members: AudienceMember[];
+};
+
 type AppAudience = {
   key: string;
   label: string;
-  clients: number;
-  staff: number;
-  admins: number;
-  pagesGranted: number;
+  clients: AudienceMember[];
+  staff: AudienceMember[];
+  admins: AudienceMember[];
   record: { label: string; count: number } | null;
 };
 
-/** Carte « Recyclerie : X clients, X staff » d'une application. */
-function AudienceCard({ app }: { app: AppAudience }) {
+/** Liste nominative derrière un compteur cliqué. */
+function MembersModal({
+  open,
+  onClose,
+  title,
+  members,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  members: AudienceMember[];
+}) {
+  return (
+    <Modal open={open} onClose={onClose} title={title} className="sm:h-auto sm:max-h-[80vh] sm:w-[34rem] sm:max-w-[34rem]">
+      {members.length === 0 ? (
+        <EmptyState icon={<UserRound className="h-8 w-8" />} title="Personne pour l'instant" />
+      ) : (
+        <ul className="divide-y divide-[var(--border)]">
+          {members.map((member) => (
+            <li key={member.email} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2.5">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                  {member.name?.trim() || member.email}
+                </p>
+                {member.name?.trim() ? (
+                  <p className="truncate text-xs text-[var(--muted-foreground)]">{member.email}</p>
+                ) : null}
+              </div>
+              {member.detail ? (
+                <p className="text-xs text-[var(--muted-foreground)]">{member.detail}</p>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
+  );
+}
+
+/** Carte « Recyclerie : X clients, X staff » ; chaque compteur ouvre sa liste. */
+function AudienceCard({
+  app,
+  onOpenGroup,
+}: {
+  app: AppAudience;
+  onOpenGroup: (group: AudienceGroup) => void;
+}) {
   const logo = APP_LOGOS[app.key];
+  const cells: Array<{ label: string; plural: string; members: AudienceMember[] }> = [
+    { label: "Clients", plural: "clients", members: app.clients },
+    { label: "Staff", plural: "staff", members: app.staff },
+    { label: "Admins", plural: "admins", members: app.admins },
+  ];
+
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
       <div className="flex items-center gap-3">
@@ -940,98 +1006,100 @@ function AudienceCard({ app }: { app: AppAudience }) {
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-        {[
-          { label: "Clients", value: app.clients },
-          { label: "Staff", value: app.staff },
-          { label: "Admins", value: app.admins },
-        ].map((cell) => (
-          <div key={cell.label} className="rounded-xl bg-[var(--accent)] px-2 py-2.5">
-            <p className="text-xl font-bold tabular-nums text-[var(--foreground)]">{num(cell.value)}</p>
+        {cells.map((cell) => (
+          <button
+            key={cell.label}
+            type="button"
+            disabled={cell.members.length === 0}
+            onClick={() =>
+              onOpenGroup({
+                label: `${app.label} · ${cell.members.length} ${cell.plural}`,
+                members: cell.members,
+              })
+            }
+            className={cn(
+              "rounded-xl bg-[var(--accent)] px-2 py-2.5 transition",
+              cell.members.length > 0
+                ? "hover:bg-[var(--border)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand-500"
+                : "cursor-default opacity-70",
+            )}
+          >
+            <p className="text-xl font-bold tabular-nums text-[var(--foreground)]">{num(cell.members.length)}</p>
             <p className="text-[11px] font-medium text-[var(--muted-foreground)]">{cell.label}</p>
-          </div>
+          </button>
         ))}
       </div>
 
-      <dl className="mt-3 space-y-1.5 text-xs">
-        {app.record ? (
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-[var(--muted-foreground)]">{app.record.label}</dt>
-            <dd className="font-semibold tabular-nums text-[var(--foreground)]">{num(app.record.count)}</dd>
-          </div>
-        ) : null}
-        <div className="flex items-baseline justify-between gap-3">
-          <dt className="text-[var(--muted-foreground)]">Droits ouverts</dt>
-          <dd className="font-semibold tabular-nums text-[var(--foreground)]">
-            {num(app.pagesGranted)} page{app.pagesGranted > 1 ? "s" : ""}
-          </dd>
-        </div>
-      </dl>
+      {app.record ? (
+        <dl className="mt-3 flex items-baseline justify-between gap-3 text-xs">
+          <dt className="text-[var(--muted-foreground)]">{app.record.label}</dt>
+          <dd className="font-semibold tabular-nums text-[var(--foreground)]">{num(app.record.count)}</dd>
+        </dl>
+      ) : null}
     </div>
   );
 }
 
 function GlobalDashboard() {
-  const stats = useQuery(api.dashboard.globalStats);
   const audience = useQuery(api.dashboard.appAudience);
   const permissionsData = useQuery(api.permissions.listManaged);
+  const [openGroup, setOpenGroup] = useState<AudienceGroup | null>(null);
 
   /**
    * Staff et admins par app, déduits des droits : une personne compte pour une
    * app dès qu'un de ses droits porte sur une page de cette app. Les admins ont
-   * accès à tout, donc ils comptent pour chaque app.
+   * accès à tout, donc ils apparaissent dans chaque app.
    */
   const apps = useMemo<AppAudience[] | undefined>(() => {
     if (!audience || !permissionsData) return undefined;
     const active = permissionsData.people.filter((person) => person.permissionActive !== false);
-    const admins = active.filter((person) => person.role === "admin").length;
+    const admins: AudienceMember[] = active
+      .filter((person) => person.role === "admin")
+      .map((person) => ({ email: person.email, name: person.name, detail: "Accès à toutes les applications" }));
+    const records = audience.records as Record<string, { label: string; count: number }>;
+    const clientsByApp = audience.clientsByApp as Record<
+      string,
+      Array<{ email: string; name: string; createdAt: number }>
+    >;
 
     return groupPagesByApp().map((group) => {
-      let staff = 0;
-      let pagesGranted = 0;
+      const staff: AudienceMember[] = [];
       for (const person of active) {
         if (person.role === "admin") continue;
         const granted = person.grants.filter(
-          (grant) =>
-            grant.actions.length > 0 && APP_BY_PAGE_KEY.get(grant.pageKey) === group.key,
+          (grant) => grant.actions.length > 0 && APP_BY_PAGE_KEY.get(grant.pageKey) === group.key,
         );
         if (granted.length > 0) {
-          staff += 1;
-          pagesGranted += granted.length;
+          staff.push({
+            email: person.email,
+            name: person.name,
+            detail: `${granted.length} page${granted.length > 1 ? "s" : ""}`,
+          });
         }
       }
-      const records = audience.records as Record<string, { label: string; count: number }>;
+
       return {
         key: group.key,
         label: group.label,
-        clients: audience.clientsByApp[group.key] ?? 0,
+        clients: (clientsByApp[group.key] ?? []).map((client) => ({
+          email: client.email,
+          name: client.name,
+          detail: formatDate(client.createdAt) ?? undefined,
+        })),
         staff,
         admins,
-        pagesGranted,
         record: records[group.key] ?? null,
       };
     });
   }, [audience, permissionsData]);
 
-  if (stats === undefined || audience === undefined || apps === undefined) {
+  if (audience === undefined || apps === undefined) {
     return <FullSpinner label="Chargement du tableau de bord..." />;
   }
 
-  const shares = [
-    { key: "recyclerie", label: "Recyclerie", revenue: stats.recyclerie.revenue, tint: "bg-brand-500" },
-    { key: "klyde", label: "Klyde", revenue: stats.klyde.revenue, tint: "bg-indigo-500" },
-    { key: "cycle", label: "Cycle en Bray", revenue: stats.cycle.revenue, tint: "bg-emerald-500" },
-  ];
-  const denom = stats.totalRevenue || 1;
-
   return (
     <div className="space-y-9">
-      {/* Indicateurs de tête : comptes, internes, activité récente, CA. */}
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiTile
-          label="Chiffre d'affaires"
-          value={eur(stats.totalRevenue)}
-          detail="Recyclerie + Klyd + Cycle en Bray"
-        />
+      <div className="grid gap-3 sm:grid-cols-3">
         <KpiTile
           label="Comptes clients"
           value={num(audience.accounts.clients)}
@@ -1043,34 +1111,44 @@ function GlobalDashboard() {
           detail="Adresses @eco-solidaire.fr"
         />
         <KpiTile
-          label="Salariés suivis"
-          value={num(audience.workforce.hrEmployees)}
-          detail={`${num(audience.workforce.ptEmployees)} fiches côté Pointeuse`}
+          label="Origine inconnue"
+          value={num(audience.accounts.unknownOrigin)}
+          detail="Comptes clients rattachés à aucune app"
         />
       </div>
 
-      {/* Clients et équipe par application. */}
       <div>
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <h3 className="text-lg font-semibold text-[var(--foreground)]">Clients et équipe par application</h3>
-          <p className="text-xs text-[var(--muted-foreground)]">
-            Un client est rattaché à l'application depuis laquelle il s'est inscrit.
-          </p>
-        </div>
+        <h3 className="text-lg font-semibold text-[var(--foreground)]">Clients et équipe par application</h3>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {apps.map((app) => (
-            <AudienceCard key={app.key} app={app} />
+            <AudienceCard key={app.key} app={app} onOpenGroup={setOpenGroup} />
           ))}
         </div>
-        <p className="mt-3 text-xs text-[var(--muted-foreground)]">
-          Les admins ont accès à toutes les applications : le même effectif est
-          compté dans chaque carte.
-          {audience.accounts.unknownOrigin > 0
-            ? ` ${num(audience.accounts.unknownOrigin)} compte${audience.accounts.unknownOrigin > 1 ? "s" : ""} client${audience.accounts.unknownOrigin > 1 ? "s" : ""} sans origine connue (inscription antérieure au suivi) ne sont rattachés à aucune application.`
-            : ""}
-        </p>
       </div>
 
+      <MembersModal
+        open={openGroup !== null}
+        onClose={() => setOpenGroup(null)}
+        title={openGroup?.label ?? ""}
+        members={openGroup?.members ?? []}
+      />
+    </div>
+  );
+}
+
+function RevenueDashboard() {
+  const stats = useQuery(api.dashboard.globalStats);
+  if (stats === undefined) return <FullSpinner label="Chargement du chiffre d'affaires..." />;
+
+  const shares = [
+    { key: "recyclerie", label: "Recyclerie", revenue: stats.recyclerie.revenue, tint: "bg-brand-500" },
+    { key: "klyde", label: "Klyde", revenue: stats.klyde.revenue, tint: "bg-indigo-500" },
+    { key: "cycle", label: "Cycle en Bray", revenue: stats.cycle.revenue, tint: "bg-emerald-500" },
+  ];
+  const denom = stats.totalRevenue || 1;
+
+  return (
+    <div className="space-y-9">
       {/* Chiffre d'affaires total + répartition par application. */}
       <div>
         <p className="text-sm font-medium text-[var(--muted-foreground)]">Chiffre d'affaires total · toutes applications</p>
