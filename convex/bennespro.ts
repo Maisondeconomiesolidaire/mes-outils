@@ -14,7 +14,7 @@ import { v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { accessAllows, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
-import { resendSend, storageImageUrl, type EmailAttachment } from "./emails";
+import { bytesToBase64, resendSend, storageImageUrl, type EmailAttachment } from "./emails";
 import { bpBilling, bpCompanyType, bpMaterial, bpUnit } from "./schema";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
@@ -1340,16 +1340,6 @@ export const deleteCompany = action({
     return null;
   },
 });
-
-/** Encode des octets en base64 (par blocs, pour rester léger en mémoire). */
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
-}
 
 /**
  * Envoie la facture par email à l'entreprise du dépôt : lien de paiement dans

@@ -1,6 +1,6 @@
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import { esc, resendSend, storageImageUrl } from "./emails";
+import { esc, resendSend, storageImageUrl, type EmailAttachment } from "./emails";
 
 // Emails internes de l'application Mes Outils (équipe), distincts des emails
 // clients de la recyclerie (cf. `emails.ts`). Expéditeur et gabarit dédiés.
@@ -819,6 +819,80 @@ export const sendMaintenanceCreatedEmail = internalAction({
       `Nouvelle maintenance · ${args.vehicleName}`,
       html,
       FROM,
+    );
+  },
+});
+
+// ─── RH : contrats générés ───────────────────────────────────────────────────
+
+/**
+ * Destinataires prévenus des contrats générés pour les structures MES et LSDB
+ * (direction : ces deux structures n'ont pas de service RH sur place).
+ */
+export const CONTRACT_NOTICE_EMAILS = ["m.lahmer@eco-solidaire.fr"];
+
+/**
+ * Prévient la direction qu'un contrat MES / LSDB vient d'être généré, avec le
+ * document en pièce jointe.
+ *
+ * La pièce jointe peut manquer : le document vit sur le SharePoint du tenant et
+ * n'est pas toujours téléchargeable sans session (cf. `rh.ts`). Dans ce cas
+ * l'email part quand même, avec le lien SharePoint et une mention explicite —
+ * mieux vaut une notification sans fichier qu'aucune notification.
+ */
+export const sendContractGeneratedEmail = internalAction({
+  args: {
+    employeeName: v.string(),
+    structureLabel: v.string(),
+    documentLabel: v.string(),
+    contractType: v.string(),
+    numeroContrat: v.string(),
+    poste: v.string(),
+    dateDebut: v.string(),
+    dateFin: v.string(),
+    requestedBy: v.string(),
+    contractUrl: v.optional(v.string()),
+    attachment: v.optional(
+      v.object({ filename: v.string(), content: v.string() }),
+    ),
+  },
+  handler: async (_ctx, args) => {
+    const attachments: EmailAttachment[] = args.attachment ? [args.attachment] : [];
+    const missingNotice = args.attachment
+      ? ""
+      : `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;padding:16px 18px;background:#fff8e8;border:1px solid #f5d99a;border-radius:14px;">
+          <tr><td>
+            <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.55;color:#6b562c;">Le document n'a pas pu être joint automatiquement (accès SharePoint requis). Utilisez le lien ci-dessous pour l'ouvrir.</p>
+          </td></tr>
+        </table>`;
+
+    const html = shell({
+      preheader: `${args.documentLabel} généré pour ${args.employeeName} (${args.structureLabel}).`,
+      heading: `${args.documentLabel} — ${args.employeeName}`,
+      intro: `Un ${args.documentLabel.toLowerCase()} vient d'être généré pour <strong>${esc(args.employeeName)}</strong> (${esc(args.structureLabel)})${args.attachment ? ", il est joint à cet email" : ""}.`,
+      contentHtml: `
+        ${detailCard([
+          ["Salarié", args.employeeName],
+          ["Structure", args.structureLabel],
+          ["Document", args.documentLabel],
+          ["Type de contrat", args.contractType],
+          ["N° de contrat", args.numeroContrat || "—"],
+          ["Poste", args.poste || "—"],
+          ["Début", args.dateDebut || "—"],
+          ["Fin", args.dateFin || "—"],
+          ["Généré par", args.requestedBy],
+        ])}
+        ${missingNotice}
+        ${button(args.contractUrl ?? null, "Ouvrir le contrat")}
+      `,
+    });
+
+    await resendSend(
+      CONTRACT_NOTICE_EMAILS,
+      `${args.documentLabel} · ${args.employeeName} (${args.structureLabel})`,
+      html,
+      FROM,
+      attachments,
     );
   },
 });
