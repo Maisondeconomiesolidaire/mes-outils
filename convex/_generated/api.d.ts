@@ -27,6 +27,7 @@ import type * as feedback from "../feedback.js";
 import type * as files from "../files.js";
 import type * as fleet from "../fleet.js";
 import type * as gotravaux from "../gotravaux.js";
+import type * as hrContractNotices from "../hrContractNotices.js";
 import type * as http from "../http.js";
 import type * as importLegacy from "../importLegacy.js";
 import type * as klyde from "../klyde.js";
@@ -82,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   files: typeof files;
   fleet: typeof fleet;
   gotravaux: typeof gotravaux;
+  hrContractNotices: typeof hrContractNotices;
   http: typeof http;
   importLegacy: typeof importLegacy;
   klyde: typeof klyde;

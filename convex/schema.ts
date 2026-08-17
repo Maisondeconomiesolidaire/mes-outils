@@ -1996,6 +1996,8 @@ export default defineSchema(
     webhookResponseBody: v.optional(v.string()),
     requestedAt: v.number(),
     requestedBy: v.string(),
+    /** Horodatage de l'email de prévenance de fin de contrat (évite les doublons). */
+    endNoticeSentAt: v.optional(v.number()),
   })
     .index("by_employee_and_requestedAt", ["employeeId", "requestedAt"])
     .index("by_requestedAt", ["requestedAt"]),
