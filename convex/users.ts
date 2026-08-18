@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, env, internalAction, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, env, internalAction, internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { fetchAllClerkUsers, normalizeCustomer, normalizeEmail, requireCrmPermission, requireUser, titleCaseName } from "./lib";
 import { STEP } from "./processes";
@@ -283,6 +283,51 @@ async function remapClerkIdEverywhere(
  * Appelée à la connexion : crée le profil s'il n'existe pas et rattache
  * automatiquement les demandes passées dont l'email correspond.
  */
+/**
+ * Corrige l'application d'origine d'un compte (`signupApp`).
+ *
+ * Outil de maintenance : un compte créé depuis un lien Mes Outils alors que
+ * l'utilisateur est en réalité un client Recyclerie / Bennes & Pro fausse le
+ * décompte « clients par application » du tableau de bord admin. Interne, donc
+ * appelable uniquement en CLI (`npx convex run`) ou depuis une autre fonction —
+ * jamais depuis le navigateur.
+ */
+export const setSignupApp = internalMutation({
+  args: {
+    email: v.string(),
+    app: v.union(
+      v.literal("mesoutils"),
+      v.literal("recycapp"),
+      v.literal("klyde"),
+      v.literal("cycleenbray"),
+      v.literal("bennespro"),
+      v.literal("pointeuse"),
+      v.literal("feedback"),
+    ),
+    /** Chemin d'inscription à réécrire ; laissé tel quel si absent. */
+    path: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const email = normalizeEmail(args.email);
+    const users = await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .collect();
+    if (users.length === 0) return { email, updated: 0, previous: [] as string[] };
+
+    const previous: string[] = [];
+    for (const user of users) {
+      previous.push(user.signupApp ?? "—");
+      await ctx.db.patch(user._id, {
+        signupApp: args.app,
+        ...(args.path === undefined ? {} : { signupPath: args.path }),
+        updatedAt: Date.now(),
+      });
+    }
+    return { email, updated: users.length, previous, app: args.app };
+  },
+});
+
 export const syncProfile = mutation({
   args: {
     // Origine de l'inscription (app + chemin/formulaire), enregistrée une seule
