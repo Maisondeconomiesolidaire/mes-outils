@@ -488,8 +488,31 @@ export const submitVelo = mutation({
  * Créneaux de dépôt : uniquement le lundi, par tranches d'une heure.
  * Un seul rendez-vous par créneau et par recyclerie.
  */
-const DEPOT_SLOT_HOURS = [9, 10, 11, 14, 15, 16];
-const DEPOT_SLOT_MINUTES = 60;
+/** Premier et dernier créneau (minutes depuis minuit, heure de Paris). */
+const DEPOT_FIRST_SLOT_MINUTE = 13 * 60 + 30;
+const DEPOT_LAST_SLOT_MINUTE = 16 * 60 + 40;
+/** Un rendez-vous toutes les 10 minutes. */
+const DEPOT_SLOT_MINUTES = 10;
+
+/** Minutes depuis minuit de chaque créneau proposé, dans l'ordre. */
+const DEPOT_SLOT_MINUTE_MARKS = (() => {
+  const marks: number[] = [];
+  for (
+    let minute = DEPOT_FIRST_SLOT_MINUTE;
+    minute <= DEPOT_LAST_SLOT_MINUTE;
+    minute += DEPOT_SLOT_MINUTES
+  ) {
+    marks.push(minute);
+  }
+  return marks;
+})();
+
+/** « 13:30 » à partir des minutes depuis minuit. */
+function depotSlotLabel(minuteOfDay: number) {
+  const hour = Math.floor(minuteOfDay / 60);
+  const minute = minuteOfDay % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
 /** Nombre de lundis proposés à la réservation. */
 const DEPOT_WEEKS_AHEAD = 8;
 
@@ -518,8 +541,14 @@ function parisOffsetMs(timestamp: number) {
 }
 
 /** Horodatage d'une heure locale de Paris (gère l'heure d'été). */
-function parisTimestamp(year: number, month: number, day: number, hour: number) {
-  const guess = Date.UTC(year, month - 1, day, hour, 0, 0);
+function parisTimestamp(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute = 0,
+) {
+  const guess = Date.UTC(year, month - 1, day, hour, minute, 0);
   // Deux passes : la première corrige le décalage, la seconde absorbe un
   // éventuel changement d'heure entre l'estimation et l'instant corrigé.
   const first = guess - parisOffsetMs(guess);
@@ -600,12 +629,18 @@ export const depotSlots = query({
     const booked = await bookedDepotSlots(ctx, site, now);
     return upcomingMondays(now).map((day) => ({
       date: `${day.year}-${String(day.month).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`,
-      slots: DEPOT_SLOT_HOURS.map((hour) => {
-        const start = parisTimestamp(day.year, day.month, day.day, hour);
+      slots: DEPOT_SLOT_MINUTE_MARKS.map((minuteOfDay) => {
+        const start = parisTimestamp(
+          day.year,
+          day.month,
+          day.day,
+          Math.floor(minuteOfDay / 60),
+          minuteOfDay % 60,
+        );
         return {
           start,
           end: start + DEPOT_SLOT_MINUTES * 60_000,
-          hour,
+          label: depotSlotLabel(minuteOfDay),
           available: start > now && !booked.has(start),
         };
       }),
@@ -639,7 +674,7 @@ export const submitDepot = mutation({
     if (slot.weekday !== "Mon") {
       throw new Error("Les dépôts se font uniquement le lundi.");
     }
-    if (slot.minute !== 0 || !DEPOT_SLOT_HOURS.includes(slot.hour)) {
+    if (!DEPOT_SLOT_MINUTE_MARKS.includes(slot.hour * 60 + slot.minute)) {
       throw new Error("Ce créneau n'est pas proposé.");
     }
     if (details.slotStart <= now) {
