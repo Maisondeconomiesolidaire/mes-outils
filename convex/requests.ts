@@ -322,6 +322,13 @@ export const submitAerogommage = mutation({
   },
   handler: async (ctx, { customer, comment, photos, items, options }) => {
     await requireUser(ctx);
+    // Sans photo, impossible de chiffrer un décapage : la règle est portée ici
+    // et pas seulement dans le formulaire, sinon un envoi direct la contourne.
+    if (items.some((item) => (item.photos?.length ?? 0) === 0) && photos.length === 0) {
+      throw new Error(
+        "Ajoutez au moins une photo pour chaque objet à décaper : sans photo, la demande ne peut pas être chiffrée.",
+      );
+    }
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,
@@ -397,6 +404,20 @@ export const submitCollecte = mutation({
   },
   handler: async (ctx, { customer, comment, photos, details }) => {
     await requireUser(ctx);
+    // Idem collecte : la demande doit être illustrée, sinon on ne sait pas ce
+    // qu'il y a à charger. Contrôle côté serveur, pas uniquement dans le
+    // formulaire (une demande sans aucune photo est déjà passée).
+    const collectePhotoCount =
+      photos.length +
+      (details.categoryPhotos ?? []).reduce(
+        (total, entry) => total + entry.photos.length,
+        0,
+      );
+    if (collectePhotoCount === 0) {
+      throw new Error(
+        "Ajoutez au moins une photo des objets à collecter : sans photo, la demande ne peut pas être traitée.",
+      );
+    }
     const resolvedCustomer = await upsertRequestCustomer(
       ctx,
       customer,
