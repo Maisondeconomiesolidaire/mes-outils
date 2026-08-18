@@ -178,6 +178,10 @@ function areLotCompatible(a: Doc<"articles">, b: Doc<"articles">) {
   return keywordOverlap(deriveKeywords(a), deriveKeywords(b)).length >= 2;
 }
 
+/** Valeurs par défaut d'un article créé à partir d'une simple photo. */
+const DRAFT_CATEGORY = "Maison et Jardin";
+const DRAFT_CONDITION = "Bon état";
+
 function normalizeDigits(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -424,6 +428,8 @@ export const listForLotAnalysis = query({
     const candidates = articles.filter(
       (article) =>
         !article.isLot &&
+        // Un brouillon n'a ni titre ni description exploitables par l'IA.
+        !article.draft &&
         !article.bundleKey &&
         article.status !== "vendu" &&
         article.status !== "reserve",
@@ -492,6 +498,103 @@ export const create = mutation({
       createdAt: Date.now(),
     });
     return articleId;
+  },
+});
+
+/**
+ * Ajout rapide au stock boutique : on ne fournit QUE des photos, une par
+ * article. Chaque photo crée un article « brouillon » avec sa référence interne
+ * (donc son QR code) ; l'annonce et le détourage sont produits plus tard par un
+ * run IA groupé (cf. `applyAiListing`).
+ */
+export const createDraftsFromPhotos = mutation({
+  args: {
+    storageIds: v.array(v.id("_storage")),
+    location: v.optional(v.string()),
+  },
+  handler: async (ctx, { storageIds, location }) => {
+    await requireCrmPermission(ctx, "articles", "create");
+    if (storageIds.length === 0) {
+      throw new Error("Ajoutez au moins une photo.");
+    }
+    const cleanLocation = location?.trim() || undefined;
+    if (cleanLocation && !/^\d{4}$/.test(cleanLocation)) {
+      throw new Error("L'emplacement doit contenir exactement 4 chiffres.");
+    }
+
+    const created: Array<{ id: Id<"articles">; internalReference: string }> = [];
+    // Les références sont tirées une par une : `generateInternalReference` relit
+    // la table, donc les brouillons déjà insérés sont bien pris en compte.
+    for (const storageId of storageIds) {
+      const internalReference = await generateInternalReference(ctx);
+      const id = await ctx.db.insert("articles", {
+        title: `Article ${internalReference}`,
+        description: "",
+        price: 0,
+        category: DRAFT_CATEGORY,
+        condition: DRAFT_CONDITION,
+        location: cleanLocation,
+        internalReference,
+        images: [storageId],
+        status: "attente",
+        draft: true,
+        createdAt: Date.now(),
+      });
+      created.push({ id, internalReference });
+    }
+    return created;
+  },
+});
+
+/**
+ * Applique à un article le résultat d'un run IA (annonce générée, éventuelles
+ * images détourées) et le sort de l'état brouillon.
+ */
+export const applyAiListing = mutation({
+  args: {
+    id: v.id("articles"),
+    title: v.string(),
+    description: v.string(),
+    price: v.number(),
+    originalPrice: v.optional(v.number()),
+    weightKg: v.optional(v.number()),
+    category: v.string(),
+    subcategory: v.optional(v.string()),
+    condition: v.string(),
+    keywords: v.optional(v.array(v.string())),
+    themeKey: v.optional(v.string()),
+    images: v.optional(v.array(v.id("_storage"))),
+    status: v.optional(
+      v.union(v.literal("disponible"), v.literal("attente"), v.literal("lot")),
+    ),
+  },
+  handler: async (ctx, { id, images, status, ...rest }) => {
+    await requireCrmPermission(ctx, "articles", "update");
+    const article = await ctx.db.get(id);
+    if (!article) throw new Error("Article introuvable.");
+    if (!rest.title.trim()) throw new Error("Le titre est requis.");
+    if (rest.price < 0) throw new Error("Prix invalide.");
+
+    await ctx.db.patch(id, {
+      title: rest.title.trim(),
+      description: rest.description,
+      price: rest.price,
+      originalPrice: rest.originalPrice,
+      weightKg:
+        rest.weightKg !== undefined
+          ? normalizeWeightKg(rest.weightKg)
+          : article.weightKg,
+      category: rest.category,
+      subcategory: rest.subcategory || undefined,
+      condition: rest.condition,
+      keywords: rest.keywords?.length ? uniqueKeywords(rest.keywords) : undefined,
+      themeKey: rest.themeKey
+        ? normalizeKeyword(rest.themeKey).replace(/\s+/g, "-")
+        : undefined,
+      ...(images ? { images } : {}),
+      ...(status ? { status } : {}),
+      draft: undefined,
+    });
   },
 });
 

@@ -415,6 +415,11 @@ export default defineSchema(
       // Ancien statut conservé pour compatibilité avec les articles déjà créés.
       v.literal("lot"),
     ),
+    /**
+     * Article créé par simple photo depuis le stock boutique : il attend encore
+     * la génération d'annonce IA et le détourage (cf. « Nouveau run »).
+     */
+    draft: v.optional(v.boolean()),
     isLot: v.optional(v.boolean()),
     bundledArticleIds: v.optional(v.array(v.id("articles"))),
     bundleKey: v.optional(v.string()),
