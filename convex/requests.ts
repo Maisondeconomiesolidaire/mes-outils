@@ -622,29 +622,109 @@ async function bookedDepotSlots(ctx: QueryCtx | MutationCtx, site: "60" | "76", 
  * même source que la validation de `submitDepot`, donc l'affichage ne peut pas
  * proposer un créneau que la mutation refusera.
  */
+/** Fermetures saisies par l'équipe pour une recyclerie. */
+async function depotBlocks(ctx: QueryCtx | MutationCtx, site: "60" | "76") {
+  const blocks = await ctx.db
+    .query("depotBlockedSlots")
+    .withIndex("by_site", (q) => q.eq("site", site))
+    .collect();
+  return {
+    days: new Set(blocks.filter((b) => b.slotStart === undefined).map((b) => b.date)),
+    slots: new Set(
+      blocks
+        .filter((b) => b.slotStart !== undefined)
+        .map((b) => b.slotStart as number),
+    ),
+  };
+}
+
 export const depotSlots = query({
   args: { site: v.union(v.literal("60"), v.literal("76")) },
   handler: async (ctx, { site }) => {
     const now = Date.now();
     const booked = await bookedDepotSlots(ctx, site, now);
-    return upcomingMondays(now).map((day) => ({
-      date: `${day.year}-${String(day.month).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`,
-      slots: DEPOT_SLOT_MINUTE_MARKS.map((minuteOfDay) => {
-        const start = parisTimestamp(
-          day.year,
-          day.month,
-          day.day,
-          Math.floor(minuteOfDay / 60),
-          minuteOfDay % 60,
-        );
-        return {
-          start,
-          end: start + DEPOT_SLOT_MINUTES * 60_000,
-          label: depotSlotLabel(minuteOfDay),
-          available: start > now && !booked.has(start),
-        };
-      }),
-    }));
+    const blocked = await depotBlocks(ctx, site);
+    return upcomingMondays(now).map((day) => {
+      const date = `${day.year}-${String(day.month).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`;
+      const dayBlocked = blocked.days.has(date);
+      return {
+        date,
+        dayBlocked,
+        slots: DEPOT_SLOT_MINUTE_MARKS.map((minuteOfDay) => {
+          const start = parisTimestamp(
+            day.year,
+            day.month,
+            day.day,
+            Math.floor(minuteOfDay / 60),
+            minuteOfDay % 60,
+          );
+          const isBooked = booked.has(start);
+          const isBlocked = dayBlocked || blocked.slots.has(start);
+          return {
+            start,
+            end: start + DEPOT_SLOT_MINUTES * 60_000,
+            label: depotSlotLabel(minuteOfDay),
+            booked: isBooked,
+            blocked: isBlocked,
+            available: start > now && !isBooked && !isBlocked,
+          };
+        }),
+      };
+    });
+  },
+});
+
+/**
+ * Ouvre ou ferme une journée / un créneau de dépôt.
+ *
+ * Fermer une journée masque tous ses créneaux d'un coup ; les rendez-vous déjà
+ * pris ne sont pas annulés pour autant — l'équipe les voit toujours dans
+ * l'onglet Dépôts et reste libre de les traiter.
+ */
+export const setDepotAvailability = mutation({
+  args: {
+    site: v.union(v.literal("60"), v.literal("76")),
+    date: v.string(),
+    /** Absent : c'est la journée entière qui est ouverte/fermée. */
+    slotStart: v.optional(v.number()),
+    blocked: v.boolean(),
+  },
+  handler: async (ctx, { site, date, slotStart, blocked }) => {
+    await requireCrmPermission(ctx, "calendrier", "update");
+    const identity = await requireUser(ctx);
+
+    const existing = (
+      await ctx.db
+        .query("depotBlockedSlots")
+        .withIndex("by_site_and_date", (q) => q.eq("site", site).eq("date", date))
+        .collect()
+    ).filter((block) => block.slotStart === slotStart);
+
+    if (!blocked) {
+      for (const block of existing) await ctx.db.delete(block._id);
+      // Rouvrir un créneau précis n'a pas de sens si toute la journée est
+      // fermée : on lève aussi la fermeture de la journée.
+      if (slotStart !== undefined) {
+        const dayBlocks = (
+          await ctx.db
+            .query("depotBlockedSlots")
+            .withIndex("by_site_and_date", (q) => q.eq("site", site).eq("date", date))
+            .collect()
+        ).filter((block) => block.slotStart === undefined);
+        for (const block of dayBlocks) await ctx.db.delete(block._id);
+      }
+      return { blocked: false };
+    }
+
+    if (existing.length > 0) return { blocked: true };
+    await ctx.db.insert("depotBlockedSlots", {
+      site,
+      date,
+      slotStart,
+      createdAt: Date.now(),
+      createdBy: identity.name ?? identity.email ?? identity.subject,
+    });
+    return { blocked: true };
   },
 });
 
@@ -2074,8 +2154,13 @@ export const scheduled = query({
  * tableau et du calendrier des demandes, et ont leur propre vue.
  */
 export const scheduledDepots = query({
-  args: { from: v.number(), to: v.number() },
-  handler: async (ctx, { from, to }) => {
+  args: {
+    from: v.number(),
+    to: v.number(),
+    /** Restreint à une recyclerie ; absent = les deux. */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+  },
+  handler: async (ctx, { from, to, site }) => {
     await requireCrmPermission(ctx, "calendrier", "read");
     const depots = await ctx.db
       .query("requests")
@@ -2083,6 +2168,7 @@ export const scheduledDepots = query({
       .collect();
     return depots
       .filter((request) => {
+        if (site && request.depot?.site !== site) return false;
         const slotStart = request.depot?.slotStart ?? 0;
         return slotStart >= from && slotStart <= to;
       })
@@ -2143,3 +2229,4 @@ export const sendPendingInvoicesDigest = internalAction({
     return { count: requests.length };
   },
 });
+

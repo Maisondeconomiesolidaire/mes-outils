@@ -519,6 +519,22 @@ export default defineSchema(
     .index("by_assignedVehicle", ["assignedVehicle"])
     .index("by_reference", ["reference"]),
 
+  /**
+   * Créneaux de dépôt rendus indisponibles par l'équipe (fermeture, absence).
+   *
+   * Sans `slotStart`, c'est la journée entière qui est fermée pour ce site.
+   */
+  depotBlockedSlots: defineTable({
+    site: depotSite,
+    /** Jour concerné, `YYYY-MM-DD` en heure de Paris. */
+    date: v.string(),
+    slotStart: v.optional(v.number()),
+    createdAt: v.number(),
+    createdBy: v.string(),
+  })
+    .index("by_site", ["site"])
+    .index("by_site_and_date", ["site", "date"]),
+
   /** Prospects/clients importés hors demandes (Bubble, etc.). */
   crmCustomers: defineTable({
     source: v.string(),
