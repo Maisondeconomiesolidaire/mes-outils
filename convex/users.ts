@@ -676,6 +676,15 @@ export const getMyRequest = query({
       quoteAmount: request.quoteAmount ?? null,
       quoteDetails: request.quoteDetails ?? null,
       collecteType: request.collecteType ?? null,
+      // Le dépôt sert au client à retrouver son créneau et à l'annuler.
+      depot: request.depot
+        ? {
+            site: request.depot.site,
+            slotStart: request.depot.slotStart,
+            slotEnd: request.depot.slotEnd,
+            vehicleType: request.depot.vehicleType,
+          }
+        : null,
       comment: request.comment ?? null,
       customer: normalizeCustomer(request.customer),
       createdAt: request.createdAt,

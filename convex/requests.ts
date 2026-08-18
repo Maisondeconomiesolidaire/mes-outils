@@ -804,6 +804,84 @@ export const submitDepot = mutation({
   },
 });
 
+/** Libellé public d'une recyclerie, pour les emails et l'espace client. */
+const DEPOT_SITE_LABELS: Record<"60" | "76", string> = {
+  "60": "Recyclerie du Pays de Bray 60",
+  "76": "Recyclerie de Gournay en Bray 76",
+};
+
+/**
+ * Annulation de son propre créneau de dépôt par le client.
+ *
+ * Le créneau est immédiatement rendu à la réservation : `bookedDepotSlots`
+ * ignore les demandes perdues.
+ */
+export const cancelMyDepot = mutation({
+  args: { id: v.id("requests") },
+  handler: async (ctx, { id }) => {
+    const identity = await requireUser(ctx);
+    const request = await ctx.db.get(id);
+    if (!request || request.type !== "depot") throw new Error("Dépôt introuvable.");
+
+    const ownsByAccount = request.userId === identity.subject;
+    const ownsByEmail =
+      normalizeEmail(request.customer.email) === normalizeEmail(identity.email ?? "");
+    if (!ownsByAccount && !ownsByEmail) throw new Error("Annulation non autorisée.");
+    if (request.outcome === "perdue") return { cancelled: true };
+
+    await ctx.db.patch(id, {
+      outcome: "perdue",
+      lostReason: "annulation_client",
+      updatedAt: Date.now(),
+    });
+    return { cancelled: true };
+  },
+});
+
+/**
+ * Cron quotidien : rappel de dépôt la veille du rendez-vous.
+ *
+ * `reminderSentAt` est posé après l'envoi, donc un client n'est prévenu qu'une
+ * fois même si le cron repasse ou si la fenêtre du lendemain est recalculée.
+ */
+export const sendDepotReminders = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<{ sent: number }> => {
+    const now = Date.now();
+    const tomorrow = parisParts(now + 86_400_000);
+    const dayStart = parisTimestamp(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0);
+    const dayEnd = dayStart + 86_400_000;
+
+    const depots = await ctx.db
+      .query("requests")
+      .withIndex("by_type", (q) => q.eq("type", "depot"))
+      .collect();
+
+    let sent = 0;
+    for (const request of depots) {
+      const detail = request.depot;
+      if (!detail || detail.reminderSentAt) continue;
+      if (request.outcome === "perdue") continue;
+      if (detail.slotStart < dayStart || detail.slotStart >= dayEnd) continue;
+      const email = request.customer.email?.trim();
+      if (!email) continue;
+
+      await ctx.scheduler.runAfter(0, internal.emails.sendDepotReminder, {
+        email,
+        name: customerFullName(request.customer),
+        requestId: String(request._id),
+        siteLabel: DEPOT_SITE_LABELS[detail.site],
+        slotStart: detail.slotStart,
+      });
+      await ctx.db.patch(request._id, {
+        depot: { ...detail, reminderSentAt: now },
+      });
+      sent += 1;
+    }
+    return { sent };
+  },
+});
+
 export const submitLivraison = mutation({
   args: {
     customer: customerArg,

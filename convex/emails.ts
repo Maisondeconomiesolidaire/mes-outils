@@ -516,6 +516,65 @@ export const sendScheduled = internalAction({
   },
 });
 
+// ─── Dépôt en recyclerie ─────────────────────────────────────────────────────
+
+/**
+ * Rappel envoyé la veille d'un dépôt : mémo de préparation et lien d'annulation
+ * pour libérer le créneau si le client a un empêchement.
+ */
+export const sendDepotReminder = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    requestId: v.string(),
+    siteLabel: v.string(),
+    slotStart: v.number(),
+  },
+  handler: async (_ctx, { email, name, requestId, siteLabel, slotStart }) => {
+    const day = formatDay(slotStart);
+    const hour = new Intl.DateTimeFormat("fr-FR", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: "Europe/Paris",
+    }).format(new Date(slotStart));
+    const orderUrl = `${appUrl()}/compte/commandes/${requestId}`;
+    const memo = [
+      "Vérifiez que vos objets sont propres, complets et réutilisables.",
+      'Pensez à prendre des "gros bras" avec vous si vous avez des meubles lourds à décharger.',
+      "Merci d'arriver à l'heure pour garantir la fluidité de notre accueil.",
+    ]
+      .map(
+        (line) =>
+          `<tr><td style="padding:4px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:#3f3f46;">• ${esc(line)}</td></tr>`,
+      )
+      .join("");
+
+    const html = shell({
+      preheader: `Rappel : votre dépôt est prévu demain à ${hour}.`,
+      heading: "Petit rappel : c'est demain !",
+      intro: `Bonjour ${esc(name)},<br/><br/>Petit rappel ! Nous vous attendons demain pour votre dépôt d'objets.`,
+      contentHtml: `
+        <div style="margin:0 0 22px;padding:16px 18px;background:linear-gradient(135deg,#fff7ef,#ffe9d6);border:1px solid #ffe0c4;border-radius:14px;text-align:center;">
+          <p style="margin:0 0 4px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Votre créneau</p>
+          <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;color:${BRAND};text-transform:capitalize;">${esc(day)} à ${esc(hour)}</p>
+          <p style="margin:6px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">${esc(siteLabel)}</p>
+        </div>
+        <p style="margin:0 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;color:#18181b;">Un rapide mémo avant votre venue :</p>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;">${memo}</table>
+        <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:#3f3f46;">
+          Un empêchement ? Merci d'annuler votre créneau, pour libérer la place.
+        </p>
+        <div style="margin:0 0 22px;">${button(orderUrl, "Annuler mon créneau", false)}</div>
+        <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:22px;color:#3f3f46;">
+          À demain, et merci pour votre engagement en faveur du réemploi !<br/>
+          L'équipe de la Recyclerie.
+        </p>
+      `,
+    });
+    await resendSend(email, `Rappel · votre dépôt demain à ${hour}`, html);
+  },
+});
+
 // ─── Facturation ─────────────────────────────────────────────────────────────
 
 /** Compta prévenue quand une facture éditée attend son règlement. */

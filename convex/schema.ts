@@ -31,6 +31,8 @@ export const depotDetails = v.object({
   slotEnd: v.number(),
   vehicleType: depotVehicleType,
   description: v.optional(v.string()),
+  /** Rappel J-1 envoyé au client (évite le doublon si le cron repasse). */
+  reminderSentAt: v.optional(v.number()),
 });
 
 /** App « Feedback » — application visée par un retour utilisateur. */
@@ -193,6 +195,7 @@ export const requestOutcome = v.union(
 export const requestLostReason = v.union(
   v.literal("devis_refuse"),
   v.literal("pas_de_retour_client"),
+  v.literal("annulation_client"),
   v.literal("autre"),
 );
 

@@ -31,6 +31,13 @@ crons.daily(
   internal.hrContractNotices.sendContractEndNotices,
 );
 
+// Rappel J-1 aux clients qui ont réservé un créneau de dépôt en recyclerie.
+crons.daily(
+  "rappel depot recyclerie",
+  { hourUTC: 7, minuteUTC: 0 },
+  internal.requests.sendDepotReminders,
+);
+
 // Alerte Klyd : article sur Vinted depuis 3 semaines et toujours non gagné.
 crons.daily(
   "alerte klyd vinted 3 semaines",
