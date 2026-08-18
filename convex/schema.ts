@@ -1621,6 +1621,8 @@ export default defineSchema(
       v.literal("en_cours_envoi"),
       v.literal("envoye"),
       v.literal("gagne"),
+      // Invendu en ligne : l'article repart en rayon à la boutique physique.
+      v.literal("magasin"),
       // Anciennes valeurs conservées pour les articles créés avant le suivi.
       v.literal("en_stock"),
       v.literal("reserve"),

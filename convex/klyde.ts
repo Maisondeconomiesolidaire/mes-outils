@@ -31,6 +31,7 @@ const itemStatus = v.union(
   v.literal("en_cours_envoi"),
   v.literal("envoye"),
   v.literal("gagne"),
+  v.literal("magasin"),
   v.literal("archive"),
 );
 
@@ -141,6 +142,9 @@ function workflowRank(status: string) {
     envoye: 3,
     gagne: 4,
     vendu: 4,
+    // « Magasin » n'est pas une étape du parcours en ligne mais une sortie de
+    // ce parcours : elle se choisit, elle ne se « valide » pas dans l'ordre.
+    magasin: -1,
   }[status] ?? -1;
 }
 
@@ -688,6 +692,30 @@ export const setActualSalePrice = mutation({
 });
 
 /** Décision après trois semaines sur Vinted : retrait vers Stock B. */
+/**
+ * Remise en vente à la boutique physique.
+ *
+ * Sortie du parcours Vinted pour un invendu : l'annonce en ligne est retirée
+ * (`vinted` remis à zéro) et la décision est tracée dans `stockBDisposition`,
+ * qui alimente déjà le suivi des sorties de Stock B.
+ */
+export const moveToShop = mutation({
+  args: { id: v.id("klydeItems") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    await ctx.db.patch(id, {
+      status: "magasin",
+      stockBDisposition: "magasin",
+      vinted: undefined,
+      vintedAt: undefined,
+      vintedAlertSentAt: undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const moveToStockB = mutation({
   args: { id: v.id("klydeItems") },
   handler: async (ctx, { id }) => {
