@@ -1010,7 +1010,11 @@ export const list = query({
           .order("desc")
           .collect()
       : await ctx.db.query("requests").order("desc").collect();
-    return all.map((r) => ({ ...r, customer: normalizeCustomer(r.customer) }));
+    // Un dépôt n'est pas une demande à traiter : c'est un rendez-vous, il vit
+    // dans l'onglet « Dépôts » du calendrier et pas sur le tableau des demandes.
+    return all
+      .filter((r) => r.type !== "depot")
+      .map((r) => ({ ...r, customer: normalizeCustomer(r.customer) }));
   },
 });
 
@@ -2019,10 +2023,39 @@ export const scheduled = query({
         q.gte("scheduledDate", from).lte("scheduledDate", to),
       )
       .collect();
-    return requests.map((request) => ({
-      ...request,
-      customer: normalizeCustomer(request.customer),
-    }));
+    return requests
+      .filter((request) => request.type !== "depot")
+      .map((request) => ({
+        ...request,
+        customer: normalizeCustomer(request.customer),
+      }));
+  },
+});
+
+/**
+ * Rendez-vous de dépôt d'une période, pour l'onglet « Dépôts » du calendrier.
+ *
+ * Requête séparée de `scheduled` : les dépôts sont volontairement absents du
+ * tableau et du calendrier des demandes, et ont leur propre vue.
+ */
+export const scheduledDepots = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }) => {
+    await requireCrmPermission(ctx, "calendrier", "read");
+    const depots = await ctx.db
+      .query("requests")
+      .withIndex("by_type", (q) => q.eq("type", "depot"))
+      .collect();
+    return depots
+      .filter((request) => {
+        const slotStart = request.depot?.slotStart ?? 0;
+        return slotStart >= from && slotStart <= to;
+      })
+      .sort((a, b) => (a.depot?.slotStart ?? 0) - (b.depot?.slotStart ?? 0))
+      .map((request) => ({
+        ...request,
+        customer: normalizeCustomer(request.customer),
+      }));
   },
 });
 
