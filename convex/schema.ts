@@ -8,7 +8,30 @@ export const requestType = v.union(
   v.literal("article"),
   v.literal("velo"),
   v.literal("livraison"),
+  v.literal("depot"),
 );
+
+/** Recyclerie où le client vient déposer ses objets. */
+export const depotSite = v.union(v.literal("60"), v.literal("76"));
+
+/** Véhicule annoncé pour le dépôt : conditionne le temps de déchargement. */
+export const depotVehicleType = v.union(
+  v.literal("voiture"),
+  v.literal("camionnette"),
+  v.literal("remorque"),
+);
+
+/**
+ * Rendez-vous de dépôt : une recyclerie, un créneau du lundi et le véhicule
+ * annoncé. `slotStart` est l'horodatage du début de créneau (unique par site).
+ */
+export const depotDetails = v.object({
+  site: depotSite,
+  slotStart: v.number(),
+  slotEnd: v.number(),
+  vehicleType: depotVehicleType,
+  description: v.optional(v.string()),
+});
 
 /** App « Feedback » — application visée par un retour utilisateur. */
 export const feedbackApp = v.union(
@@ -469,6 +492,7 @@ export default defineSchema(
     payment: v.optional(requestPayment),
     velo: v.optional(veloDetails),
     livraison: v.optional(livraisonDetails),
+    depot: v.optional(depotDetails),
     // Véhicule de la flotte affecté (collecte / livraison planifiée).
     assignedVehicle: v.optional(v.id("vehicles")),
     createdAt: v.number(),

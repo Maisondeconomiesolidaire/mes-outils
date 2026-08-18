@@ -13,6 +13,9 @@ export const STEP = {
   factureReglee: "Facture réglée",
   // Livraison
   acompteVerse: "Acompte versé",
+  // Dépôt en recyclerie
+  rdvConfirme: "Rendez-vous confirmé",
+  depotRealise: "Dépôt réalisé",
 } as const;
 
 /** Process complet à 7 étapes (aérogommage, collecte C2/C3, vélo par défaut). */
@@ -47,7 +50,8 @@ export type RequestType =
   | "collecte"
   | "article"
   | "velo"
-  | "livraison";
+  | "livraison"
+  | "depot";
 
 export type CollecteType = "indefini" | "C1" | "C2" | "C3";
 
@@ -70,6 +74,10 @@ export function resolveProcess(
       return [STEP.contact, STEP.factureReglee];
     case "livraison":
       return [STEP.acompteVerse, STEP.prestaPlanifiee, STEP.prestaTerminee];
+    case "depot":
+      // Le créneau est choisi par le client : le rendez-vous existe déjà, il
+      // reste à le confirmer puis à constater le dépôt.
+      return [STEP.rdvConfirme, STEP.depotRealise];
     case "collecte":
       switch (collecteType) {
         case "C1":

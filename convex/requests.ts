@@ -5,6 +5,7 @@ import {
   mutation,
   query,
   MutationCtx,
+  QueryCtx,
 } from "./_generated/server";
 import { v } from "convex/values";
 import {
@@ -126,7 +127,7 @@ async function createNewRequestNotification(
   ctx: MutationCtx,
   args: {
     requestId: Id<"requests">;
-    requestType: "aerogommage" | "collecte" | "article" | "velo" | "livraison";
+    requestType: "aerogommage" | "collecte" | "article" | "velo" | "livraison" | "depot";
     customerName: string;
   },
 ) {
@@ -475,6 +476,213 @@ export const submitVelo = mutation({
     await createNewRequestNotification(ctx, {
       requestId,
       requestType: "velo",
+      customerName: customerFullName(customer),
+    });
+    return requestId;
+  },
+});
+
+/* ─── Dépôt en recyclerie ────────────────────────────────────────────────── */
+
+/**
+ * Créneaux de dépôt : uniquement le lundi, par tranches d'une heure.
+ * Un seul rendez-vous par créneau et par recyclerie.
+ */
+const DEPOT_SLOT_HOURS = [9, 10, 11, 14, 15, 16];
+const DEPOT_SLOT_MINUTES = 60;
+/** Nombre de lundis proposés à la réservation. */
+const DEPOT_WEEKS_AHEAD = 8;
+
+/** Décalage (ms) entre l'heure de Paris et UTC à un instant donné. */
+function parisOffsetMs(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Paris",
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? "0");
+  const asUtc = Date.UTC(
+    get("year"),
+    get("month") - 1,
+    get("day"),
+    get("hour") % 24,
+    get("minute"),
+    get("second"),
+  );
+  return asUtc - timestamp;
+}
+
+/** Horodatage d'une heure locale de Paris (gère l'heure d'été). */
+function parisTimestamp(year: number, month: number, day: number, hour: number) {
+  const guess = Date.UTC(year, month - 1, day, hour, 0, 0);
+  // Deux passes : la première corrige le décalage, la seconde absorbe un
+  // éventuel changement d'heure entre l'estimation et l'instant corrigé.
+  const first = guess - parisOffsetMs(guess);
+  return guess - parisOffsetMs(first);
+}
+
+/** Champs calendaires d'un horodatage, exprimés à Paris. */
+function parisParts(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Paris",
+    hour12: false,
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
+  return {
+    weekday: get("weekday"),
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")) % 24,
+    minute: Number(get("minute")),
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+  };
+}
+
+/** Les prochains lundis (dates Paris) proposés à la réservation. */
+function upcomingMondays(from: number) {
+  const days: Array<{ year: number; month: number; day: number }> = [];
+  const start = parisParts(from);
+  const cursor = Date.UTC(start.year, start.month - 1, start.day);
+  for (let offset = 0; days.length < DEPOT_WEEKS_AHEAD; offset += 1) {
+    const dayUtc = cursor + offset * 86_400_000;
+    const date = new Date(dayUtc);
+    // getUTCDay : 1 = lundi. La date est déjà exprimée en jours de Paris.
+    if (date.getUTCDay() !== 1) continue;
+    days.push({
+      year: date.getUTCFullYear(),
+      month: date.getUTCMonth() + 1,
+      day: date.getUTCDate(),
+    });
+  }
+  return days;
+}
+
+/** Rendez-vous déjà pris pour une recyclerie (créneaux à venir uniquement). */
+async function bookedDepotSlots(ctx: QueryCtx | MutationCtx, site: "60" | "76", from: number) {
+  const requests = await ctx.db
+    .query("requests")
+    .withIndex("by_type", (q) => q.eq("type", "depot"))
+    .collect();
+  return new Set(
+    requests
+      .filter(
+        (request) =>
+          request.depot?.site === site &&
+          request.outcome !== "perdue" &&
+          (request.depot?.slotStart ?? 0) >= from,
+      )
+      .map((request) => request.depot!.slotStart),
+  );
+}
+
+/**
+ * Créneaux de dépôt proposés au client : les prochains lundis, avec pour
+ * chaque heure l'information « déjà réservé » calculée côté serveur — c'est la
+ * même source que la validation de `submitDepot`, donc l'affichage ne peut pas
+ * proposer un créneau que la mutation refusera.
+ */
+export const depotSlots = query({
+  args: { site: v.union(v.literal("60"), v.literal("76")) },
+  handler: async (ctx, { site }) => {
+    const now = Date.now();
+    const booked = await bookedDepotSlots(ctx, site, now);
+    return upcomingMondays(now).map((day) => ({
+      date: `${day.year}-${String(day.month).padStart(2, "0")}-${String(day.day).padStart(2, "0")}`,
+      slots: DEPOT_SLOT_HOURS.map((hour) => {
+        const start = parisTimestamp(day.year, day.month, day.day, hour);
+        return {
+          start,
+          end: start + DEPOT_SLOT_MINUTES * 60_000,
+          hour,
+          available: start > now && !booked.has(start),
+        };
+      }),
+    }));
+  },
+});
+
+export const submitDepot = mutation({
+  args: {
+    customer: customerArg,
+    comment: v.optional(v.string()),
+    photos: v.array(v.id("_storage")),
+    details: v.object({
+      site: v.union(v.literal("60"), v.literal("76")),
+      slotStart: v.number(),
+      vehicleType: v.union(
+        v.literal("voiture"),
+        v.literal("camionnette"),
+        v.literal("remorque"),
+      ),
+      description: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, { customer, comment, photos, details }) => {
+    await requireUser(ctx);
+
+    // Le créneau est revalidé ici : un client peut avoir gardé la page ouverte
+    // pendant qu'un autre réservait le même lundi.
+    const now = Date.now();
+    const slot = parisParts(details.slotStart);
+    if (slot.weekday !== "Mon") {
+      throw new Error("Les dépôts se font uniquement le lundi.");
+    }
+    if (slot.minute !== 0 || !DEPOT_SLOT_HOURS.includes(slot.hour)) {
+      throw new Error("Ce créneau n'est pas proposé.");
+    }
+    if (details.slotStart <= now) {
+      throw new Error("Ce créneau est déjà passé.");
+    }
+    const booked = await bookedDepotSlots(ctx, details.site, now);
+    if (booked.has(details.slotStart)) {
+      throw new Error("Ce créneau vient d'être réservé. Choisissez-en un autre.");
+    }
+
+    const resolvedCustomer = await upsertRequestCustomer(ctx, customer, "/depot");
+    customer = resolvedCustomer.customer;
+    const reference = await generateReference(ctx);
+    const requestId = await ctx.db.insert("requests", {
+      type: "depot",
+      stage: "planifie",
+      outcome: "open",
+      requestOrigin: "external",
+      // Un dépôt est complet dès l'envoi : créneau, site et véhicule sont requis.
+      complete: true,
+      processSteps: resolveProcess("depot"),
+      completedSteps: 0,
+      customer,
+      userId: resolvedCustomer.userId,
+      site: details.site,
+      // Le créneau choisi pilote aussi le calendrier du CRM.
+      scheduledDate: details.slotStart,
+      comment,
+      photos,
+      depot: {
+        site: details.site,
+        slotStart: details.slotStart,
+        slotEnd: details.slotStart + DEPOT_SLOT_MINUTES * 60_000,
+        vehicleType: details.vehicleType,
+        description: details.description || undefined,
+      },
+      createdAt: now,
+      updatedAt: now,
+      reference,
+    });
+    await createNewRequestNotification(ctx, {
+      requestId,
+      requestType: "depot",
       customerName: customerFullName(customer),
     });
     return requestId;

@@ -38,6 +38,7 @@ const TYPE_LABELS: Record<string, string> = {
   article: "Boutique",
   velo: "Recyclerie",
   livraison: "Livraison",
+  depot: "Dépôt en recyclerie",
 };
 
 function typeLabel(type: string) {
