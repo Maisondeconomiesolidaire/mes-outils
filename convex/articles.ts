@@ -463,6 +463,7 @@ export const create = mutation({
     price: v.number(),
     weightKg: v.number(),
     location: v.optional(v.string()),
+    caisseId: v.optional(v.id("caisses")),
     originalPrice: v.optional(v.number()),
     gdrReference: v.optional(v.string()),
     category: v.string(),
@@ -510,16 +511,16 @@ export const create = mutation({
 export const createDraftsFromPhotos = mutation({
   args: {
     storageIds: v.array(v.id("_storage")),
-    location: v.optional(v.string()),
+    /** Caisse dans laquelle ranger tous les brouillons créés. */
+    caisseId: v.optional(v.id("caisses")),
   },
-  handler: async (ctx, { storageIds, location }) => {
+  handler: async (ctx, { storageIds, caisseId }) => {
     await requireCrmPermission(ctx, "articles", "create");
     if (storageIds.length === 0) {
       throw new Error("Ajoutez au moins une photo.");
     }
-    const cleanLocation = location?.trim() || undefined;
-    if (cleanLocation && !/^\d{4}$/.test(cleanLocation)) {
-      throw new Error("L'emplacement doit contenir exactement 4 chiffres.");
+    if (caisseId && !(await ctx.db.get(caisseId))) {
+      throw new Error("Caisse introuvable.");
     }
 
     const created: Array<{ id: Id<"articles">; internalReference: string }> = [];
@@ -533,7 +534,7 @@ export const createDraftsFromPhotos = mutation({
         price: 0,
         category: DRAFT_CATEGORY,
         condition: DRAFT_CONDITION,
-        location: cleanLocation,
+        caisseId,
         internalReference,
         images: [storageId],
         status: "attente",
@@ -706,6 +707,7 @@ export const update = mutation({
     price: v.number(),
     weightKg: v.number(),
     location: v.optional(v.string()),
+    caisseId: v.optional(v.id("caisses")),
     originalPrice: v.optional(v.number()),
     internalReference: v.string(),
     gdrReference: v.optional(v.string()),
@@ -730,6 +732,9 @@ export const update = mutation({
       ...rest,
       weightKg: normalizeWeightKg(rest.weightKg),
       location: rest.location?.trim() || undefined,
+      // Explicite : le formulaire pilote la caisse, y compris pour la vider
+      // (`undefined` retire le champ, alors qu'un argument absent le garderait).
+      caisseId: rest.caisseId ?? undefined,
       gdrReference: rest.gdrReference || undefined,
       keywords: rest.keywords?.length ? uniqueKeywords(rest.keywords) : undefined,
       themeKey: rest.themeKey

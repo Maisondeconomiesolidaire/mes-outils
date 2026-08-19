@@ -174,6 +174,51 @@ type LotAnalysisResult = {
   groups: LotAnalysisGroup[];
 };
 
+/**
+ * Extrait le premier objet JSON complet d'une réponse de modèle.
+ *
+ * Les modèles « search » répondent en prose puis glissent le JSON dans un bloc
+ * ```json. On privilégie donc le contenu du bloc, et à défaut on isole l'objet
+ * en comptant les accolades (un `lastIndexOf("}")` naïf ramassait la prose et
+ * les citations qui suivent parfois l'objet).
+ */
+function extractJsonObject(raw: string): string | null {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidates = [fenced?.[1]?.trim(), raw.trim()].filter(
+    (value): value is string => Boolean(value),
+  );
+
+  for (const candidate of candidates) {
+    const start = candidate.indexOf("{");
+    if (start === -1) continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < candidate.length; i += 1) {
+      const char = candidate[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        if (inString) escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (char === "{") depth += 1;
+      else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) return candidate.slice(start, i + 1);
+      }
+    }
+  }
+  return null;
+}
+
 async function callOpenAI<T>(
   apiKey: string,
   body: Record<string, unknown>,
@@ -193,22 +238,28 @@ async function callOpenAI<T>(
   }
 
   const data = (await response.json()) as {
-    choices: Array<{ message: { content: string } }>;
+    choices: Array<{ message: { content: string }; finish_reason?: string }>;
   };
 
-  const raw = data.choices?.[0]?.message?.content ?? "";
-  let cleaned = raw.replace(/^```(?:json)?\n?/i, "").replace(/\n?```$/, "").trim();
-  // Le modèle ajoute parfois du texte autour du JSON : on isole l'objet { … }.
-  if (!cleaned.startsWith("{")) {
-    const first = cleaned.indexOf("{");
-    const last = cleaned.lastIndexOf("}");
-    if (first !== -1 && last > first) cleaned = cleaned.slice(first, last + 1);
+  const choice = data.choices?.[0];
+  const raw = choice?.message?.content ?? "";
+  const json = extractJsonObject(raw);
+
+  if (!json) {
+    // `finish_reason: "length"` = réponse coupée par `max_tokens` : le JSON est
+    // tronqué et illisible. C'était la cause la plus fréquente des échecs de run.
+    if (choice?.finish_reason === "length") {
+      throw new Error(
+        "Réponse IA tronquée (limite de jetons atteinte) — relancez l'article.",
+      );
+    }
+    throw new Error("Réponse IA non parseable : " + raw.slice(0, 200));
   }
 
   try {
-    return JSON.parse(cleaned) as T;
+    return JSON.parse(json) as T;
   } catch {
-    throw new Error("Réponse IA non parseable : " + cleaned.slice(0, 150));
+    throw new Error("Réponse IA non parseable : " + json.slice(0, 200));
   }
 }
 
@@ -454,7 +505,10 @@ export const analyzeArticleImage = action({
     // ── Étape 1 : identification visuelle ──────────────────────────────────
     const identification = await callOpenAI<IdentificationResult>(apiKey, {
       model: "gpt-4o",
-      max_tokens: 400,
+      // 400 jetons coupaient regulierement le JSON d'identification en plein
+      // milieu (finish_reason "length"), ce qui faisait echouer le run.
+      max_tokens: 900,
+      response_format: { type: "json_object" },
       temperature: 0.1,
       messages: [
         { role: "system", content: IDENTIFICATION_PROMPT },
@@ -470,6 +524,13 @@ export const analyzeArticleImage = action({
 
     // ── Étape 2 : recherche marché + valorisation ──────────────────────────
     // gpt-4o-search-preview peut naviguer sur le web pour trouver des prix réels
+    // Le modèle omet parfois `searchQueries` : sans garde, l'accès à
+    // `searchQueries[0]` faisait planter l'action entière.
+    const queries =
+      Array.isArray(identification.searchQueries) && identification.searchQueries.length > 0
+        ? identification.searchQueries
+        : [identification.name];
+
     const searchUserPrompt = `Article à évaluer :
 - Nom : ${identification.name}${identification.brand ? ` (marque : ${identification.brand})` : ""}
 - État : ${identification.estimatedCondition}
@@ -477,9 +538,9 @@ export const analyzeArticleImage = action({
 - Détails clés : ${identification.keyDetails}
 
 Recherche sur Leboncoin, Vinted, eBay France et Amazon France les prix actuels pour cet article EN ÉTAT SIMILAIRE. Utilise ces requêtes :
-1. "${identification.searchQueries[0]}"
-2. "${identification.searchQueries[1] ?? identification.searchQueries[0]} occasion prix"
-3. "${identification.searchQueries[2] ?? identification.name} prix neuf"
+1. "${queries[0]}"
+2. "${queries[1] ?? queries[0]} occasion prix"
+3. "${queries[2] ?? identification.name} prix neuf"
 
 IMPORTANT : applique toutes les décotes selon l'état "${identification.estimatedCondition}" et les défauts constatés. Ne sois pas généreux.${detailsBlock}
 
@@ -487,7 +548,7 @@ Produis l'évaluation JSON complète basée sur les résultats trouvés.`;
 
     const result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
       model: "gpt-4o-search-preview",
-      max_tokens: 1600,
+      max_tokens: 2400,
       web_search_options: { search_context_size: "medium" },
       messages: [
         { role: "system", content: VALUATION_PROMPT },
@@ -595,7 +656,7 @@ En plus des champs JSON habituels, ajoute le champ "weightKg" : le poids estimé
       apiKey,
       {
         model: "gpt-4o-search-preview",
-        max_tokens: 1600,
+        max_tokens: 2400,
         web_search_options: { search_context_size: "medium" },
         messages: [
           {

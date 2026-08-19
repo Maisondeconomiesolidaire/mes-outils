@@ -15,6 +15,7 @@ import type * as ateliers from "../ateliers.js";
 import type * as bennespro from "../bennespro.js";
 import type * as bennesproClientVehicles from "../bennesproClientVehicles.js";
 import type * as bikes from "../bikes.js";
+import type * as caisses from "../caisses.js";
 import type * as clerkMigration from "../clerkMigration.js";
 import type * as clients from "../clients.js";
 import type * as community from "../community.js";
@@ -71,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   bennespro: typeof bennespro;
   bennesproClientVehicles: typeof bennesproClientVehicles;
   bikes: typeof bikes;
+  caisses: typeof caisses;
   clerkMigration: typeof clerkMigration;
   clients: typeof clients;
   community: typeof community;

@@ -398,6 +398,9 @@ export default defineSchema(
     weightKg: v.optional(v.number()),
     // Emplacement physique de l'article en boutique / réserve.
     location: v.optional(v.string()),
+    // Caisse physique (bac étiqueté d'un QR code) qui contient l'article.
+    // Remplace progressivement le champ texte `location`.
+    caisseId: v.optional(v.id("caisses")),
     originalPrice: v.optional(v.number()),
     internalReference: v.optional(v.string()),
     gdrReference: v.optional(v.string()),
@@ -431,7 +434,25 @@ export default defineSchema(
     .index("by_status", ["status"])
     .index("by_internalReference", ["internalReference"])
     .index("by_gdrReference", ["gdrReference"])
-    .index("by_productOfDay", ["productOfDay"]),
+    .index("by_productOfDay", ["productOfDay"])
+    .index("by_caisse", ["caisseId"]),
+
+  /**
+   * Caisses de rangement de la recyclerie : chaque caisse porte un QR code
+   * collé dessus. On scanne la caisse à l'ajout d'un article pour l'y ranger,
+   * et on la rescanne pour voir tout ce qu'elle contient.
+   */
+  caisses: defineTable({
+    /** Code imprimé sur le QR code, ex. « CA-0007 ». Unique. */
+    code: v.string(),
+    /** Nom libre donné par l'équipe, ex. « Vaisselle réserve ». */
+    label: v.optional(v.string()),
+    /** Zone / lieu où se trouve la caisse, ex. « Réserve », « Boutique ». */
+    zone: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    archived: v.optional(v.boolean()),
+    createdAt: v.number(),
+  }).index("by_code", ["code"]),
 
   /** Articles sauvegardés (wishlist) par les clients connectés. */
   wishlists: defineTable({
