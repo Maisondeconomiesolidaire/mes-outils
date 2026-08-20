@@ -166,7 +166,8 @@ export function Gotravaux() {
   const [searchParams] = useSearchParams();
   const sub = searchParams.get("v") ?? "vehicles";
   const [search, setSearch] = useState("");
-  const [statusTab, setStatusTab] = useState<"active" | "immobilized" | "sold">("active");
+  // « Tout » par défaut : on veut voir l'ensemble du parc en arrivant.
+  const [statusTab, setStatusTab] = useState<"all" | "active" | "immobilized" | "sold">("all");
 
   const [detailsVehicleId, setDetailsVehicleId] = useState<Id<"vehicles"> | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -212,7 +213,7 @@ export function Gotravaux() {
           <div className="space-y-5">
             <div className="flex flex-wrap items-center gap-3">
               <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
-                {([{ key: "active", label: "Actifs" }, { key: "immobilized", label: "Immobilisés" }, { key: "sold", label: "Vendus" }] as const).map((option) => (
+                {([{ key: "all", label: "Tout" }, { key: "active", label: "Actifs" }, { key: "immobilized", label: "Immobilisés" }, { key: "sold", label: "Vendus" }] as const).map((option) => (
                   <button key={option.key} type="button" onClick={() => setStatusTab(option.key)} className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${statusTab === option.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}>
                     {option.label}
                   </button>
