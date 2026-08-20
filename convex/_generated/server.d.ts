@@ -40,6 +40,7 @@ type Env = {
   readonly OPENAI_API_KEY: string | undefined;
   readonly OPENAI_REQUEST_ANALYSIS_MODEL: string | undefined;
   readonly RECYCAPP_STRIPE_SECRET_KEY: string | undefined;
+  readonly RECYCAPP_STRIPE_WEBHOOK_SECRET: string | undefined;
   readonly STAFF_EMAILS: string | undefined;
   readonly STRIPE_SECRET_KEY: string | undefined;
 };
