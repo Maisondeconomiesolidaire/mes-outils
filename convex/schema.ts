@@ -999,6 +999,35 @@ export default defineSchema(
     completedAt: v.optional(v.number()),
   }).index("by_stripeSessionId", ["stripeSessionId"]),
 
+  /**
+   * Lien de paiement généré depuis le CRM : permet de faire régler en ligne
+   * une demande boutique existante, ou un ou plusieurs articles choisis, sans
+   * passer par le panier. Le `token` est l'identifiant public du lien.
+   */
+  paymentLinks: defineTable({
+    token: v.string(),
+    articleIds: v.array(v.id("articles")),
+    /** Demande boutique réglée par ce lien (absent pour un lien ad hoc). */
+    requestId: v.optional(v.id("requests")),
+    /** Coordonnées connues à la création, pour préremplir la page de paiement. */
+    customer: v.optional(customer),
+    /** Montant figé à la création du lien (euros). */
+    amount: v.number(),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("paid"),
+      v.literal("cancelled"),
+    ),
+    stripePaymentIntentId: v.optional(v.string()),
+    /** Horodatage du dernier envoi par email. */
+    sentAt: v.optional(v.number()),
+    createdAt: v.number(),
+    createdBy: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+  })
+    .index("by_token", ["token"])
+    .index("by_request", ["requestId"]),
+
   publicStripeCheckoutDrafts: defineTable({
     articleIds: v.array(v.id("articles")),
     customer: customer,

@@ -524,3 +524,101 @@ export const confirmPublicCartPayment = action({
     });
   },
 });
+
+/* ─── Liens de paiement (CRM → client) ────────────────────────────────────── */
+
+/** Prépare le paiement d'un lien : le montant vient du lien, jamais du client. */
+export const createPaymentIntentForLink = action({
+  args: {
+    token: v.string(),
+    customer: v.optional(
+      v.object({
+        firstName: v.string(),
+        lastName: v.string(),
+        email: v.string(),
+        phone: v.string(),
+      }),
+    ),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ clientSecret: string; paymentIntentId: string; amount: number }> => {
+    const secretKey = recycappSecretKey();
+
+    const link = await ctx.runQuery(internal.paymentLinks.byTokenInternal, {
+      token: args.token,
+    });
+    if (!link) throw new Error("Ce lien de paiement n'existe pas ou a été supprimé.");
+    if (link.status === "paid") throw new Error("Cette commande est déjà réglée.");
+    if (link.status === "cancelled") throw new Error("Ce lien de paiement a été annulé.");
+
+    const email = args.customer?.email ?? link.customer?.email;
+    const intent = await stripeRequest<{ id: string; client_secret: string }>(
+      "payment_intents",
+      secretKey,
+      {
+        amount: String(Math.round(link.amount * 100)),
+        currency: "eur",
+        "automatic_payment_methods[enabled]": "true",
+        description: `Lien de paiement boutique — ${link.articleIds.length} article${
+          link.articleIds.length > 1 ? "s" : ""
+        }`,
+        ...(email ? { receipt_email: email } : {}),
+        "metadata[paymentLinkToken]": args.token,
+        "metadata[source]": "recycapp-lien-paiement",
+      },
+    );
+
+    await ctx.runMutation(internal.paymentLinks.attachPaymentIntent, {
+      token: args.token,
+      stripePaymentIntentId: intent.id,
+    });
+
+    return {
+      clientSecret: intent.client_secret,
+      paymentIntentId: intent.id,
+      amount: link.amount,
+    };
+  },
+});
+
+/** Confirme le paiement d'un lien après relecture du statut chez Stripe. */
+export const confirmPaymentLink = action({
+  args: {
+    token: v.string(),
+    paymentIntentId: v.string(),
+    customer: v.optional(
+      v.object({
+        firstName: v.string(),
+        lastName: v.string(),
+        email: v.string(),
+        phone: v.string(),
+      }),
+    ),
+  },
+  handler: async (ctx, args): Promise<{ requestId: Id<"requests"> | null }> => {
+    const secretKey = recycappSecretKey();
+
+    const intent = await stripeRequest<{
+      id: string;
+      status: string;
+      metadata?: { paymentLinkToken?: string };
+    }>(`payment_intents/${args.paymentIntentId}`, secretKey);
+
+    if (intent.metadata?.paymentLinkToken !== args.token) {
+      throw new Error("Ce paiement ne correspond pas au lien attendu.");
+    }
+    if (intent.status !== "succeeded") {
+      throw new Error(
+        "Le paiement n'est pas confirmé par Stripe. Aucune commande n'a été enregistrée.",
+      );
+    }
+
+    return await ctx.runMutation(internal.requests.finalizePaymentLink, {
+      token: args.token,
+      stripePaymentIntentId: intent.id,
+      customer: args.customer,
+    });
+  },
+});

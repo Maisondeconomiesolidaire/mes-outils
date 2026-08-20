@@ -419,6 +419,39 @@ const AEROGOMMAGE_STAFF_EMAILS = [
   "e.carette@eco-solidaire.fr",
 ];
 
+/** Lien de paiement envoyé au client depuis le CRM. */
+export const sendPaymentLink = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    amount: v.number(),
+    url: v.string(),
+    articleTitles: v.array(v.string()),
+  },
+  handler: async (_ctx, { email, name, amount, url, articleTitles }) => {
+    const list = articleTitles.length
+      ? `<ul style="margin:0 0 22px;padding-left:20px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.7;color:#3f3f46;">
+          ${articleTitles.map((title) => `<li>${esc(title)}</li>`).join("")}
+        </ul>`
+      : "";
+    const html = shell({
+      preheader: `Réglez votre commande en ligne : ${euro(amount)}.`,
+      heading: "Votre lien de paiement",
+      intro: `Bonjour ${esc(name || "")},<br/><br/>Voici le lien pour régler votre commande en ligne, d'un montant de <strong>${euro(amount)}</strong>. Le paiement est sécurisé et ne prend qu'une minute.`,
+      contentHtml: `
+        ${list}
+        <div style="margin:0 0 22px;">${button(url, `Payer ${euro(amount)}`)}</div>
+        <p style="margin:0 0 18px;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">
+          Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br/>
+          <span style="word-break:break-all;color:${BRAND};">${esc(url)}</span>
+        </p>
+        ${pickupDeadlineNotice()}
+      `,
+    });
+    await resendSend(email, `Votre lien de paiement · ${euro(amount)}`, html);
+  },
+});
+
 export const sendNewRequestToStaff = internalAction({
   args: {
     type: v.string(),

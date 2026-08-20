@@ -1145,6 +1145,107 @@ export const attachStripePaymentIntentToPublicDraft = internalMutation({
   },
 });
 
+/**
+ * Encaissement d'un lien de paiement : marque les articles vendus et solde la
+ * demande liée — ou en crée une quand le lien a été généré depuis un article,
+ * sans demande préalable. Idempotent : rejouer l'appel ne crée rien de plus.
+ */
+export const finalizePaymentLink = internalMutation({
+  args: {
+    token: v.string(),
+    stripePaymentIntentId: v.string(),
+    customer: v.optional(customerArg),
+    comment: v.optional(v.string()),
+  },
+  handler: async (ctx, { token, stripePaymentIntentId, customer, comment }) => {
+    const link = await ctx.db
+      .query("paymentLinks")
+      .withIndex("by_token", (q) => q.eq("token", token))
+      .unique();
+    if (!link) throw new Error("Lien de paiement introuvable.");
+    if (link.status === "paid") {
+      return { requestId: link.requestId ?? null };
+    }
+
+    const now = Date.now();
+    const payment = {
+      method: "cb" as const,
+      status: "paid" as const,
+      validated: true,
+      captured: true,
+      provider: "stripe" as const,
+      stripePaymentIntentId,
+      paidAt: now,
+    };
+
+    const articles: Array<{ articleId: Id<"articles">; articleTitle: string }> = [];
+    for (const articleId of link.articleIds) {
+      const article = await ctx.db.get(articleId);
+      if (!article) continue;
+      articles.push({ articleId, articleTitle: article.title });
+      if (article.status !== "vendu") {
+        await ctx.db.patch(articleId, { status: "vendu" });
+      }
+    }
+
+    let requestId = link.requestId ?? null;
+    if (requestId) {
+      const request = await ctx.db.get(requestId);
+      if (!request) throw new Error("Demande introuvable.");
+      await ctx.db.patch(requestId, {
+        payment,
+        outcome: "gagnee",
+        completedSteps: request.processSteps.length,
+        updatedAt: now,
+      });
+    } else {
+      // Lien généré depuis un article : on crée la demande boutique payée.
+      const linkCustomer = normalizeCustomer(
+        customer ?? link.customer ?? {
+          firstName: "Client",
+          lastName: "boutique",
+          email: "",
+          phone: "",
+        },
+      );
+      const steps = resolveProcess("article");
+      const reference = await generateReference(ctx);
+      requestId = await ctx.db.insert("requests", {
+        type: "article",
+        stage: "nouveau",
+        outcome: "gagnee",
+        requestOrigin: "external",
+        complete: isArticleComplete(linkCustomer),
+        processSteps: steps,
+        completedSteps: steps.length,
+        customer: linkCustomer,
+        comment,
+        photos: [],
+        article: articles[0],
+        articles,
+        payment,
+        createdAt: now,
+        updatedAt: now,
+        reference,
+      });
+      await createNewRequestNotification(ctx, {
+        requestId,
+        requestType: "article",
+        customerName: customerFullName(linkCustomer),
+      });
+    }
+
+    await ctx.db.patch(link._id, {
+      status: "paid",
+      stripePaymentIntentId,
+      paidAt: now,
+      ...(customer && !link.customer ? { customer: normalizeCustomer(customer) } : {}),
+    });
+
+    return { requestId };
+  },
+});
+
 export const finalizePublicStripeCheckout = internalMutation({
   args: {
     draftId: v.id("publicStripeCheckoutDrafts"),

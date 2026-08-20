@@ -112,7 +112,13 @@ http.route({
 
     const event = JSON.parse(payload) as {
       type?: string;
-      data?: { object?: { id?: string; status?: string; metadata?: { draftId?: string } } };
+      data?: {
+        object?: {
+          id?: string;
+          status?: string;
+          metadata?: { draftId?: string; paymentLinkToken?: string };
+        };
+      };
     };
     const intent = event.data?.object;
 
@@ -122,25 +128,35 @@ http.route({
     }
 
     const draftId = intent?.metadata?.draftId;
-    if (!draftId || !intent?.id) {
-      console.error("payment_intent.succeeded sans draftId exploitable.");
+    const paymentLinkToken = intent?.metadata?.paymentLinkToken;
+    if ((!draftId && !paymentLinkToken) || !intent?.id) {
+      console.error("payment_intent.succeeded sans panier ni lien de paiement exploitable.");
       return new Response("ok", { status: 200 });
     }
 
     try {
-      // Idempotent : si la commande a déjà été créée par le navigateur, la
-      // mutation renvoie simplement la demande existante.
-      await ctx.runMutation(internal.requests.finalizePublicStripeCheckout, {
-        draftId: draftId as Id<"publicStripeCheckoutDrafts">,
-        stripePaymentIntentId: intent.id,
-      });
+      // Idempotent dans les deux cas : si la commande a déjà été créée par le
+      // navigateur, la mutation renvoie simplement la demande existante.
+      if (paymentLinkToken) {
+        await ctx.runMutation(internal.requests.finalizePaymentLink, {
+          token: paymentLinkToken,
+          stripePaymentIntentId: intent.id,
+        });
+      } else {
+        await ctx.runMutation(internal.requests.finalizePublicStripeCheckout, {
+          draftId: draftId as Id<"publicStripeCheckoutDrafts">,
+          stripePaymentIntentId: intent.id,
+        });
+      }
       return new Response("ok", { status: 200 });
     } catch (error) {
       // Un échec ici = un client débité sans commande (article vendu entre
       // temps, par exemple). On renvoie une erreur pour que Stripe réessaie et
       // que l'incident reste visible dans le dashboard.
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`Finalisation impossible pour le brouillon ${draftId} : ${message}`);
+      console.error(
+        `Finalisation impossible (${paymentLinkToken ? `lien ${paymentLinkToken}` : `brouillon ${draftId}`}) : ${message}`,
+      );
       return new Response(message, { status: 500 });
     }
   }),
