@@ -433,9 +433,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
       </div>
       <section className="premium-panel overflow-hidden rounded-2xl">
         <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-2.5">
-          <p className="text-sm font-bold text-[var(--foreground)]">
-            Réservations, de la plus récemment enregistrée à la plus ancienne
-          </p>
+          <p className="text-sm font-bold text-[var(--foreground)]">Réservations</p>
         </div>
         <div className="divide-y divide-[var(--border)]">
           {byCreationDesc.map((reservation) => {
