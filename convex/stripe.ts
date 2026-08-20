@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { action, env } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { accessAllows } from "./lib";
@@ -450,7 +450,7 @@ export const createPublicCartPaymentIntent = action({
       });
 
     if (draft.total <= 0) {
-      throw new Error("Le montant du panier doit être supérieur à 0 €.");
+      throw new ConvexError("Le montant du panier doit être supérieur à 0 €.");
     }
 
     const fullName = `${args.customer.firstName} ${args.customer.lastName}`.trim();
@@ -510,10 +510,10 @@ export const confirmPublicCartPayment = action({
     }>(`payment_intents/${args.paymentIntentId}`, secretKey);
 
     if (intent.metadata?.draftId !== args.draftId) {
-      throw new Error("Ce paiement ne correspond pas au panier attendu.");
+      throw new ConvexError("Ce paiement ne correspond pas au panier attendu.");
     }
     if (intent.status !== "succeeded") {
-      throw new Error(
+      throw new ConvexError(
         "Le paiement n'est pas confirmé par Stripe. Aucune commande n'a été enregistrée.",
       );
     }
@@ -549,9 +549,9 @@ export const createPaymentIntentForLink = action({
     const link = await ctx.runQuery(internal.paymentLinks.byTokenInternal, {
       token: args.token,
     });
-    if (!link) throw new Error("Ce lien de paiement n'existe pas ou a été supprimé.");
-    if (link.status === "paid") throw new Error("Cette commande est déjà réglée.");
-    if (link.status === "cancelled") throw new Error("Ce lien de paiement a été annulé.");
+    if (!link) throw new ConvexError("Ce lien de paiement n'existe pas ou a été supprimé.");
+    if (link.status === "paid") throw new ConvexError("Cette commande est déjà réglée.");
+    if (link.status === "cancelled") throw new ConvexError("Ce lien de paiement a été annulé.");
 
     const email = args.customer?.email ?? link.customer?.email;
     const intent = await stripeRequest<{ id: string; client_secret: string }>(
@@ -607,10 +607,10 @@ export const confirmPaymentLink = action({
     }>(`payment_intents/${args.paymentIntentId}`, secretKey);
 
     if (intent.metadata?.paymentLinkToken !== args.token) {
-      throw new Error("Ce paiement ne correspond pas au lien attendu.");
+      throw new ConvexError("Ce paiement ne correspond pas au lien attendu.");
     }
     if (intent.status !== "succeeded") {
-      throw new Error(
+      throw new ConvexError(
         "Le paiement n'est pas confirmé par Stripe. Aucune commande n'a été enregistrée.",
       );
     }

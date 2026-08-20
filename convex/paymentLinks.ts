@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import {
   action,
   internalMutation,
@@ -41,21 +41,38 @@ export function paymentLinkUrl(token: string) {
   return `${shopUrl()}/paiement/${token}`;
 }
 
-/** Articles vendables et somme correspondante. */
-async function priceArticles(ctx: QueryCtx | MutationCtx, articleIds: Id<"articles">[]) {
+/**
+ * Articles facturables et somme correspondante.
+ *
+ * `allowSold` est utilisé quand le lien vient d'une demande existante : ses
+ * articles ont souvent déjà été basculés en « vendu » au moment de la mise de
+ * côté, et c'est justement cette demande qu'il s'agit de faire régler. Pour un
+ * lien ad hoc, en revanche, un article vendu ne doit pas être revendu.
+ */
+async function priceArticles(
+  ctx: QueryCtx | MutationCtx,
+  articleIds: Id<"articles">[],
+  { allowSold = false }: { allowSold?: boolean } = {},
+) {
   const articles: Doc<"articles">[] = [];
   let amount = 0;
   for (const articleId of articleIds) {
     const article = await ctx.db.get(articleId);
-    if (!article) throw new Error("Article introuvable.");
-    if (article.status === "vendu") {
-      throw new Error(`« ${article.title} » est déjà vendu.`);
+    if (!article) throw new ConvexError("Article introuvable.");
+    if (article.status === "vendu" && !allowSold) {
+      throw new ConvexError(
+        `« ${article.title} » est déjà vendu : impossible d'en générer un lien de paiement.`,
+      );
     }
     articles.push(article);
     amount += article.price;
   }
-  if (articles.length === 0) throw new Error("Aucun article à facturer.");
-  if (amount <= 0) throw new Error("Le montant du lien doit être supérieur à 0 €.");
+  if (articles.length === 0) {
+    throw new ConvexError("Aucun article à facturer sur cette demande.");
+  }
+  if (amount <= 0) {
+    throw new ConvexError("Le montant du lien doit être supérieur à 0 €.");
+  }
   return { articles, amount: Math.round(amount * 100) / 100 };
 }
 
@@ -79,9 +96,9 @@ export const create = mutation({
 
     if (requestId) {
       const request = await ctx.db.get(requestId);
-      if (!request) throw new Error("Demande introuvable.");
+      if (!request) throw new ConvexError("Demande introuvable.");
       if (request.payment?.status === "paid") {
-        throw new Error("Cette demande est déjà payée.");
+        throw new ConvexError("Cette demande est déjà payée.");
       }
       customer = request.customer;
       if (targetIds.length === 0) {
@@ -99,7 +116,9 @@ export const create = mutation({
       if (pending) return { token: pending.token, amount: pending.amount, reused: true };
     }
 
-    const { amount } = await priceArticles(ctx, targetIds);
+    const { amount } = await priceArticles(ctx, targetIds, {
+      allowSold: Boolean(requestId),
+    });
     const token = generateToken();
     await ctx.db.insert("paymentLinks", {
       token,
@@ -158,9 +177,9 @@ export const sendByEmail = action({
     const link = await ctx.runQuery(internal.paymentLinks.byTokenInternal, {
       token: created.token,
     });
-    if (!link) throw new Error("Lien de paiement introuvable.");
+    if (!link) throw new ConvexError("Lien de paiement introuvable.");
     const email = link.customer?.email;
-    if (!email) throw new Error("Cette demande n'a pas d'adresse email.");
+    if (!email) throw new ConvexError("Cette demande n'a pas d'adresse email : renseignez-la avant d'envoyer le lien.");
 
     const details = await ctx.runQuery(internal.paymentLinks.articleTitles, {
       token: created.token,
@@ -244,7 +263,7 @@ export const attachPaymentIntent = internalMutation({
       .query("paymentLinks")
       .withIndex("by_token", (q) => q.eq("token", token))
       .unique();
-    if (!link) throw new Error("Lien de paiement introuvable.");
+    if (!link) throw new ConvexError("Lien de paiement introuvable.");
     await ctx.db.patch(link._id, { stripePaymentIntentId });
   },
 });
