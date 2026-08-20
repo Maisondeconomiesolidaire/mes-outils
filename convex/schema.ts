@@ -438,6 +438,28 @@ export default defineSchema(
     .index("by_caisse", ["caisseId"]),
 
   /**
+   * Pool de QR codes d'articles imprimés À L'AVANCE.
+   *
+   * L'équipe imprime une planche d'étiquettes vierges, les colle sur les objets
+   * au fil de la collecte, puis crée les fiches en scannant le code déjà posé.
+   * Cela évite l'aller-retour « créer la fiche → imprimer → retrouver l'objet →
+   * coller ». La référence a le même format que `articles.internalReference`
+   * (6 chiffres), donc un code scanné se comporte exactement comme aujourd'hui.
+   */
+  articleQrCodes: defineTable({
+    reference: v.string(),
+    /** Renseigné dès que le code est attribué à un article. */
+    articleId: v.optional(v.id("articles")),
+    assignedAt: v.optional(v.number()),
+    /** Horodatage de la planche d'impression, pour regrouper un lot de codes. */
+    batchAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_reference", ["reference"])
+    .index("by_article", ["articleId"])
+    .index("by_batch", ["batchAt"]),
+
+  /**
    * Caisses de rangement de la recyclerie : chaque caisse porte un QR code
    * collé dessus. On scanne la caisse à l'ajout d'un article pour l'y ranger,
    * et on la rescanne pour voir tout ce qu'elle contient.

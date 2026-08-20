@@ -32,6 +32,18 @@ const CATEGORIES = {
 
 const CONDITIONS = ["Neuf", "Très bon état", "Bon état", "État correct", "À rénover"];
 
+/**
+ * Modèles OpenAI utilisés par le module.
+ *
+ * `gpt-4o-search-preview`, qui portait la recherche de prix, a été retiré par
+ * OpenAI (404 `model_not_found`). Son remplaçant en Chat Completions,
+ * `gpt-5-search-api`, est plafonné à 6 000 jetons par minute sur ce compte :
+ * un run de quelques articles le sature immédiatement. On passe donc par
+ * l'API Responses et l'outil `web_search` de `gpt-5.5`, qui consomme les quotas
+ * (bien plus larges) du modèle principal.
+ */
+const MODEL = "gpt-5.5";
+
 // ─── Step 1: vision identification prompt ─────────────────────────────────────
 const IDENTIFICATION_PROMPT = `Tu es un inspecteur d'articles de seconde main réputé pour son regard critique et honnête. Tu ne flattes jamais l'état d'un article.
 
@@ -219,10 +231,24 @@ function extractJsonObject(raw: string): string | null {
   return null;
 }
 
+/**
+ * Appel Chat Completions renvoyant du JSON.
+ *
+ * Les modèles gpt-5 n'acceptent plus `max_tokens` (remplacé par
+ * `max_completion_tokens`) ni une `temperature` autre que 1 : la conversion est
+ * faite ici pour que les appelants restent lisibles.
+ */
 async function callOpenAI<T>(
   apiKey: string,
-  body: Record<string, unknown>,
+  { max_tokens, temperature: _temperature, ...rest }: Record<string, unknown> & {
+    max_tokens?: number;
+    temperature?: number;
+  },
 ): Promise<T> {
+  const body = {
+    ...rest,
+    ...(max_tokens !== undefined ? { max_completion_tokens: max_tokens } : {}),
+  };
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -249,6 +275,69 @@ async function callOpenAI<T>(
     // `finish_reason: "length"` = réponse coupée par `max_tokens` : le JSON est
     // tronqué et illisible. C'était la cause la plus fréquente des échecs de run.
     if (choice?.finish_reason === "length") {
+      throw new Error(
+        "Réponse IA tronquée (limite de jetons atteinte) — relancez l'article.",
+      );
+    }
+    throw new Error("Réponse IA non parseable : " + raw.slice(0, 200));
+  }
+
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    throw new Error("Réponse IA non parseable : " + json.slice(0, 200));
+  }
+}
+
+/**
+ * Appel avec recherche web, via l'API Responses et l'outil `web_search`.
+ *
+ * C'est le remplaçant de `gpt-4o-search-preview` : le modèle navigue lui-même
+ * pour trouver des prix réels, puis rend le JSON demandé. La réponse mêle
+ * souvent prose, citations et bloc ```json — `extractJsonObject` s'en charge.
+ */
+async function callOpenAIWebSearch<T>(
+  apiKey: string,
+  {
+    instructions,
+    input,
+    maxOutputTokens,
+  }: { instructions: string; input: string; maxOutputTokens: number },
+): Promise<T> {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      instructions,
+      input,
+      tools: [{ type: "web_search" }],
+      max_output_tokens: maxOutputTokens,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Erreur API OpenAI (${response.status}): ${err.slice(0, 300)}`);
+  }
+
+  const data = (await response.json()) as {
+    status?: string;
+    output?: Array<{ content?: Array<{ type: string; text?: string }> }>;
+  };
+
+  const raw = (data.output ?? [])
+    .flatMap((item) => item.content ?? [])
+    .filter((part) => part.type === "output_text")
+    .map((part) => part.text ?? "")
+    .join("");
+
+  const json = extractJsonObject(raw);
+  if (!json) {
+    if (data.status === "incomplete") {
       throw new Error(
         "Réponse IA tronquée (limite de jetons atteinte) — relancez l'article.",
       );
@@ -420,8 +509,7 @@ export const analyzePotentialLots = action({
 
     try {
       const result = await callOpenAI<LotAnalysisResult>(apiKey, {
-        model: "gpt-4o",
-        temperature: 0.1,
+        model: MODEL,
         max_tokens: 2000,
         messages: [
           {
@@ -504,12 +592,11 @@ export const analyzeArticleImage = action({
 
     // ── Étape 1 : identification visuelle ──────────────────────────────────
     const identification = await callOpenAI<IdentificationResult>(apiKey, {
-      model: "gpt-4o",
-      // 400 jetons coupaient regulierement le JSON d'identification en plein
-      // milieu (finish_reason "length"), ce qui faisait echouer le run.
-      max_tokens: 900,
+      model: MODEL,
+      // 400 jetons coupaient régulièrement le JSON d'identification en plein
+      // milieu (finish_reason « length »), ce qui faisait échouer le run.
+      max_tokens: 1500,
       response_format: { type: "json_object" },
-      temperature: 0.1,
       messages: [
         { role: "system", content: IDENTIFICATION_PROMPT },
         {
@@ -523,7 +610,7 @@ export const analyzeArticleImage = action({
     });
 
     // ── Étape 2 : recherche marché + valorisation ──────────────────────────
-    // gpt-4o-search-preview peut naviguer sur le web pour trouver des prix réels
+    // Le modèle navigue lui-même sur le web pour trouver des prix réels.
     // Le modèle omet parfois `searchQueries` : sans garde, l'accès à
     // `searchQueries[0]` faisait planter l'action entière.
     const queries =
@@ -546,14 +633,10 @@ IMPORTANT : applique toutes les décotes selon l'état "${identification.estimat
 
 Produis l'évaluation JSON complète basée sur les résultats trouvés.`;
 
-    const result = await callOpenAI<ArticleAIAnalysis>(apiKey, {
-      model: "gpt-4o-search-preview",
-      max_tokens: 2400,
-      web_search_options: { search_context_size: "medium" },
-      messages: [
-        { role: "system", content: VALUATION_PROMPT },
-        { role: "user", content: searchUserPrompt },
-      ],
+    const result = await callOpenAIWebSearch<ArticleAIAnalysis>(apiKey, {
+      instructions: VALUATION_PROMPT,
+      input: searchUserPrompt,
+      maxOutputTokens: 4000,
     });
 
     // Sanity checks
@@ -652,21 +735,14 @@ ${brief}
 
 En plus des champs JSON habituels, ajoute le champ "weightKg" : le poids estimé de l'article en kilogrammes (nombre, ex: 0.5, 2, 12).`;
 
-    const result = await callOpenAI<ArticleAIAnalysis & { weightKg?: number }>(
+    const result = await callOpenAIWebSearch<ArticleAIAnalysis & { weightKg?: number }>(
       apiKey,
       {
-        model: "gpt-4o-search-preview",
-        max_tokens: 2400,
-        web_search_options: { search_context_size: "medium" },
-        messages: [
-          {
-            role: "system",
-            content:
-              VALUATION_PROMPT +
-              `\n\nIMPORTANT : ajoute aussi le champ "weightKg" (poids estimé en kilogrammes, nombre) dans le JSON de réponse.`,
-          },
-          { role: "user", content: userPrompt },
-        ],
+        instructions:
+          VALUATION_PROMPT +
+          `\n\nIMPORTANT : ajoute aussi le champ "weightKg" (poids estimé en kilogrammes, nombre) dans le JSON de réponse.`,
+        input: userPrompt,
+        maxOutputTokens: 4000,
       },
     );
 
@@ -707,9 +783,8 @@ export const generateLotDescription = action({
 
     try {
       const result = await callOpenAI<{ description: string }>(apiKey, {
-        model: "gpt-4o",
-        temperature: 0.6,
-        max_tokens: 400,
+        model: MODEL,
+        max_tokens: 900,
         messages: [
           {
             role: "system",

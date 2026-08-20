@@ -2,6 +2,11 @@ import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { requireCrmPermission } from "./lib";
+import {
+  claimQrCode,
+  normalizeReference,
+  releaseQrCodes,
+} from "./articleQrCodes";
 import { Doc, Id } from "./_generated/dataModel";
 
 async function withImageUrls(
@@ -420,6 +425,17 @@ export const listAll = query({
   },
 });
 
+/** Fiche article complète pour le CRM (page /crm/articles/:id). */
+export const getForCrm = query({
+  args: { id: v.id("articles") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, "articles", "read");
+    const article = await ctx.db.get(id);
+    if (!article) return null;
+    return withImageUrls(ctx, article);
+  },
+});
+
 export const listForLotAnalysis = query({
   args: {},
   handler: async (ctx) => {
@@ -464,6 +480,11 @@ export const create = mutation({
     weightKg: v.number(),
     location: v.optional(v.string()),
     caisseId: v.optional(v.id("caisses")),
+    /**
+     * Référence d'un QR code déjà imprimé et collé sur l'objet. Fournie, elle
+     * devient la référence interne de l'article au lieu d'en tirer une neuve.
+     */
+    qrReference: v.optional(v.string()),
     originalPrice: v.optional(v.number()),
     gdrReference: v.optional(v.string()),
     category: v.string(),
@@ -478,12 +499,13 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "articles", "create");
-    const internalReference = await generateInternalReference(ctx);
+    const scanned = args.qrReference ? normalizeReference(args.qrReference) : "";
+    const internalReference = scanned || (await generateInternalReference(ctx));
     assertArticleReferences({
       internalReference,
       gdrReference: args.gdrReference,
     });
-    const { desiredStatus, ...articleArgs } = args;
+    const { desiredStatus, qrReference: _qrReference, ...articleArgs } = args;
     const shouldKeepForLot = desiredStatus === "attente" || desiredStatus === "lot";
     const articleId = await ctx.db.insert("articles", {
       ...articleArgs,
@@ -498,6 +520,7 @@ export const create = mutation({
       status: shouldKeepForLot ? "attente" : "disponible",
       createdAt: Date.now(),
     });
+    if (scanned) await claimQrCode(ctx, scanned, articleId);
     return articleId;
   },
 });
@@ -513,8 +536,13 @@ export const createDraftsFromPhotos = mutation({
     storageIds: v.array(v.id("_storage")),
     /** Caisse dans laquelle ranger tous les brouillons créés. */
     caisseId: v.optional(v.id("caisses")),
+    /**
+     * QR codes déjà collés sur les objets, alignés sur `storageIds`. Une chaîne
+     * vide laisse tirer une référence neuve pour cette photo.
+     */
+    qrReferences: v.optional(v.array(v.string())),
   },
-  handler: async (ctx, { storageIds, caisseId }) => {
+  handler: async (ctx, { storageIds, caisseId, qrReferences }) => {
     await requireCrmPermission(ctx, "articles", "create");
     if (storageIds.length === 0) {
       throw new Error("Ajoutez au moins une photo.");
@@ -526,8 +554,9 @@ export const createDraftsFromPhotos = mutation({
     const created: Array<{ id: Id<"articles">; internalReference: string }> = [];
     // Les références sont tirées une par une : `generateInternalReference` relit
     // la table, donc les brouillons déjà insérés sont bien pris en compte.
-    for (const storageId of storageIds) {
-      const internalReference = await generateInternalReference(ctx);
+    for (const [index, storageId] of storageIds.entries()) {
+      const scanned = normalizeReference(qrReferences?.[index] ?? "");
+      const internalReference = scanned || (await generateInternalReference(ctx));
       const id = await ctx.db.insert("articles", {
         title: `Article ${internalReference}`,
         description: "",
@@ -541,6 +570,7 @@ export const createDraftsFromPhotos = mutation({
         draft: true,
         createdAt: Date.now(),
       });
+      if (scanned) await claimQrCode(ctx, scanned, id);
       created.push({ id, internalReference });
     }
     return created;
@@ -762,6 +792,9 @@ export const remove = mutation({
   args: { id: v.id("articles") },
   handler: async (ctx, { id }) => {
     await requireCrmPermission(ctx, "articles", "delete");
+    // L'étiquette reste collée quelque part : on rend le code au pool plutôt
+    // que de le perdre avec l'article.
+    await releaseQrCodes(ctx, id);
     await ctx.db.delete(id);
   },
 });

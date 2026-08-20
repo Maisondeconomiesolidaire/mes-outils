@@ -10,6 +10,7 @@
 
 import type * as ai from "../ai.js";
 import type * as arrivages from "../arrivages.js";
+import type * as articleQrCodes from "../articleQrCodes.js";
 import type * as articles from "../articles.js";
 import type * as ateliers from "../ateliers.js";
 import type * as bennespro from "../bennespro.js";
@@ -67,6 +68,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   ai: typeof ai;
   arrivages: typeof arrivages;
+  articleQrCodes: typeof articleQrCodes;
   articles: typeof articles;
   ateliers: typeof ateliers;
   bennespro: typeof bennespro;
