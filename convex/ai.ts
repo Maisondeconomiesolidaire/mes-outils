@@ -42,16 +42,23 @@ const CONDITIONS = ["Neuf", "Très bon état", "Bon état", "État correct", "À
  * l'API Responses et l'outil `web_search`, qui consomme les quotas (bien plus
  * larges) du modèle principal.
  *
- * `gpt-5.4` plutôt que `gpt-5.5` : mesuré sur ce pipeline (identification
- * visuelle + valorisation avec recherche), il rend les mêmes prix pour environ
- * un tiers du coût — ~0,08 € par article contre ~0,23 €, et deux fois plus vite.
+ * Coût mesuré sur ce pipeline (identification visuelle d'une photo du stock +
+ * valorisation avec recherche web), par article :
  *
- * `gpt-5.4-mini` coûterait encore trois fois moins (~0,026 €) mais applique mal
- * les décotes du prompt : sur le même article il proposait 7 à 9 € là où 5.4 et
- * 5.5 convergeaient vers 3,50–4,50 €. Surévaluer, dans une recyclerie, c'est du
- * stock qui ne part pas — l'économie ne vaut pas ce risque.
+ *   gpt-5.5        ~0,23 €    prix 3,50 €
+ *   gpt-5.4        ~0,081 €   prix 3,50–4,50 €
+ *   gpt-5.4-mini   ~0,027 €   prix 7–14 €
+ *   gpt-5.4-nano   ~0,015 €   prix 4–13 €, justification d'état parfois vide
+ *
+ * `gpt-5.4-mini` est le choix retenu : trois fois moins cher que 5.4, et sa
+ * lecture des photos reste solide (même état constaté, justification détaillée).
+ *
+ * ⚠️ Il applique en revanche moins strictement les décotes du prompt et
+ * surévalue d'un facteur ~2 sur les petits articles. Si trop de stock reste
+ * invendu, la première chose à faire est de repasser cette constante à
+ * `gpt-5.4` — le reste du code est identique.
  */
-const MODEL = "gpt-5.4";
+const MODEL = "gpt-5.4-mini";
 
 // ─── Step 1: vision identification prompt ─────────────────────────────────────
 const IDENTIFICATION_PROMPT = `Tu es un inspecteur d'articles de seconde main réputé pour son regard critique et honnête. Tu ne flattes jamais l'état d'un article.

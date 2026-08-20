@@ -34,6 +34,8 @@ type Room = {
 
 type RoomReservation = {
   _id: Id<"roomReservations">;
+  /** Date d'enregistrement du record — l'ordre de lecture de la liste. */
+  _creationTime: number;
   roomId: Id<"rooms">;
   title: string;
   usageType?: string;
@@ -405,11 +407,15 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
     return <EmptyState icon={<CalendarDays className="h-8 w-8" />} title="Aucune réservation" description="Le planning des salles à venir s'affichera ici." />;
   }
 
-  const byDay = new Map<string, typeof upcoming>();
-  for (const reservation of upcoming) {
-    const key = formatDate(reservation.start);
-    byDay.set(key, [...(byDay.get(key) ?? []), reservation]);
-  }
+  /**
+   * La liste se lit comme un journal des demandes : la réservation enregistrée
+   * en dernier arrive en tête, quelle que soit la date réservée. Le calendrier
+   * et le panneau du jour, eux, restent chronologiques — c'est leur raison
+   * d'être.
+   */
+  const byCreationDesc = [...upcoming].sort(
+    (a, b) => b._creationTime - a._creationTime,
+  );
 
   async function cancelReservationWithConfirmation(reservationId: Id<"roomReservations">) {
     const message = canDeleteForever
@@ -425,42 +431,45 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
         <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher par salle, nom, objet..." className="pl-9" />
       </div>
-      {Array.from(byDay.entries()).map(([day, items]) => (
-        <section key={day} className="premium-panel overflow-hidden rounded-2xl">
-          <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-2.5">
-            <p className="text-sm font-bold capitalize text-[var(--foreground)]">{day}</p>
-          </div>
-          <div className="divide-y divide-[var(--border)]">
-            {items.map((reservation) => {
-              const room = roomName.get(String(reservation.roomId));
-              return (
-                <div key={reservation._id} className="flex flex-wrap items-center gap-4 px-5 py-3">
-                  <span className="h-9 w-1.5 shrink-0 rounded-full bg-brand-500" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-[var(--foreground)]">
-                      {reservation.title} · {room?.name ?? "Salle"}
-                    </p>
-                    <p className="truncate text-xs text-[var(--muted-foreground)]">
-                      {reservation.userName} · {formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}
-                    </p>
-                  </div>
-                  <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(reservation._id)}>
-                    <Info className="h-4 w-4" />Détails
-                  </Button>
-                  <button
-                    type="button"
-                    onClick={() => cancelReservationWithConfirmation(reservation._id)}
-                    className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"
-                    title={canDeleteForever ? "Supprimer" : "Annuler la réservation"}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+      <section className="premium-panel overflow-hidden rounded-2xl">
+        <div className="border-b border-[var(--border)] bg-[var(--accent)] px-5 py-2.5">
+          <p className="text-sm font-bold text-[var(--foreground)]">
+            Réservations, de la plus récemment enregistrée à la plus ancienne
+          </p>
+        </div>
+        <div className="divide-y divide-[var(--border)]">
+          {byCreationDesc.map((reservation) => {
+            const room = roomName.get(String(reservation.roomId));
+            return (
+              <div key={reservation._id} className="flex flex-wrap items-center gap-4 px-5 py-3">
+                <span className="h-9 w-1.5 shrink-0 rounded-full bg-brand-500" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-[var(--foreground)]">
+                    {reservation.title} · {room?.name ?? "Salle"}
+                  </p>
+                  <p className="truncate text-xs text-[var(--muted-foreground)]">
+                    {reservation.userName} · {formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}
+                  </p>
+                  <p className="truncate text-xs text-[var(--muted-foreground)]">
+                    Enregistrée le {formatDateTime(reservation._creationTime)}
+                  </p>
                 </div>
-              );
-            })}
-          </div>
-        </section>
-      ))}
+                <Button size="sm" variant="secondary" onClick={() => setSelectedReservationId(reservation._id)}>
+                  <Info className="h-4 w-4" />Détails
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => cancelReservationWithConfirmation(reservation._id)}
+                  className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"
+                  title={canDeleteForever ? "Supprimer" : "Annuler la réservation"}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </section>
       <RoomReservationDetailsModal
         reservation={selectedReservation}
         room={selectedReservation ? roomName.get(String(selectedReservation.roomId)) ?? null : null}
