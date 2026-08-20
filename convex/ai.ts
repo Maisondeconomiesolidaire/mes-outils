@@ -33,16 +33,25 @@ const CATEGORIES = {
 const CONDITIONS = ["Neuf", "Très bon état", "Bon état", "État correct", "À rénover"];
 
 /**
- * Modèles OpenAI utilisés par le module.
+ * Modèle OpenAI utilisé par le module.
  *
  * `gpt-4o-search-preview`, qui portait la recherche de prix, a été retiré par
  * OpenAI (404 `model_not_found`). Son remplaçant en Chat Completions,
  * `gpt-5-search-api`, est plafonné à 6 000 jetons par minute sur ce compte :
  * un run de quelques articles le sature immédiatement. On passe donc par
- * l'API Responses et l'outil `web_search` de `gpt-5.5`, qui consomme les quotas
- * (bien plus larges) du modèle principal.
+ * l'API Responses et l'outil `web_search`, qui consomme les quotas (bien plus
+ * larges) du modèle principal.
+ *
+ * `gpt-5.4` plutôt que `gpt-5.5` : mesuré sur ce pipeline (identification
+ * visuelle + valorisation avec recherche), il rend les mêmes prix pour environ
+ * un tiers du coût — ~0,08 € par article contre ~0,23 €, et deux fois plus vite.
+ *
+ * `gpt-5.4-mini` coûterait encore trois fois moins (~0,026 €) mais applique mal
+ * les décotes du prompt : sur le même article il proposait 7 à 9 € là où 5.4 et
+ * 5.5 convergeaient vers 3,50–4,50 €. Surévaluer, dans une recyclerie, c'est du
+ * stock qui ne part pas — l'économie ne vaut pas ce risque.
  */
-const MODEL = "gpt-5.5";
+const MODEL = "gpt-5.4";
 
 // ─── Step 1: vision identification prompt ─────────────────────────────────────
 const IDENTIFICATION_PROMPT = `Tu es un inspecteur d'articles de seconde main réputé pour son regard critique et honnête. Tu ne flattes jamais l'état d'un article.
