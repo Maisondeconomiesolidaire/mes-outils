@@ -156,6 +156,37 @@ function noReplyNotice() {
   </table>`;
 }
 
+/** Délai laissé au client pour venir chercher un article payé en ligne. */
+export const PICKUP_DEADLINE_DAYS = 5;
+
+/**
+ * Rappel du délai de retrait, affiché uniquement sur les commandes payées en
+ * ligne : passé ce délai l'article est remboursé et remis en vente.
+ */
+function pickupDeadlineNotice(deadline?: number) {
+  const dateLine = deadline
+    ? `<p style="margin:0 0 12px;font-family:Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;line-height:1.6;color:#3f3f46;">
+        À retirer avant le ${formatDay(deadline)}.
+      </p>`
+    : "";
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:26px 0 0;border:2px solid #f59e0b;border-radius:16px;background:#fffbeb;">
+    <tr>
+      <td class="px" style="padding:22px 24px;">
+        <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;line-height:1.35;color:#b45309;">
+          ⏳ Vous avez ${PICKUP_DEADLINE_DAYS} jours pour retirer votre article
+        </p>
+        ${dateLine}
+        <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">
+          Passé ce délai, votre commande sera <strong>remboursée</strong> et
+          l'article <strong>remis en vente</strong> en boutique et en ligne.
+          Si vous ne pouvez pas venir à temps, prévenez-nous depuis votre espace
+          client : nous trouverons une solution.
+        </p>
+      </td>
+    </tr>
+  </table>`;
+}
+
 /** Gabarit complet : préheader, en-tête (logo), contenu, pied de page. */
 function shell(opts: {
   preheader: string;
@@ -337,22 +368,42 @@ export const sendRequestConfirmation = internalAction({
     type: v.string(),
     requestId: v.string(),
     article: articleArg,
+    /** Commande réglée en ligne : le message parle d'achat, pas de demande. */
+    paid: v.optional(v.boolean()),
+    /** Date limite de retrait (ms), pour les commandes payées. */
+    pickupDeadline: v.optional(v.number()),
   },
-  handler: async (_ctx, { email, name, reference, type, requestId, article }) => {
+  handler: async (
+    _ctx,
+    { email, name, reference, type, requestId, article, paid, pickupDeadline },
+  ) => {
     const label = typeLabel(type);
     const orderUrl = `${appUrl()}/compte/commandes/${requestId}`;
     const html = shell({
-      preheader: `Votre demande ${label} #${reference} est bien enregistrée.`,
-      heading: "Votre demande est bien enregistrée 🎉",
-      intro: `Bonjour ${esc(name)},<br/><br/>Nous avons bien reçu votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>). Notre équipe la traite et revient vers vous très prochainement.`,
+      preheader: paid
+        ? `Votre commande #${reference} est confirmée. Vous avez ${PICKUP_DEADLINE_DAYS} jours pour la retirer.`
+        : `Votre demande ${label} #${reference} est bien enregistrée.`,
+      heading: paid
+        ? "Votre commande est confirmée 🎉"
+        : "Votre demande est bien enregistrée 🎉",
+      intro: paid
+        ? `Bonjour ${esc(name)},<br/><br/>Votre paiement est bien reçu et votre commande <strong>#${esc(reference)}</strong> est confirmée. Votre article vous attend en boutique.`
+        : `Bonjour ${esc(name)},<br/><br/>Nous avons bien reçu votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>). Notre équipe la traite et revient vers vous très prochainement.`,
       contentHtml: `
         ${buildArticleCard(article)}
-        <div style="margin:0 0 22px;">${button(orderUrl, "Suivre ma demande")}</div>
-        <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#71717a;">Accès rapides :</p>
+        <div style="margin:0 0 22px;">${button(orderUrl, paid ? "Voir ma commande" : "Suivre ma demande")}</div>
+        ${paid ? pickupDeadlineNotice(pickupDeadline) : ""}
+        <p style="margin:22px 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#71717a;">Accès rapides :</p>
         ${quickLinks()}
       `,
     });
-    await resendSend(email, `Demande bien reçue · ${label} #${reference}`, html);
+    await resendSend(
+      email,
+      paid
+        ? `Commande confirmée · #${reference} · à retirer sous ${PICKUP_DEADLINE_DAYS} jours`
+        : `Demande bien reçue · ${label} #${reference}`,
+      html,
+    );
   },
 });
 

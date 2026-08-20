@@ -30,6 +30,7 @@ import {
   requestLostReason,
   requestType,
 } from "./schema";
+import { PICKUP_DEADLINE_DAYS } from "./emails";
 import { isAwaitingInvoicePayment, resolveProcess } from "./processes";
 import { vehicleBusyReason } from "./fleet";
 import { internal } from "./_generated/api";
@@ -141,9 +142,11 @@ async function createNewRequestNotification(
     createdAt: Date.now(),
   });
 
-  // Email de confirmation au client (Resend).
+  // Email de confirmation au client (Resend). Une commande déjà réglée en ligne
+  // reçoit un message d'achat, avec le délai de retrait de 5 jours.
   const request = await ctx.db.get(args.requestId);
   if (request?.customer.email) {
+    const paid = request.payment?.status === "paid";
     await ctx.scheduler.runAfter(0, internal.emails.sendRequestConfirmation, {
       email: request.customer.email,
       name: customerFullName(request.customer),
@@ -151,6 +154,11 @@ async function createNewRequestNotification(
       type: request.type,
       requestId: String(request._id),
       article: await emailArticlePreview(ctx, request),
+      paid,
+      pickupDeadline: paid
+        ? (request.payment?.paidAt ?? request.createdAt) +
+          PICKUP_DEADLINE_DAYS * 24 * 60 * 60 * 1000
+        : undefined,
     });
   }
 
