@@ -4,6 +4,8 @@ import { v } from "convex/values";
 export default defineApp({
   env: {
     STRIPE_SECRET_KEY: v.optional(v.string()),
+    /** Clé Stripe de la boutique en ligne Recycapp (paiement client). */
+    RECYCAPP_STRIPE_SECRET_KEY: v.optional(v.string()),
     BENNESPRO_STRIPE_SECRET_KEY: v.optional(v.string()),
     BENNESPRO_STRIPE_TVA_TAX_RATE_ID: v.optional(v.string()),
     BENNESPRO_EMAIL_LOGO_ID: v.optional(v.string()),

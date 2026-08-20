@@ -372,3 +372,155 @@ export const confirmPublicCartCheckout = action({
     return result;
   },
 });
+
+/* ─── Boutique en ligne : paiement custom (Payment Element) ────────────────
+ *
+ * Flux « custom » : au lieu de rediriger vers la page Checkout hébergée par
+ * Stripe, l'app crée un PaymentIntent et affiche son propre écran de paiement.
+ * Stripe ne voit jamais la carte transiter par nos serveurs — le Payment
+ * Element parle directement à Stripe avec le `client_secret` renvoyé ici.
+ */
+
+/** Clé Stripe de la boutique Recycapp (distincte de la caisse et de Bennes Pro). */
+function recycappSecretKey(): string {
+  const key = env.RECYCAPP_STRIPE_SECRET_KEY;
+  if (!key) {
+    throw new Error(
+      "Paiement en ligne indisponible : RECYCAPP_STRIPE_SECRET_KEY n'est pas configurée côté Convex.",
+    );
+  }
+  return key;
+}
+
+async function stripeRequest<T>(
+  path: string,
+  secretKey: string,
+  body?: Record<string, string>,
+): Promise<T> {
+  const response = await fetch(`https://api.stripe.com/v1/${path}`, {
+    method: body ? "POST" : "GET",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      ...(body ? { "Content-Type": "application/x-www-form-urlencoded" } : {}),
+    },
+    ...(body ? { body: buildStripeBody(body) } : {}),
+  });
+  const payload = (await response.json()) as T & { error?: { message?: string } };
+  if (!response.ok) {
+    throw new Error(payload.error?.message || "Erreur Stripe.");
+  }
+  return payload;
+}
+
+/**
+ * Prépare le paiement d'un panier : verrouille le montant côté serveur (le
+ * client n'envoie que les identifiants d'articles) et renvoie le `client_secret`
+ * que le Payment Element utilisera.
+ */
+export const createPublicCartPaymentIntent = action({
+  args: {
+    articleIds: v.array(v.id("articles")),
+    customer: v.object({
+      firstName: v.string(),
+      lastName: v.string(),
+      email: v.string(),
+      phone: v.string(),
+      address: v.optional(v.string()),
+      postalCode: v.optional(v.string()),
+      city: v.optional(v.string()),
+    }),
+    comment: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    draftId: Id<"publicStripeCheckoutDrafts">;
+    clientSecret: string;
+    paymentIntentId: string;
+    total: number;
+  }> => {
+    const secretKey = recycappSecretKey();
+
+    const draft: { draftId: Id<"publicStripeCheckoutDrafts">; total: number } =
+      await ctx.runMutation(internal.requests.createPublicStripeCheckoutDraft, {
+        articleIds: args.articleIds,
+        customer: args.customer,
+        comment: args.comment,
+      });
+
+    if (draft.total <= 0) {
+      throw new Error("Le montant du panier doit être supérieur à 0 €.");
+    }
+
+    const fullName = `${args.customer.firstName} ${args.customer.lastName}`.trim();
+    const intent = await stripeRequest<{ id: string; client_secret: string }>(
+      "payment_intents",
+      secretKey,
+      {
+        amount: String(Math.round(draft.total * 100)),
+        currency: "eur",
+        "automatic_payment_methods[enabled]": "true",
+        description: `Boutique en ligne — ${args.articleIds.length} article${
+          args.articleIds.length > 1 ? "s" : ""
+        }`,
+        receipt_email: args.customer.email,
+        "shipping[name]": fullName || args.customer.email,
+        "shipping[phone]": args.customer.phone,
+        "shipping[address][line1]": args.customer.address ?? "",
+        "shipping[address][postal_code]": args.customer.postalCode ?? "",
+        "shipping[address][city]": args.customer.city ?? "",
+        "shipping[address][country]": "FR",
+        "metadata[draftId]": draft.draftId,
+        "metadata[source]": "recycapp-boutique",
+      },
+    );
+
+    await ctx.runMutation(internal.requests.attachStripePaymentIntentToPublicDraft, {
+      draftId: draft.draftId,
+      stripePaymentIntentId: intent.id,
+    });
+
+    return {
+      draftId: draft.draftId,
+      clientSecret: intent.client_secret,
+      paymentIntentId: intent.id,
+      total: draft.total,
+    };
+  },
+});
+
+/**
+ * Confirme la commande APRÈS encaissement : le statut est relu chez Stripe, on
+ * ne fait jamais confiance au navigateur pour dire qu'un paiement a réussi.
+ */
+export const confirmPublicCartPayment = action({
+  args: {
+    draftId: v.id("publicStripeCheckoutDrafts"),
+    paymentIntentId: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ requestId: Id<"requests"> }> => {
+    const secretKey = recycappSecretKey();
+
+    const intent = await stripeRequest<{
+      id: string;
+      status: string;
+      amount_received?: number;
+      metadata?: { draftId?: string };
+    }>(`payment_intents/${args.paymentIntentId}`, secretKey);
+
+    if (intent.metadata?.draftId !== args.draftId) {
+      throw new Error("Ce paiement ne correspond pas au panier attendu.");
+    }
+    if (intent.status !== "succeeded") {
+      throw new Error(
+        "Le paiement n'est pas confirmé par Stripe. Aucune commande n'a été enregistrée.",
+      );
+    }
+
+    return await ctx.runMutation(internal.requests.finalizePublicStripeCheckout, {
+      draftId: args.draftId,
+      stripePaymentIntentId: intent.id,
+    });
+  },
+});

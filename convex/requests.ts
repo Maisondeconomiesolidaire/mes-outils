@@ -1126,10 +1126,22 @@ export const attachStripeSessionToPublicDraft = internalMutation({
   },
 });
 
+/** Flux custom : mémorise le PaymentIntent dès sa création. */
+export const attachStripePaymentIntentToPublicDraft = internalMutation({
+  args: {
+    draftId: v.id("publicStripeCheckoutDrafts"),
+    stripePaymentIntentId: v.string(),
+  },
+  handler: async (ctx, { draftId, stripePaymentIntentId }) => {
+    await ctx.db.patch(draftId, { stripePaymentIntentId });
+  },
+});
+
 export const finalizePublicStripeCheckout = internalMutation({
   args: {
     draftId: v.id("publicStripeCheckoutDrafts"),
-    stripeSessionId: v.string(),
+    /** Flux Checkout hébergé. Absent pour le flux custom (Payment Element). */
+    stripeSessionId: v.optional(v.string()),
     stripePaymentIntentId: v.optional(v.string()),
   },
   handler: async (ctx, { draftId, stripeSessionId, stripePaymentIntentId }) => {
@@ -1140,8 +1152,19 @@ export const finalizePublicStripeCheckout = internalMutation({
       return { requestId: draft.requestId };
     }
 
-    if (draft.stripeSessionId && draft.stripeSessionId !== stripeSessionId) {
+    if (
+      stripeSessionId &&
+      draft.stripeSessionId &&
+      draft.stripeSessionId !== stripeSessionId
+    ) {
       throw new Error("Cette session Stripe ne correspond pas au panier en cours.");
+    }
+    if (
+      stripePaymentIntentId &&
+      draft.stripePaymentIntentId &&
+      draft.stripePaymentIntentId !== stripePaymentIntentId
+    ) {
+      throw new Error("Ce paiement Stripe ne correspond pas au panier en cours.");
     }
 
     const articles = [];
@@ -1196,8 +1219,8 @@ export const finalizePublicStripeCheckout = internalMutation({
     });
 
     await ctx.db.patch(draftId, {
-      stripeSessionId,
-      stripePaymentIntentId,
+      ...(stripeSessionId ? { stripeSessionId } : {}),
+      ...(stripePaymentIntentId ? { stripePaymentIntentId } : {}),
       status: "completed",
       requestId,
       completedAt: Date.now(),
