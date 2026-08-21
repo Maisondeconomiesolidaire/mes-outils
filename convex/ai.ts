@@ -77,16 +77,27 @@ BIAIS À CORRIGER :
 - Si tu vois de la saleté, des rayures ou de l'usure sur la photo → descends d'un cran
 - En cas de doute → choisis l'état INFÉRIEUR, jamais supérieur
 
+IDENTIFICATION FINE — l'étape suivante fera des recherches web, la qualité du résultat dépend ENTIÈREMENT de ta précision ici :
+- Lis TOUT le texte visible sur la photo : marque, modèle, référence, numéro de série, étiquette, plaque signalétique, logo, mention au dos ou sous l'objet.
+- Cherche le modèle EXACT, pas la famille ("Moulinex Masterchef Gourmet QA503", pas "robot pâtissier"). Si tu hésites entre deux modèles proches, donne les deux dans "modelHypotheses".
+- Note les indices datant l'objet (design, logo d'époque, type de connectique, matériaux).
+- Pour les objets sous licence (jouets, jeux, figurines) : identifie la licence, le personnage ET la référence de série si visible.
+
 Analyse cette image et retourne UNIQUEMENT un JSON valide (sans markdown) :
 {
-  "name": "nom précis de l'objet en français (marque et modèle si visibles, matière, couleur, style)",
+  "name": "nom précis de l'objet en français (marque, modèle et référence si visibles, matière, couleur, style)",
   "brand": "marque si identifiable, sinon null",
+  "model": "modèle / référence exacte si lisible ou déductible, sinon null",
+  "modelHypotheses": ["1 à 3 modèles ou références plausibles si le modèle exact n'est pas certain"],
+  "visibleText": "tout le texte lisible sur la photo (étiquettes, plaques, sérigraphies), sinon null",
   "estimatedCondition": "une de : Neuf | Très bon état | Bon état | État correct | À rénover",
   "conditionJustification": "liste des défauts visibles qui justifient cette note (sois précis et honnête)",
   "searchQueries": [
-    "requête 1 pour annonces similaires sur leboncoin",
-    "requête 2 avec marque/modèle si connu + occasion",
-    "requête 3 pour prix neuf"
+    "requête 1 : marque + modèle exact + occasion (pour leboncoin)",
+    "requête 2 : marque + modèle + prix vendu (vinted / ebay)",
+    "requête 3 : marque + modèle + prix neuf (amazon / site officiel)",
+    "requête 4 : requête de repli plus large si le modèle exact est incertain",
+    "requête 5 : requête sur la référence, le numéro de série ou la licence/personnage"
   ],
   "keyDetails": "détails clés : dimensions estimées, matière, particularités, TOUS les défauts visibles",
   "backgroundPrompt": "In English: a concise product photography background description (max 50 words) for this item. Focus on setting, surfaces, and lighting only — no people, no figures. Match the product's material and style. Example for a wooden chair: 'Warm Scandinavian studio, pale linen backdrop, wood grain floor, soft diffused natural light'. Example for a toy: 'Clean white studio, smooth seamless floor, bright even lighting'. Keep it factual and environment-focused."
@@ -99,7 +110,18 @@ On te donne :
 - La description et l'état d'un article identifié par analyse visuelle (avec justification de l'état)
 - Des résultats de recherche en temps réel sur Leboncoin, eBay France, Vinted et Amazon France
 
-MÉTHODOLOGIE STRICTE :
+MÉTHODE DE RECHERCHE WEB (approfondie — ne te contente JAMAIS d'une seule requête) :
+1. Commence par IDENTIFIER précisément l'article avant de le valoriser : cherche la marque + le modèle/référence pour confirmer de quel produit il s'agit exactement (fiche produit constructeur, notice, test, fiche Amazon/Fnac/Darty). Si l'identification visuelle proposait plusieurs hypothèses de modèle, tranche avec la recherche.
+2. Fais AU MOINS 4 recherches distinctes, et enchaîne-les en affinant :
+   - une sur les annonces d'occasion (leboncoin),
+   - une sur les ventes réalisées (vinted, ebay France — privilégie les articles VENDUS, pas les prix demandés),
+   - une sur le prix neuf actuel ou dernier prix catalogue (Amazon, site de la marque, Fnac/Darty/Cdiscount),
+   - une sur l'identification/les caractéristiques du modèle (année de sortie, caractéristiques, cote, rareté, réédition).
+3. Si une requête ne donne rien d'exploitable, REFORMULE (retire le modèle, élargis à la gamme, essaie la référence seule, essaie en anglais) et relance. Ne conclus « prix inconnu » qu'après avoir essayé plusieurs formulations.
+4. Croise au minimum 3 annonces réelles avant de fixer un prix. Une annonce isolée n'est pas un marché.
+5. Retiens de cette recherche les éléments qui DONNENT ENVIE (année de sortie, réputation du modèle, qualité de fabrication, prix neuf, rareté, usages) : ils nourriront la description de vente.
+
+MÉTHODOLOGIE DE PRIX STRICTE :
 1. Analyse les prix trouvés : prends la médiane des annonces en état SIMILAIRE (pas les annonces "Neuf" si l'article est usé)
 2. Distingue prix NEUF (Amazon, site officiel) du prix OCCASION réel (Leboncoin, Vinted, eBay)
 3. Prix recyclerie = 90 % du prix occasion médian constaté (légèrement en dessous du particulier sur Leboncoin)
@@ -122,6 +144,15 @@ FOURCHETTES PLANCHER (minimums absolus en recyclerie) :
 - Bibelots/déco générique : 0,50–3 €
 - Vêtements : 1–5 € pièce
 
+RÉDACTION DE LA DESCRIPTION (texte affiché en boutique en ligne — c'est une VITRINE, pas un rapport d'expertise) :
+- Écris comme un vendeur de seconde main passionné : concret, chaleureux, incarné. Le lecteur doit se projeter avec l'objet chez lui.
+- Structure en 3 à 5 phrases : (1) ce que c'est précisément, marque et modèle identifiés par la recherche ; (2) ce qui le rend intéressant — qualité de fabrication, réputation du modèle, matière, style, prix neuf de référence s'il est élevé ; (3) à quel usage / à qui il s'adresse concrètement ; (4) éventuellement l'état en une formule courte et positive.
+- Appuie-toi sur ce que la RECHERCHE WEB t'a appris (année, gamme, réputation, prix neuf) : c'est ce qui différencie une bonne description d'un texte creux.
+- INTERDIT de mentionner ce qui disparaît au nettoyage ou à la préparation : poussière, saleté, traces de doigts, taches superficielles, toile d'araignée, odeur, cheveux, terre. Tous les articles sont NETTOYÉS et vérifiés avant la vente. Ne le mentionne jamais, même pour être « honnête ».
+- INTERDIT aussi : les phrases creuses et interchangeables ("article d'occasion en bon état", "peut convenir à de nombreux usages", "idéal pour les amateurs", "fonctionnel et pratique", "un bon rapport qualité-prix"), les listes de dimensions estimées au pif, la répétition de l'état déjà affiché à côté du prix, la mention de la recyclerie ou du geste écologique (déjà présent partout sur le site).
+- À CONSERVER en revanche : les défauts RÉELS et permanents (rayure marquée, éclat, fissure, pièce manquante, élément non fonctionnel, accessoire absent). Une seule phrase factuelle en fin de description, sans dramatiser.
+- Pas de superlatifs mensongers, pas de majuscules criardes, pas d'emoji, pas de point d'exclamation en rafale.
+
 GARDE-FOUS ANTI-OPTIMISME :
 - Un article "Bon état" ne vaut JAMAIS autant qu'un article "Très bon état"
 - Un jouet d'enfant utilisé = article usé. Pas d'exception.
@@ -131,11 +162,11 @@ GARDE-FOUS ANTI-OPTIMISME :
 
 Retourne UNIQUEMENT un objet JSON valide (sans markdown) :
 {
-  "title": "Nom précis et honnête en français, max 60 caractères (pas de superlatifs)",
+  "title": "Titre précis et attractif en français, max 60 caractères : marque + modèle + ce que c'est (ex: 'Robot pâtissier Moulinex Masterchef Gourmet'). Pas de superlatifs, pas de mention d'état.",
   "category": "Exactement une de : Maison et Jardin | Électronique | Loisirs",
   "subcategory": "Exactement une des sous-catégories disponibles",
   "condition": "Reprend l'état évalué à l'étape 1 — ne l'améliore pas sans raison solide",
-  "description": "2–3 phrases objectives : identifie l'objet (marque/modèle, matière, dimensions estimées), décris l'état réel avec les défauts visibles, aucune formulation commerciale excessive",
+  "description": "3 à 5 phrases de vente, en suivant la section RÉDACTION DE LA DESCRIPTION : objet identifié précisément (marque/modèle confirmés par la recherche), ce qui le rend intéressant, à quel usage il sert, et seulement s'il y en a, les défauts permanents en une phrase. Jamais de poussière/saleté, jamais de phrases creuses.",
   "price": <prix de vente recyclerie en euros, applique toutes les décotes>,
   "originalPrice": <prix neuf constaté (Amazon/site officiel), null si vraiment inconnu>,
   "priceRationale": "1 phrase précise : source du prix + calcul (ex: 'Leboncoin médiane 22 €, état correct -20 %, recyclerie -10 % = 16 €')",
@@ -183,6 +214,9 @@ export type ArticleAIAnalysis = {
 type IdentificationResult = {
   name: string;
   brand: string | null;
+  model?: string | null;
+  modelHypotheses?: string[];
+  visibleText?: string | null;
   estimatedCondition: string;
   conditionJustification: string;
   searchQueries: string[];
@@ -634,25 +668,33 @@ export const analyzeArticleImage = action({
         ? identification.searchQueries
         : [identification.name];
 
+    const hypotheses = Array.isArray(identification.modelHypotheses)
+      ? identification.modelHypotheses.filter(Boolean)
+      : [];
+
     const searchUserPrompt = `Article à évaluer :
 - Nom : ${identification.name}${identification.brand ? ` (marque : ${identification.brand})` : ""}
-- État : ${identification.estimatedCondition}
-- Justification de l'état (défauts constatés) : ${identification.conditionJustification}
+${identification.model ? `- Modèle / référence lue sur la photo : ${identification.model}\n` : ""}${hypotheses.length > 0 ? `- Modèles possibles à départager par la recherche : ${hypotheses.join(" | ")}\n` : ""}${identification.visibleText ? `- Texte lisible sur la photo : ${identification.visibleText}\n` : ""}- État : ${identification.estimatedCondition}
+- Justification de l'état (défauts constatés, usage INTERNE — ne recopie pas la saleté ou la poussière dans la description) : ${identification.conditionJustification}
 - Détails clés : ${identification.keyDetails}
 
-Recherche sur Leboncoin, Vinted, eBay France et Amazon France les prix actuels pour cet article EN ÉTAT SIMILAIRE. Utilise ces requêtes :
-1. "${queries[0]}"
-2. "${queries[1] ?? queries[0]} occasion prix"
-3. "${queries[2] ?? identification.name} prix neuf"
+ÉTAPE A — IDENTIFIE d'abord le produit exact sur le web (fiche constructeur, notice, test, fiche marchand) et tranche entre les hypothèses de modèle.
+ÉTAPE B — RECHERCHE ensuite les prix réels, en enchaînant plusieurs requêtes et en les affinant si les résultats sont pauvres. Pistes de départ :
+${queries.map((q, i) => `${i + 1}. "${q}"`).join("\n")}
+Ajoute au moins une recherche sur les ventes RÉALISÉES (vinted / ebay vendus) et une sur le prix neuf actuel.
 
-IMPORTANT : applique toutes les décotes selon l'état "${identification.estimatedCondition}" et les défauts constatés. Ne sois pas généreux.${detailsBlock}
+IMPORTANT :
+- Applique toutes les décotes selon l'état "${identification.estimatedCondition}" et les défauts constatés. Ne sois pas généreux sur le prix.
+- La description, elle, est une vitrine : vendeuse, précise, nourrie par ce que la recherche t'a appris. Jamais de poussière, saleté ni de phrases creuses.${detailsBlock}
 
 Produis l'évaluation JSON complète basée sur les résultats trouvés.`;
 
     const result = await callOpenAIWebSearch<ArticleAIAnalysis>(apiKey, {
       instructions: VALUATION_PROMPT,
       input: searchUserPrompt,
-      maxOutputTokens: 4000,
+      // Relevé à 6000 : la recherche web approfondie (plusieurs requêtes
+      // enchaînées) consomme des jetons avant même le JSON final.
+      maxOutputTokens: 6000,
     });
 
     // Sanity checks
@@ -747,7 +789,9 @@ ${brief}
 Étapes :
 1. Déduis l'objet le plus probable décrit par ces mots-clés (marque, modèle, type, matière si possible).
 2. Choisis un état réaliste : "Bon état" par défaut, sauf si les mots-clés indiquent un autre état (neuf, à rénover, déstockage…).
-3. Recherche sur Leboncoin, Vinted, eBay France et Amazon France les prix actuels pour cet article en état similaire, puis applique TOUTE la méthodologie de valorisation et les décotes.
+3. Identifie d'abord le produit exact sur le web (marque, modèle, référence, année, gamme) en enchaînant plusieurs recherches et en les reformulant si les résultats sont pauvres.
+4. Recherche ensuite sur Leboncoin, Vinted, eBay France (ventes réalisées) et Amazon France les prix actuels pour cet article en état similaire, puis applique TOUTE la méthodologie de valorisation et les décotes.
+5. Rédige la description comme une vitrine de boutique : vendeuse et précise, nourrie par ce que la recherche t'a appris. Aucune mention de poussière ou de saleté, aucune phrase creuse.
 
 En plus des champs JSON habituels, ajoute le champ "weightKg" : le poids estimé de l'article en kilogrammes (nombre, ex: 0.5, 2, 12).`;
 
@@ -758,7 +802,7 @@ En plus des champs JSON habituels, ajoute le champ "weightKg" : le poids estimé
           VALUATION_PROMPT +
           `\n\nIMPORTANT : ajoute aussi le champ "weightKg" (poids estimé en kilogrammes, nombre) dans le JSON de réponse.`,
         input: userPrompt,
-        maxOutputTokens: 4000,
+        maxOutputTokens: 6000,
       },
     );
 
@@ -815,9 +859,11 @@ export const generateLotDescription = action({
 ${JSON.stringify(items, null, 0)}
 
 Consignes :
-- 3 à 5 phrases, ton chaleureux et vendeur, en français.
+- 3 à 5 phrases, ton chaleureux et vendeur, en français, concrètes et incarnées.
 - Mets en valeur la cohérence du lot (univers, thème, usage commun) et l'intérêt d'acheter l'ensemble plutôt que séparément.
 - Mentionne le nombre d'articles (${items.length}) et donne envie, sans inventer de caractéristiques absentes.
+- INTERDIT de parler de poussière, saleté ou traces d'usage superficielles : tous les articles sont nettoyés avant la vente.
+- INTERDIT les phrases creuses et interchangeables ("articles d'occasion en bon état", "idéal pour les amateurs", "un bon rapport qualité-prix").
 - Termine par une phrase courte sur la démarche solidaire et de seconde main.
 
 Retourne ce JSON exact : { "description": "texte de la description" }`,
