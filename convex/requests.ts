@@ -33,6 +33,7 @@ import {
 import { PICKUP_DEADLINE_DAYS } from "./emails";
 import { isAwaitingInvoicePayment, resolveProcess, STEP } from "./processes";
 import { applyDiscount, assertUsableDiscount } from "./discountCodes";
+import { scheduleStripeSync } from "./stripeCatalog";
 import { vehicleBusyReason } from "./fleet";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
@@ -990,6 +991,7 @@ export const submitArticleReservation = mutation({
     const reference = await generateReference(ctx);
     // L'article passe en « réservé » dès la demande.
     await ctx.db.patch(articleId, { status: "reserve" });
+    await scheduleStripeSync(ctx, articleId);
     const requestId = await ctx.db.insert("requests", {
       type: "article",
       stage: "nouveau",
@@ -1054,6 +1056,7 @@ export const submitArticleCartReservation = mutation({
     const reference = await generateReference(ctx);
     for (const articleId of uniqueArticleIds) {
       await ctx.db.patch(articleId, { status: "reserve" });
+      await scheduleStripeSync(ctx, articleId);
     }
 
     const requestId = await ctx.db.insert("requests", {
@@ -1230,6 +1233,7 @@ export const finalizePaymentLink = internalMutation({
       articles.push({ articleId, articleTitle: article.title });
       if (article.status !== "vendu") {
         await ctx.db.patch(articleId, { status: "vendu" });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
 
@@ -1346,6 +1350,7 @@ export const markRefunded = internalMutation({
       const article = await ctx.db.get(articleId);
       if (article && article.status === "vendu") {
         await ctx.db.patch(articleId, { status: "disponible" });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
     return null;
@@ -1396,6 +1401,7 @@ export const finalizePublicStripeCheckout = internalMutation({
     const reference = await generateReference(ctx);
     for (const articleId of draft.articleIds) {
       await ctx.db.patch(articleId, { status: "vendu" });
+      await scheduleStripeSync(ctx, articleId);
     }
 
     const discount = draft.discountCodeId
@@ -1637,6 +1643,7 @@ export const setOutcome = mutation({
             : "reserve";
       for (const articleId of requestArticleIds(request)) {
         await ctx.db.patch(articleId, { status: articleStatus });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
   },
@@ -1722,6 +1729,7 @@ export const deleteForever = mutation({
         const article = await ctx.db.get(articleId);
         if (article?.status === "reserve") {
           await ctx.db.patch(articleId, { status: "disponible" });
+          await scheduleStripeSync(ctx, articleId);
           articleReservationsReleased++;
         }
       }
@@ -2076,6 +2084,7 @@ export const advanceProcess = mutation({
     if (done && r.type === "article") {
       for (const articleId of requestArticleIds(r)) {
         await ctx.db.patch(articleId, { status: "vendu" });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
     // La facture vient d'être éditée et « Facture réglée » est l'étape
@@ -2114,6 +2123,7 @@ export const retreatProcess = mutation({
     if (r.outcome === "gagnee" && r.type === "article") {
       for (const articleId of requestArticleIds(r)) {
         await ctx.db.patch(articleId, { status: "reserve" });
+        await scheduleStripeSync(ctx, articleId);
       }
     }
   },
@@ -2437,6 +2447,7 @@ export const createInternal = mutation({
       if (!article) throw new Error("Article introuvable.");
       if (article.status !== "disponible") throw new Error("Cet article n'est plus disponible.");
       await ctx.db.patch(articleId, { status: "reserve" });
+      await scheduleStripeSync(ctx, articleId);
       const id = await ctx.db.insert("requests", {
         type: "article",
         stage: "nouveau",

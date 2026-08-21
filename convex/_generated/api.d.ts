@@ -55,6 +55,7 @@ import type * as reservations from "../reservations.js";
 import type * as rh from "../rh.js";
 import type * as sorties from "../sorties.js";
 import type * as stripe from "../stripe.js";
+import type * as stripeCatalog from "../stripeCatalog.js";
 import type * as team from "../team.js";
 import type * as users from "../users.js";
 import type * as vehicleControlReminders from "../vehicleControlReminders.js";
@@ -115,6 +116,7 @@ declare const fullApi: ApiFromModules<{
   rh: typeof rh;
   sorties: typeof sorties;
   stripe: typeof stripe;
+  stripeCatalog: typeof stripeCatalog;
   team: typeof team;
   users: typeof users;
   vehicleControlReminders: typeof vehicleControlReminders;

@@ -1,6 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
+import { internal } from "./_generated/api";
+import { scheduleStripeSync } from "./stripeCatalog";
 import { requireCrmPermission } from "./lib";
 import {
   claimQrCode,
@@ -598,6 +600,7 @@ export const create = mutation({
       createdAt: Date.now(),
     });
     if (scanned) await claimQrCode(ctx, scanned, articleId);
+    await scheduleStripeSync(ctx, articleId);
     return articleId;
   },
 });
@@ -648,6 +651,7 @@ export const createDraftsFromPhotos = mutation({
         createdAt: Date.now(),
       });
       if (scanned) await claimQrCode(ctx, scanned, id);
+      await scheduleStripeSync(ctx, id);
       created.push({ id, internalReference });
     }
     return created;
@@ -703,6 +707,7 @@ export const applyAiListing = mutation({
       ...(status ? { status } : {}),
       draft: undefined,
     });
+    await scheduleStripeSync(ctx, id);
   },
 });
 
@@ -785,6 +790,11 @@ export const publishLot = mutation({
       ),
     );
 
+    await scheduleStripeSync(ctx, lotId);
+    for (const article of articles) {
+      await scheduleStripeSync(ctx, article._id);
+    }
+
     return lotId;
   },
 });
@@ -803,6 +813,7 @@ export const patchStatus = mutation({
   handler: async (ctx, { id, status }) => {
     await requireCrmPermission(ctx, "articles", "update");
     await ctx.db.patch(id, { status });
+    await scheduleStripeSync(ctx, id);
   },
 });
 
@@ -848,6 +859,7 @@ export const update = mutation({
         ? normalizeKeyword(rest.themeKey).replace(/\s+/g, "-")
         : undefined,
     });
+    await scheduleStripeSync(ctx, id);
   },
 });
 
@@ -858,6 +870,15 @@ export const remove = mutation({
     // L'étiquette reste collée quelque part : on rend le code au pool plutôt
     // que de le perdre avec l'article.
     await releaseQrCodes(ctx, id);
+    // Les identifiants Stripe disparaissent avec le document : on planifie
+    // l'archivage du produit AVANT de supprimer l'article.
+    const article = await ctx.db.get(id);
+    if (article?.stripeProductId) {
+      await ctx.scheduler.runAfter(0, internal.stripeCatalog.archiveProduct, {
+        stripeProductId: article.stripeProductId,
+        stripePriceId: article.stripePriceId,
+      });
+    }
     await ctx.db.delete(id);
   },
 });

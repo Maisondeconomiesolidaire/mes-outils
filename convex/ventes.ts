@@ -7,6 +7,7 @@ import {
 } from "./_generated/server";
 import { requireCrmPermission } from "./lib";
 import type { Id } from "./_generated/dataModel";
+import { scheduleStripeSync } from "./stripeCatalog";
 
 const saleItemValidator = v.object({
   articleId: v.id("articles"),
@@ -53,7 +54,10 @@ async function recordVente(
   });
 
   await Promise.all(
-    args.items.map((item) => ctx.db.patch(item.articleId, { status: "vendu" })),
+    args.items.map(async (item) => {
+      await ctx.db.patch(item.articleId, { status: "vendu" });
+      await scheduleStripeSync(ctx, item.articleId);
+    }),
   );
 
   return { venteId, receiptNumber, total, change };

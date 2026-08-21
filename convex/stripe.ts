@@ -382,7 +382,7 @@ export const confirmPublicCartCheckout = action({
  */
 
 /** Clé Stripe de la boutique Recycapp (distincte de la caisse et de Bennes Pro). */
-function recycappSecretKey(): string {
+export function recycappSecretKey(): string {
   const key = env.RECYCAPP_STRIPE_SECRET_KEY;
   if (!key) {
     throw new Error(
@@ -392,7 +392,7 @@ function recycappSecretKey(): string {
   return key;
 }
 
-async function stripeRequest<T>(
+export async function stripeRequest<T>(
   path: string,
   secretKey: string,
   body?: Record<string, string>,

@@ -443,6 +443,20 @@ export default defineSchema(
     bundleReason: v.optional(v.string()),
     // Article mis en avant "Produit du jour" (un seul à la fois).
     productOfDay: v.optional(v.boolean()),
+    /**
+     * Miroir de l'article dans le catalogue Stripe.
+     *
+     * Recycapp est la source de vérité : la synchronisation ne va que dans ce
+     * sens. Le montant et l'état déjà poussés sont mémorisés pour que la
+     * réconciliation nocturne n'appelle Stripe que lorsque quelque chose a
+     * réellement changé.
+     */
+    stripeProductId: v.optional(v.string()),
+    stripePriceId: v.optional(v.string()),
+    /** Montant du prix Stripe en vigueur, en centimes. */
+    stripePriceAmount: v.optional(v.number()),
+    stripeActive: v.optional(v.boolean()),
+    stripeSyncedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_status", ["status"])
