@@ -32,6 +32,7 @@ import {
 } from "./schema";
 import { PICKUP_DEADLINE_DAYS } from "./emails";
 import { isAwaitingInvoicePayment, resolveProcess, STEP } from "./processes";
+import { applyDiscount, assertUsableDiscount } from "./discountCodes";
 import { vehicleBusyReason } from "./fleet";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
@@ -1093,8 +1094,9 @@ export const createPublicStripeCheckoutDraft = internalMutation({
     customer: customerArg,
     comment: v.optional(v.string()),
     articleIds: v.array(v.id("articles")),
+    discountCode: v.optional(v.string()),
   },
-  handler: async (ctx, { customer, comment, articleIds }) => {
+  handler: async (ctx, { customer, comment, articleIds, discountCode }) => {
     customer = normalizeCustomer(customer);
     const uniqueArticleIds = Array.from(new Set(articleIds));
     if (uniqueArticleIds.length === 0) {
@@ -1111,15 +1113,34 @@ export const createPublicStripeCheckoutDraft = internalMutation({
       total += article.price;
     }
 
+    // La remise est relue depuis le bon lui-même : le navigateur n'envoie
+    // qu'un code, jamais un pourcentage ni un montant.
+    let discountCodeId: Id<"discountCodes"> | undefined;
+    let discountPercent: number | undefined;
+    let discountAmount: number | undefined;
+    let payable = total;
+    if (discountCode?.trim()) {
+      const discount = await assertUsableDiscount(ctx, discountCode);
+      const applied = applyDiscount(total, discount.percent);
+      discountCodeId = discount._id;
+      discountPercent = discount.percent;
+      discountAmount = applied.discountAmount;
+      payable = applied.total;
+    }
+
     const draftId = await ctx.db.insert("publicStripeCheckoutDrafts", {
       articleIds: uniqueArticleIds,
       customer,
       comment,
-      total,
+      total: payable,
+      subtotal: total,
+      discountCodeId,
+      discountPercent,
+      discountAmount,
       status: "pending",
       createdAt: Date.now(),
     });
-    return { draftId, total };
+    return { draftId, total: payable, subtotal: total, discountPercent, discountAmount };
   },
 });
 
@@ -1377,6 +1398,11 @@ export const finalizePublicStripeCheckout = internalMutation({
       await ctx.db.patch(articleId, { status: "vendu" });
     }
 
+    const discount = draft.discountCodeId
+      ? await ctx.db.get(draft.discountCodeId)
+      : null;
+    const discountCodeValue = discount?.code;
+
     const steps = resolveProcess("article");
     const progress = paidBoutiqueProgress(steps);
     const requestId = await ctx.db.insert("requests", {
@@ -1401,11 +1427,28 @@ export const finalizePublicStripeCheckout = internalMutation({
         stripeSessionId,
         stripePaymentIntentId,
         paidAt: now,
+        ...(draft.discountPercent !== undefined
+          ? {
+              discountCode: discountCodeValue,
+              discountPercent: draft.discountPercent,
+              discountAmount: draft.discountAmount,
+              subtotal: draft.subtotal,
+            }
+          : {}),
       },
       createdAt: now,
       updatedAt: now,
       reference,
     });
+
+    if (discount && discount.status !== "used") {
+      await ctx.db.patch(discount._id, {
+        status: "used",
+        usedAt: now,
+        usedByRequestId: requestId,
+        discountAmount: draft.discountAmount,
+      });
+    }
 
     await createNewRequestNotification(ctx, {
       requestId,

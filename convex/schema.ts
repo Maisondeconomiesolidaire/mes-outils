@@ -347,6 +347,11 @@ const requestPayment = v.object({
   refundedAmount: v.optional(v.number()),
   refundedAt: v.optional(v.number()),
   refundedBy: v.optional(v.string()),
+  /** Bon de réduction utilisé au paiement (code, remise, montant déduit). */
+  discountCode: v.optional(v.string()),
+  discountPercent: v.optional(v.number()),
+  discountAmount: v.optional(v.number()),
+  subtotal: v.optional(v.number()),
 });
 
 const veloDetails = v.object({
@@ -1037,11 +1042,46 @@ export default defineSchema(
     .index("by_token", ["token"])
     .index("by_request", ["requestId"]),
 
+  /**
+   * Bons de réduction de la boutique en ligne.
+   *
+   * Un bon est généré depuis le CRM, imprimé ou dicté au client, et vaut un
+   * pourcentage sur la totalité d'un panier. Le code est long et tiré au sort
+   * (« RECY » + 16 chiffres) : il ne se devine pas, et un bon consommé ne peut
+   * plus resservir — `status` bascule sur « used » au moment de l'encaissement.
+   */
+  discountCodes: defineTable({
+    code: v.string(),
+    /** Remise en pourcentage du panier, de 5 à 80. */
+    percent: v.number(),
+    status: v.union(
+      v.literal("active"),
+      v.literal("used"),
+      v.literal("cancelled"),
+    ),
+    label: v.optional(v.string()),
+    createdAt: v.number(),
+    createdBy: v.optional(v.string()),
+    usedAt: v.optional(v.number()),
+    usedByRequestId: v.optional(v.id("requests")),
+    /** Montant réellement remisé, en euros, au moment de l'encaissement. */
+    discountAmount: v.optional(v.number()),
+    cancelledAt: v.optional(v.number()),
+  })
+    .index("by_code", ["code"])
+    .index("by_status", ["status"]),
+
   publicStripeCheckoutDrafts: defineTable({
     articleIds: v.array(v.id("articles")),
     customer: customer,
     comment: v.optional(v.string()),
+    /** Montant réellement dû, remise déduite. */
     total: v.number(),
+    /** Bon de réduction appliqué au panier, s'il y en a un. */
+    discountCodeId: v.optional(v.id("discountCodes")),
+    discountPercent: v.optional(v.number()),
+    discountAmount: v.optional(v.number()),
+    subtotal: v.optional(v.number()),
     stripeSessionId: v.optional(v.string()),
     stripePaymentIntentId: v.optional(v.string()),
     status: v.union(v.literal("pending"), v.literal("completed")),

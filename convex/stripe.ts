@@ -430,6 +430,8 @@ export const createPublicCartPaymentIntent = action({
       city: v.optional(v.string()),
     }),
     comment: v.optional(v.string()),
+    /** Bon de réduction saisi au panier. La remise est appliquée côté serveur. */
+    discountCode: v.optional(v.string()),
   },
   handler: async (
     ctx,
@@ -439,15 +441,24 @@ export const createPublicCartPaymentIntent = action({
     clientSecret: string;
     paymentIntentId: string;
     total: number;
+    subtotal: number;
+    discountPercent?: number;
+    discountAmount?: number;
   }> => {
     const secretKey = recycappSecretKey();
 
-    const draft: { draftId: Id<"publicStripeCheckoutDrafts">; total: number } =
-      await ctx.runMutation(internal.requests.createPublicStripeCheckoutDraft, {
-        articleIds: args.articleIds,
-        customer: args.customer,
-        comment: args.comment,
-      });
+    const draft: {
+      draftId: Id<"publicStripeCheckoutDrafts">;
+      total: number;
+      subtotal: number;
+      discountPercent?: number;
+      discountAmount?: number;
+    } = await ctx.runMutation(internal.requests.createPublicStripeCheckoutDraft, {
+      articleIds: args.articleIds,
+      customer: args.customer,
+      comment: args.comment,
+      discountCode: args.discountCode,
+    });
 
     if (draft.total <= 0) {
       throw new ConvexError("Le montant du panier doit être supérieur à 0 €.");
@@ -486,6 +497,9 @@ export const createPublicCartPaymentIntent = action({
       clientSecret: intent.client_secret,
       paymentIntentId: intent.id,
       total: draft.total,
+      subtotal: draft.subtotal,
+      discountPercent: draft.discountPercent,
+      discountAmount: draft.discountAmount,
     };
   },
 });

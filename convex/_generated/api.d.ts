@@ -22,6 +22,7 @@ import type * as clients from "../clients.js";
 import type * as community from "../community.js";
 import type * as crons from "../crons.js";
 import type * as dashboard from "../dashboard.js";
+import type * as discountCodes from "../discountCodes.js";
 import type * as documents from "../documents.js";
 import type * as emails from "../emails.js";
 import type * as equipements from "../equipements.js";
@@ -81,6 +82,7 @@ declare const fullApi: ApiFromModules<{
   community: typeof community;
   crons: typeof crons;
   dashboard: typeof dashboard;
+  discountCodes: typeof discountCodes;
   documents: typeof documents;
   emails: typeof emails;
   equipements: typeof equipements;
