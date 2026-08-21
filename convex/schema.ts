@@ -1904,9 +1904,32 @@ export default defineSchema(
     key: v.string(),
     /** Prix du DIB en centimes d'euro par kg (défaut : 34). */
     dibPriceCentsPerKg: v.optional(v.number()),
+    /** Code PIN de l'onglet « Profils » (défaut : 0205). */
+    profilesPin: v.optional(v.string()),
     updatedAt: v.optional(v.number()),
     updatedBy: v.optional(v.string()),
   }).index("by_key", ["key"]),
+
+  /**
+   * Profils d'un compte Bennes & Pro partagé par plusieurs personnes.
+   *
+   * Le compte est unique mais l'équipe est multiple : à l'ouverture, chacun
+   * choisit son profil (à la Netflix), et c'est ce nom-là qui est inscrit sur
+   * les dépôts qu'il enregistre. Sans ça, tous les dépôts porteraient la même
+   * adresse email et on ne saurait jamais qui était sur le terrain.
+   */
+  bpProfiles: defineTable({
+    /** Compte partagé auquel appartient le profil (email Clerk, en minuscules). */
+    ownerEmail: v.string(),
+    name: v.string(),
+    /** Rôle ou mention libre affichée sous le nom (« Chauffeur », « Quai »…). */
+    role: v.optional(v.string()),
+    /** Teinte de la vignette, pour distinguer les profils d'un coup d'œil. */
+    color: v.optional(v.string()),
+    archived: v.optional(v.boolean()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_owner", ["ownerEmail"]),
 
   /** Véhicules appartenant à une entreprise (bennes, camions...). */
   bpVehicles: defineTable({
@@ -1940,10 +1963,18 @@ export default defineSchema(
     /** Facturation Stripe des matières payantes, au poids. */
     billing: v.optional(bpBilling),
     createdBy: v.optional(v.string()),
+    /**
+     * Profil de la personne qui a saisi le dépôt derrière un compte partagé.
+     * Le nom est recopié : un profil renommé ou supprimé plus tard ne doit pas
+     * effacer la trace de qui a fait le dépôt ce jour-là.
+     */
+    createdByProfileId: v.optional(v.id("bpProfiles")),
+    createdByProfile: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_company", ["companyId"])
-    .index("by_number", ["depotNumber"]),
+    .index("by_number", ["depotNumber"])
+    .index("by_profile", ["createdByProfileId"]),
 
   // ───────────────────────── App « Pointeuse LSDB » ─────────────────────────
   // Suivi des salariés et des chantiers : clients, projets, pointages,
