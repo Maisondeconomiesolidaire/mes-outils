@@ -232,10 +232,16 @@ async function generateInternalReference(ctx: {
 
 function matchesArticleFilters(
   article: Doc<"articles">,
-  filters: { searchText?: string; categories?: string[] },
+  filters: { searchText?: string; categories?: string[]; site?: "60" | "76" },
 ) {
   const selectedCategories = filters.categories?.filter(Boolean) ?? [];
   if (selectedCategories.length > 0 && !selectedCategories.includes(article.category)) {
+    return false;
+  }
+
+  // Filtre recyclerie : un article sans site renseigné (stock antérieur au
+  // champ) n'apparaît que dans « Toutes les recycleries ».
+  if (filters.site && article.site !== filters.site) {
     return false;
   }
 
@@ -274,6 +280,7 @@ function matchesArticleFilters(
 export const listPublic = query({
   args: {
     categories: v.optional(v.array(v.string())),
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
   },
   handler: async (ctx, args) => {
     const articles = await ctx.db
@@ -436,6 +443,36 @@ export const getForCrm = query({
   },
 });
 
+/**
+ * Emplacement physique d'un article, pour le CRM.
+ *
+ * Depuis une demande boutique, l'équipe doit pouvoir aller chercher l'objet :
+ * il lui faut la caisse qui le contient et la recyclerie où elle se trouve.
+ * Ces informations sont internes — elles ne passent pas par `getPublic`, qui
+ * sert la boutique en ligne.
+ */
+export const locationForCrm = query({
+  args: { id: v.id("articles") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, "demandes", "read");
+    const article = await ctx.db.get(id);
+    if (!article) return null;
+    const caisse = article.caisseId ? await ctx.db.get(article.caisseId) : null;
+    return {
+      internalReference: article.internalReference ?? null,
+      site: article.site ?? null,
+      location: article.location ?? null,
+      caisse: caisse
+        ? {
+            code: caisse.code,
+            label: caisse.label ?? null,
+            zone: caisse.zone ?? null,
+          }
+        : null,
+    };
+  },
+});
+
 export const listForLotAnalysis = query({
   args: {},
   handler: async (ctx) => {
@@ -487,6 +524,8 @@ export const create = mutation({
     qrReference: v.optional(v.string()),
     originalPrice: v.optional(v.number()),
     gdrReference: v.optional(v.string()),
+    /** Recyclerie qui détient l'article (site de retrait pour le client). */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
     condition: v.string(),
@@ -741,6 +780,7 @@ export const update = mutation({
     originalPrice: v.optional(v.number()),
     internalReference: v.string(),
     gdrReference: v.optional(v.string()),
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
     condition: v.string(),
@@ -765,6 +805,7 @@ export const update = mutation({
       // Explicite : le formulaire pilote la caisse, y compris pour la vider
       // (`undefined` retire le champ, alors qu'un argument absent le garderait).
       caisseId: rest.caisseId ?? undefined,
+      site: rest.site ?? undefined,
       gdrReference: rest.gdrReference || undefined,
       keywords: rest.keywords?.length ? uniqueKeywords(rest.keywords) : undefined,
       themeKey: rest.themeKey

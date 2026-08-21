@@ -342,6 +342,11 @@ const requestPayment = v.object({
   stripeSessionId: v.optional(v.string()),
   stripePaymentIntentId: v.optional(v.string()),
   paidAt: v.optional(v.number()),
+  /** Remboursement Stripe déclenché depuis le CRM (montant en euros). */
+  stripeRefundId: v.optional(v.string()),
+  refundedAmount: v.optional(v.number()),
+  refundedAt: v.optional(v.number()),
+  refundedBy: v.optional(v.string()),
 });
 
 const veloDetails = v.object({
@@ -404,6 +409,11 @@ export default defineSchema(
     originalPrice: v.optional(v.number()),
     internalReference: v.optional(v.string()),
     gdrReference: v.optional(v.string()),
+    /**
+     * Recyclerie qui détient physiquement l'article : le client vient le
+     * retirer sur ce site, et la boutique en ligne permet de filtrer dessus.
+     */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
     condition: v.string(),
@@ -435,7 +445,8 @@ export default defineSchema(
     .index("by_internalReference", ["internalReference"])
     .index("by_gdrReference", ["gdrReference"])
     .index("by_productOfDay", ["productOfDay"])
-    .index("by_caisse", ["caisseId"]),
+    .index("by_caisse", ["caisseId"])
+    .index("by_site", ["site"]),
 
   /**
    * Pool de QR codes d'articles imprimés À L'AVANCE.

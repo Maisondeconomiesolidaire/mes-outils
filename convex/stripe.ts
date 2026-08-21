@@ -622,3 +622,90 @@ export const confirmPaymentLink = action({
     });
   },
 });
+
+/* ─── Remboursement d'une commande boutique ──────────────────────────────── */
+
+/**
+ * Rembourse intégralement le paiement Stripe d'une demande boutique.
+ *
+ * Deux clés Stripe ont encaissé des commandes au fil du temps : la clé
+ * Recycapp (flux actuel, Payment Element et liens de paiement) et l'ancienne
+ * clé Checkout. On tente la clé Recycapp puis, seulement si Stripe dit ne pas
+ * connaître ce PaymentIntent, l'ancienne — sinon une vieille commande serait
+ * irremboursable depuis le CRM.
+ */
+export const refundBoutiqueRequest = action({
+  args: { requestId: v.id("requests") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ refundId: string; amount: number }> => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, "demandes", "update")) {
+      throw new ConvexError("Accès CRM insuffisant.");
+    }
+
+    const details = await ctx.runQuery(internal.requests.paymentForRefund, {
+      requestId: args.requestId,
+    });
+    if (!details) throw new ConvexError("Demande introuvable.");
+    const payment = details.payment;
+    if (!payment) {
+      throw new ConvexError("Cette demande n'a aucun paiement enregistré.");
+    }
+    if (payment.stripeRefundId) {
+      throw new ConvexError("Cette commande a déjà été remboursée.");
+    }
+    if (payment.status !== "paid" || !payment.stripePaymentIntentId) {
+      throw new ConvexError(
+        "Aucun paiement Stripe encaissé : il n'y a rien à rembourser.",
+      );
+    }
+
+    const paymentIntentId = payment.stripePaymentIntentId;
+    const keys = [
+      env.RECYCAPP_STRIPE_SECRET_KEY,
+      env.STRIPE_SECRET_KEY,
+    ].filter((key): key is string => Boolean(key));
+    if (keys.length === 0) {
+      throw new ConvexError(
+        "Remboursement indisponible : aucune clé Stripe n'est configurée côté Convex.",
+      );
+    }
+
+    let refund: { id: string; amount: number } | null = null;
+    let lastError = "";
+    for (const secretKey of keys) {
+      try {
+        refund = await stripeRequest<{ id: string; amount: number }>(
+          "refunds",
+          secretKey,
+          {
+            payment_intent: paymentIntentId,
+            "metadata[requestId]": String(args.requestId),
+            "metadata[source]": "recycapp-crm-remboursement",
+          },
+        );
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "Erreur Stripe.";
+        // « No such payment_intent » = mauvaise clé, on essaie la suivante.
+        if (!/no such payment_intent/i.test(lastError)) break;
+      }
+    }
+
+    if (!refund) {
+      throw new ConvexError(lastError || "Stripe a refusé le remboursement.");
+    }
+
+    const amount = refund.amount / 100;
+    await ctx.runMutation(internal.requests.markRefunded, {
+      requestId: args.requestId,
+      stripeRefundId: refund.id,
+      refundedAmount: amount,
+      refundedBy: access.email ?? undefined,
+    });
+
+    return { refundId: refund.id, amount };
+  },
+});

@@ -31,7 +31,7 @@ import {
   requestType,
 } from "./schema";
 import { PICKUP_DEADLINE_DAYS } from "./emails";
-import { isAwaitingInvoicePayment, resolveProcess } from "./processes";
+import { isAwaitingInvoicePayment, resolveProcess, STEP } from "./processes";
 import { vehicleBusyReason } from "./fleet";
 import { internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
@@ -1146,6 +1146,30 @@ export const attachStripePaymentIntentToPublicDraft = internalMutation({
 });
 
 /**
+ * Avancement d'une demande boutique qui vient d'être payée.
+ *
+ * Le paiement ne solde PAS la demande : il ne coche que « Paiement validé ».
+ * La commande reste ouverte (colonne « Prestation planifiée » du CRM) tant que
+ * l'équipe n'a pas constaté le retrait en boutique. Les demandes créées avant
+ * l'introduction de ce process gardent leurs anciennes étapes : on les solde
+ * comme avant pour ne pas les laisser bloquées.
+ */
+function paidBoutiqueProgress(steps: string[]): {
+  completedSteps: number;
+  outcome: "open" | "gagnee";
+} {
+  const paidIndex = steps.indexOf(STEP.paiementValide);
+  if (paidIndex === -1) {
+    return { completedSteps: steps.length, outcome: "gagnee" };
+  }
+  const completedSteps = paidIndex + 1;
+  return {
+    completedSteps,
+    outcome: completedSteps >= steps.length ? "gagnee" : "open",
+  };
+}
+
+/**
  * Encaissement d'un lien de paiement : marque les articles vendus et solde la
  * demande liée — ou en crée une quand le lien a été généré depuis un article,
  * sans demande préalable. Idempotent : rejouer l'appel ne crée rien de plus.
@@ -1192,10 +1216,11 @@ export const finalizePaymentLink = internalMutation({
     if (requestId) {
       const request = await ctx.db.get(requestId);
       if (!request) throw new Error("Demande introuvable.");
+      const progress = paidBoutiqueProgress(request.processSteps);
       await ctx.db.patch(requestId, {
         payment,
-        outcome: "gagnee",
-        completedSteps: request.processSteps.length,
+        outcome: progress.outcome,
+        completedSteps: progress.completedSteps,
         updatedAt: now,
       });
     } else {
@@ -1209,15 +1234,16 @@ export const finalizePaymentLink = internalMutation({
         },
       );
       const steps = resolveProcess("article");
+      const progress = paidBoutiqueProgress(steps);
       const reference = await generateReference(ctx);
       requestId = await ctx.db.insert("requests", {
         type: "article",
         stage: "nouveau",
-        outcome: "gagnee",
+        outcome: progress.outcome,
         requestOrigin: "external",
         complete: isArticleComplete(linkCustomer),
         processSteps: steps,
-        completedSteps: steps.length,
+        completedSteps: progress.completedSteps,
         customer: linkCustomer,
         comment,
         photos: [],
@@ -1243,6 +1269,65 @@ export const finalizePaymentLink = internalMutation({
     });
 
     return { requestId };
+  },
+});
+
+/* ─── Remboursement d'une commande boutique ──────────────────────────────── */
+
+/** Lit le paiement d'une demande pour l'action de remboursement Stripe. */
+export const paymentForRefund = internalQuery({
+  args: { requestId: v.id("requests") },
+  handler: async (ctx, { requestId }) => {
+    const request = await ctx.db.get(requestId);
+    if (!request) return null;
+    return {
+      payment: request.payment ?? null,
+      quoteAmount: request.quoteAmount,
+      reference: request.reference,
+      articleIds: requestArticleIds(request),
+    };
+  },
+});
+
+/**
+ * Enregistre le remboursement Stripe sur la demande.
+ *
+ * Le paiement reste marqué « payé » — il l'a bien été — mais porte désormais sa
+ * trace de remboursement, et la demande est fermée en « perdue » : la commande
+ * n'ira pas au bout. Les articles repartent en vente (« disponible ») puisque
+ * plus personne ne les a achetés.
+ */
+export const markRefunded = internalMutation({
+  args: {
+    requestId: v.id("requests"),
+    stripeRefundId: v.string(),
+    refundedAmount: v.number(),
+    refundedBy: v.optional(v.string()),
+  },
+  handler: async (ctx, { requestId, stripeRefundId, refundedAmount, refundedBy }) => {
+    const request = await ctx.db.get(requestId);
+    if (!request) throw new Error("Demande introuvable.");
+    if (!request.payment) throw new Error("Cette demande n'a aucun paiement.");
+    const now = Date.now();
+    await ctx.db.patch(requestId, {
+      payment: {
+        ...request.payment,
+        stripeRefundId,
+        refundedAmount,
+        refundedAt: now,
+        refundedBy,
+      },
+      outcome: "perdue",
+      lostReason: "annulation_client",
+      updatedAt: now,
+    });
+    for (const articleId of requestArticleIds(request)) {
+      const article = await ctx.db.get(articleId);
+      if (article && article.status === "vendu") {
+        await ctx.db.patch(articleId, { status: "disponible" });
+      }
+    }
+    return null;
   },
 });
 
@@ -1293,14 +1378,15 @@ export const finalizePublicStripeCheckout = internalMutation({
     }
 
     const steps = resolveProcess("article");
+    const progress = paidBoutiqueProgress(steps);
     const requestId = await ctx.db.insert("requests", {
       type: "article",
       stage: "nouveau",
-      outcome: "gagnee",
+      outcome: progress.outcome,
       requestOrigin: "external",
       complete: isArticleComplete(draft.customer),
       processSteps: steps,
-      completedSteps: steps.length,
+      completedSteps: progress.completedSteps,
       customer: draft.customer,
       comment: draft.comment || undefined,
       photos: [],

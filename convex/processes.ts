@@ -16,6 +16,9 @@ export const STEP = {
   // Dépôt en recyclerie
   rdvConfirme: "Rendez-vous confirmé",
   depotRealise: "Dépôt réalisé",
+  // Boutique : la commande est réglée, reste à savoir si le client l'a retirée.
+  paiementValide: "Paiement validé",
+  retraitEffectue: "Retrait effectué",
 } as const;
 
 /** Process complet à 7 étapes (aérogommage, collecte C2/C3, vélo par défaut). */
@@ -71,7 +74,10 @@ export function resolveProcess(
       // TODO Cycle en Bray : process défini ultérieurement (placeholder = complet).
       return [...FULL];
     case "article":
-      return [STEP.contact, STEP.factureReglee];
+      // Une commande boutique n'a que deux jalons : l'encaissement, puis le
+      // retrait en boutique. Tant que le client n'est pas venu chercher ses
+      // articles, la demande reste ouverte dans le CRM.
+      return [STEP.paiementValide, STEP.retraitEffectue];
     case "livraison":
       return [STEP.acompteVerse, STEP.prestaPlanifiee, STEP.prestaTerminee];
     case "depot":
