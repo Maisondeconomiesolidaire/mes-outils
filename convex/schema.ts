@@ -463,7 +463,8 @@ export default defineSchema(
     .index("by_internalReference", ["internalReference"])
     .index("by_productOfDay", ["productOfDay"])
     .index("by_caisse", ["caisseId"])
-    .index("by_site", ["site"]),
+    .index("by_site", ["site"])
+    .index("by_stripeProduct", ["stripeProductId"]),
 
   /**
    * Pool de QR codes d'articles imprimés À L'AVANCE.

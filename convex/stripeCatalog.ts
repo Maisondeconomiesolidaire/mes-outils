@@ -290,3 +290,152 @@ export const syncAll = action({
     return { scheduled: ids.length };
   },
 });
+
+/* ─── Sens retour : Stripe → Recycapp ─────────────────────────────────────── */
+
+/**
+ * Le webhook Stripe applique ici ce qui a été fait côté Stripe.
+ *
+ * ATTENTION AUX ALLERS-RETOURS : nos propres écritures vers Stripe déclenchent
+ * elles aussi des événements. Ces mutations mettent donc à jour l'article ET
+ * son miroir (`stripe*`) dans la même opération, et ne planifient JAMAIS de
+ * synchronisation sortante. Un événement qui décrit un état déjà atteint ne
+ * change rien et la boucle s'arrête d'elle-même.
+ *
+ * Rien de destructeur non plus : un produit supprimé chez Stripe retire
+ * l'article de la vente, il ne l'efface pas. Une erreur de manipulation dans le
+ * dashboard Stripe ne doit pas faire disparaître une fiche — avec ses photos,
+ * son QR code et son emplacement — de la recyclerie.
+ */
+async function articleByStripeProduct(ctx: MutationCtx, stripeProductId: string) {
+  return await ctx.db
+    .query("articles")
+    .withIndex("by_stripeProduct", (q) => q.eq("stripeProductId", stripeProductId))
+    .first();
+}
+
+/** Produit supprimé chez Stripe : l'article sort de la vente et perd son lien. */
+export const applyProductDeleted = internalMutation({
+  args: { stripeProductId: v.string() },
+  handler: async (ctx, { stripeProductId }) => {
+    const article = await articleByStripeProduct(ctx, stripeProductId);
+    if (!article) return null;
+    // Seul un article EN VENTE est retiré de la vente. Vendu, réservé, en
+    // attente ou pris dans un lot, son statut raconte déjà quelque chose que
+    // Stripe ignore : on n'y touche pas.
+    await ctx.db.patch(article._id, {
+      ...(article.status === "disponible" ? { status: "attente" as const } : {}),
+      stripeProductId: undefined,
+      stripePriceId: undefined,
+      stripePriceAmount: undefined,
+      stripeActive: undefined,
+      stripeSyncedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
+/** Produit (dés)activé chez Stripe : l'article suit, sans jamais écraser une vente. */
+export const applyProductActive = internalMutation({
+  args: { stripeProductId: v.string(), active: v.boolean() },
+  handler: async (ctx, { stripeProductId, active }) => {
+    const article = await articleByStripeProduct(ctx, stripeProductId);
+    if (!article) return null;
+    if (article.stripeActive === active) return null;
+
+    // On ne traduit que les deux bascules qui ont un sens, et seulement
+    // depuis le statut correspondant : désactiver retire de la vente un
+    // article DISPONIBLE, réactiver remet en vente un article EN ATTENTE.
+    //
+    // Tout le reste est laissé intact. Un article « vendu », « réservé » ou
+    // pris dans un lot porte une information que Stripe n'a pas — et nos
+    // propres écritures sortantes désactivent justement ces produits-là :
+    // les traduire en aveugle ferait sortir un article de son lot.
+    const status = active
+      ? article.status === "attente"
+        ? ("disponible" as const)
+        : article.status
+      : article.status === "disponible"
+        ? ("attente" as const)
+        : article.status;
+
+    await ctx.db.patch(article._id, {
+      status,
+      stripeActive: active,
+      stripeSyncedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
+/** Prix modifié chez Stripe : l'article prend le nouveau montant. */
+export const applyPriceChange = internalMutation({
+  args: {
+    stripeProductId: v.string(),
+    stripePriceId: v.string(),
+    unitAmount: v.number(),
+  },
+  handler: async (ctx, { stripeProductId, stripePriceId, unitAmount }) => {
+    const article = await articleByStripeProduct(ctx, stripeProductId);
+    if (!article) return null;
+    if (article.stripePriceAmount === unitAmount) return null;
+
+    await ctx.db.patch(article._id, {
+      price: Math.round(unitAmount) / 100,
+      stripePriceId,
+      stripePriceAmount: unitAmount,
+      stripeSyncedAt: Date.now(),
+    });
+    return null;
+  },
+});
+
+/**
+ * Vente encaissée par un canal Stripe (Payment Link, Terminal, dashboard) :
+ * les articles concernés passent « vendu » pour quitter la boutique.
+ *
+ * Aucune demande n'est créée : on ne connaît ni le client ni les conditions de
+ * retrait. Le but est de ne pas vendre deux fois le même objet.
+ */
+export const applySoldProducts = internalMutation({
+  args: { stripeProductIds: v.array(v.string()) },
+  handler: async (ctx, { stripeProductIds }) => {
+    let sold = 0;
+    for (const stripeProductId of stripeProductIds) {
+      const article = await articleByStripeProduct(ctx, stripeProductId);
+      if (!article || article.status === "vendu") continue;
+      await ctx.db.patch(article._id, {
+        status: "vendu",
+        stripeActive: false,
+        stripeSyncedAt: Date.now(),
+      });
+      sold += 1;
+    }
+    return { sold };
+  },
+});
+
+/**
+ * Marque vendus les articles d'une session Checkout Stripe.
+ *
+ * Les lignes d'une session ne voyagent pas dans le webhook : il faut les
+ * redemander à Stripe, donc une action.
+ */
+export const applySoldCheckoutSession = internalAction({
+  args: { sessionId: v.string() },
+  handler: async (ctx, { sessionId }): Promise<{ sold: number }> => {
+    const secretKey = recycappSecretKey();
+    const lineItems = await stripeRequest<{
+      data?: Array<{ price?: { product?: string } }>;
+    }>(`checkout/sessions/${sessionId}/line_items?limit=100`, secretKey);
+
+    const productIds = (lineItems.data ?? [])
+      .map((item) => item.price?.product)
+      .filter((product): product is string => typeof product === "string");
+    if (productIds.length === 0) return { sold: 0 };
+
+    return await ctx.runMutation(internal.stripeCatalog.applySoldProducts, {
+      stripeProductIds: productIds,
+    });
+  },
+});
