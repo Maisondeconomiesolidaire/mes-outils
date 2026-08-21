@@ -32,6 +32,26 @@ async function withCoverImageUrl(
   return { ...article, imageUrls: cover ? [cover] : [] };
 }
 
+/**
+ * Codes des caisses, indexés par identifiant.
+ *
+ * Le code (« CA-12 ») est annoncé au client : c'est le bac où l'objet
+ * l'attend en boutique. La table des caisses est petite — on la lit une fois
+ * pour toute une liste plutôt qu'une caisse par article.
+ */
+async function caisseCodesById(ctx: QueryCtx) {
+  const caisses = await ctx.db.query("caisses").collect();
+  return new Map(caisses.map((caisse) => [String(caisse._id), caisse.code]));
+}
+
+/** Code de la caisse d'un article, ou `undefined` s'il n'est pas rangé. */
+function caisseCodeOf(
+  article: Doc<"articles">,
+  codes: Map<string, string>,
+): string | undefined {
+  return article.caisseId ? codes.get(String(article.caisseId)) : undefined;
+}
+
 async function withBundleDetails(ctx: QueryCtx, article: Doc<"articles">) {
   const enriched = await withImageUrls(ctx, article);
   if (!article.isLot || !article.bundledArticleIds?.length) {
@@ -294,7 +314,13 @@ export const listPublic = query({
         a.status !== "lot" &&
         matchesArticleFilters(a, args),
     );
-    return Promise.all(visible.map((a) => withCoverImageUrl(ctx, a)));
+    const codes = await caisseCodesById(ctx);
+    return Promise.all(
+      visible.map(async (a) => ({
+        ...(await withCoverImageUrl(ctx, a)),
+        caisseCode: caisseCodeOf(a, codes),
+      })),
+    );
   },
 });
 
@@ -306,8 +332,10 @@ export const getPublic = query({
     if (!article) return null;
     const enriched = await withBundleDetails(ctx, article);
     const similarArticles = await similarArticlesFor(ctx, article);
+    const caisse = article.caisseId ? await ctx.db.get(article.caisseId) : null;
     return {
       ...enriched,
+      caisseCode: caisse?.code,
       similarArticles,
     };
   },
