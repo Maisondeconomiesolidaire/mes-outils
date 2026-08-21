@@ -21,7 +21,7 @@ export const createSession = mutation({
 
     return await ctx.db.insert("atelierSessions", {
       ...args,
-      articleReference: article.internalReference ?? article.gdrReference ?? args.articleId,
+      articleReference: article.internalReference ?? args.articleId,
       date: Date.now(),
       status: "en_cours",
       createdAt: Date.now(),
@@ -86,9 +86,7 @@ export const getArticleForAtelier = query({
     await requireCrmPermission(ctx, "ateliers", "read");
     const articles = await ctx.db.query("articles").collect();
     const found = articles.find(
-      (a) =>
-        (a.internalReference && a.internalReference === reference) ||
-        (a.gdrReference && a.gdrReference === reference),
+      (a) => a.internalReference && a.internalReference === reference,
     );
     if (!found) return null;
     const imageUrls = await Promise.all(

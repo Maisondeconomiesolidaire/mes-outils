@@ -408,7 +408,6 @@ export default defineSchema(
     caisseId: v.optional(v.id("caisses")),
     originalPrice: v.optional(v.number()),
     internalReference: v.optional(v.string()),
-    gdrReference: v.optional(v.string()),
     /**
      * Recyclerie qui détient physiquement l'article : le client vient le
      * retirer sur ce site, et la boutique en ligne permet de filtrer dessus.
@@ -443,7 +442,6 @@ export default defineSchema(
   })
     .index("by_status", ["status"])
     .index("by_internalReference", ["internalReference"])
-    .index("by_gdrReference", ["gdrReference"])
     .index("by_productOfDay", ["productOfDay"])
     .index("by_caisse", ["caisseId"])
     .index("by_site", ["site"]),

@@ -119,17 +119,10 @@ export const getArticleByReference = query({
   args: { reference: v.string() },
   handler: async (ctx, { reference }) => {
     await requireCrmPermission(ctx, "caisse", "read");
-    // Try internalReference index first, then gdrReference
-    let found = await ctx.db
+    const found = await ctx.db
       .query("articles")
       .withIndex("by_internalReference", (q) => q.eq("internalReference", reference))
       .first();
-    if (!found) {
-      found = await ctx.db
-        .query("articles")
-        .withIndex("by_gdrReference", (q) => q.eq("gdrReference", reference))
-        .first();
-    }
     if (!found) return null;
     const imageUrls = await Promise.all(
       found.images.map((id: Id<"_storage">) => ctx.storage.getUrl(id)),
@@ -159,7 +152,6 @@ export const searchArticlesForSale = query({
         const haystack = [
           article.title,
           article.internalReference,
-          article.gdrReference,
           article.category,
           article.subcategory,
         ]
@@ -169,7 +161,7 @@ export const searchArticlesForSale = query({
         const textMatch = haystack.some((value) => value.includes(normalized));
         const digitMatch =
           digitSearch.length > 0 &&
-          [article.internalReference, article.gdrReference]
+          [article.internalReference]
             .filter((value): value is string => Boolean(value))
             .map((value) => value.replace(/\D/g, ""))
             .some((value) => value.includes(digitSearch));
@@ -187,7 +179,7 @@ export const searchArticlesForSale = query({
           _id: article._id,
           title: article.title,
           price: article.price,
-          reference: article.internalReference ?? article.gdrReference ?? "",
+          reference: article.internalReference ?? "",
           imageUrls: imageUrls.filter(Boolean) as string[],
         };
       }),

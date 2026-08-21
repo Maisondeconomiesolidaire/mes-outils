@@ -241,11 +241,6 @@ export const articleByReference = internalQuery({
   ): Promise<{ price: number; title: string } | null> => {
     const ref = reference.replace(/\D/g, "");
     if (!ref) return null;
-    const byGdr = await ctx.db
-      .query("articles")
-      .withIndex("by_gdrReference", (q) => q.eq("gdrReference", ref))
-      .first();
-    if (byGdr) return { price: byGdr.price, title: byGdr.title };
     const byInternal = await ctx.db
       .query("articles")
       .withIndex("by_internalReference", (q) => q.eq("internalReference", ref))

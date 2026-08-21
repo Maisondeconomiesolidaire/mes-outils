@@ -126,7 +126,6 @@ export const promoteToArticle = mutation({
       subcategory: item.subcategory,
       condition: args.condition ?? item.condition ?? "Bon état",
       internalReference: item.reference,
-      gdrReference: item.reference,
       images: [],
       status: "attente",
       createdAt: Date.now(),

@@ -211,15 +211,9 @@ function normalizeDigits(value: string) {
   return value.replace(/\D/g, "");
 }
 
-function assertArticleReferences(args: {
-  internalReference: string;
-  gdrReference?: string;
-}) {
+function assertArticleReferences(args: { internalReference: string }) {
   if (!/^\d{6}$/.test(args.internalReference)) {
     throw new Error("La référence interne doit contenir exactement 6 chiffres.");
-  }
-  if (args.gdrReference && !/^\d{15}$/.test(args.gdrReference)) {
-    throw new Error("La référence GDR doit contenir exactement 15 chiffres.");
   }
 }
 
@@ -275,7 +269,6 @@ function matchesArticleFilters(
     article.category,
     article.subcategory,
     article.internalReference,
-    article.gdrReference,
     ...(article.keywords ?? []),
     article.themeKey,
   ]
@@ -285,7 +278,7 @@ function matchesArticleFilters(
   const textMatch = haystack.some((value) => value.includes(normalizedSearch));
   const digitMatch =
     digitSearch.length > 0 &&
-    [article.internalReference, article.gdrReference]
+    [article.internalReference]
       .filter((value): value is string => Boolean(value))
       .map(normalizeDigits)
       .some((value) => value.includes(digitSearch));
@@ -507,7 +500,6 @@ export const cartForCrm = query({
           status: enriched.status,
           imageUrls: enriched.imageUrls,
           internalReference: enriched.internalReference ?? null,
-          gdrReference: enriched.gdrReference ?? null,
           site: enriched.site ?? null,
           location: enriched.location ?? null,
           caisse: caisse
@@ -574,7 +566,6 @@ export const create = mutation({
      */
     qrReference: v.optional(v.string()),
     originalPrice: v.optional(v.number()),
-    gdrReference: v.optional(v.string()),
     /** Recyclerie qui détient l'article (site de retrait pour le client). */
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
@@ -591,10 +582,7 @@ export const create = mutation({
     await requireCrmPermission(ctx, "articles", "create");
     const scanned = args.qrReference ? normalizeReference(args.qrReference) : "";
     const internalReference = scanned || (await generateInternalReference(ctx));
-    assertArticleReferences({
-      internalReference,
-      gdrReference: args.gdrReference,
-    });
+    assertArticleReferences({ internalReference });
     const { desiredStatus, qrReference: _qrReference, ...articleArgs } = args;
     const shouldKeepForLot = desiredStatus === "attente" || desiredStatus === "lot";
     const articleId = await ctx.db.insert("articles", {
@@ -602,7 +590,6 @@ export const create = mutation({
       weightKg: normalizeWeightKg(args.weightKg),
       location: args.location?.trim() || undefined,
       internalReference,
-      gdrReference: args.gdrReference || undefined,
       keywords: args.keywords?.length ? uniqueKeywords(args.keywords) : undefined,
       themeKey: args.themeKey
         ? normalizeKeyword(args.themeKey).replace(/\s+/g, "-")
@@ -830,7 +817,6 @@ export const update = mutation({
     caisseId: v.optional(v.id("caisses")),
     originalPrice: v.optional(v.number()),
     internalReference: v.string(),
-    gdrReference: v.optional(v.string()),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
@@ -857,26 +843,11 @@ export const update = mutation({
       // (`undefined` retire le champ, alors qu'un argument absent le garderait).
       caisseId: rest.caisseId ?? undefined,
       site: rest.site ?? undefined,
-      gdrReference: rest.gdrReference || undefined,
       keywords: rest.keywords?.length ? uniqueKeywords(rest.keywords) : undefined,
       themeKey: rest.themeKey
         ? normalizeKeyword(rest.themeKey).replace(/\s+/g, "-")
         : undefined,
     });
-  },
-});
-
-/** CRM : renseigne uniquement la référence externe (GDR) d'un article.
- *  Raccourci utilisé depuis le suivi d'une demande boutique. */
-export const setGdrReference = mutation({
-  args: { id: v.id("articles"), gdrReference: v.string() },
-  handler: async (ctx, { id, gdrReference }) => {
-    await requireCrmPermission(ctx, "articles", "update");
-    const trimmed = gdrReference.trim();
-    if (trimmed && !/^\d{15}$/.test(trimmed)) {
-      throw new Error("La référence GDR doit contenir exactement 15 chiffres.");
-    }
-    await ctx.db.patch(id, { gdrReference: trimmed || undefined });
   },
 });
 
