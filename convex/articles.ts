@@ -444,32 +444,55 @@ export const getForCrm = query({
 });
 
 /**
- * Emplacement physique d'un article, pour le CRM.
+ * Le panier d'une demande boutique, vu du CRM.
  *
- * Depuis une demande boutique, l'équipe doit pouvoir aller chercher l'objet :
- * il lui faut la caisse qui le contient et la recyclerie où elle se trouve.
- * Ces informations sont internes — elles ne passent pas par `getPublic`, qui
- * sert la boutique en ligne.
+ * Une seule requête pour toute la commande : chaque article arrive avec sa
+ * photo, son prix, sa référence (celle du QR code) et surtout son emplacement
+ * physique — caisse et recyclerie. Depuis une demande, l'équipe n'a autrement
+ * aucune idée de l'endroit où sont rangés les objets à préparer.
+ *
+ * Contrairement à `getManyPublic`, les articles vendus sont conservés : dans
+ * une commande payée, ils le sont tous.
  */
-export const locationForCrm = query({
-  args: { id: v.id("articles") },
-  handler: async (ctx, { id }) => {
+export const cartForCrm = query({
+  args: { ids: v.array(v.id("articles")) },
+  handler: async (ctx, { ids }) => {
     await requireCrmPermission(ctx, "demandes", "read");
-    const article = await ctx.db.get(id);
-    if (!article) return null;
-    const caisse = article.caisseId ? await ctx.db.get(article.caisseId) : null;
-    return {
-      internalReference: article.internalReference ?? null,
-      site: article.site ?? null,
-      location: article.location ?? null,
-      caisse: caisse
-        ? {
-            code: caisse.code,
-            label: caisse.label ?? null,
-            zone: caisse.zone ?? null,
-          }
-        : null,
-    };
+    const items = [];
+    for (const id of ids.slice(0, 40)) {
+      const article = await ctx.db.get(id);
+      if (!article) {
+        items.push({ id, article: null });
+        continue;
+      }
+      const caisse = article.caisseId ? await ctx.db.get(article.caisseId) : null;
+      const enriched = await withImageUrls(ctx, article);
+      items.push({
+        id,
+        article: {
+          _id: enriched._id,
+          title: enriched.title,
+          price: enriched.price,
+          originalPrice: enriched.originalPrice ?? null,
+          category: enriched.category,
+          weightKg: enriched.weightKg ?? null,
+          status: enriched.status,
+          imageUrls: enriched.imageUrls,
+          internalReference: enriched.internalReference ?? null,
+          gdrReference: enriched.gdrReference ?? null,
+          site: enriched.site ?? null,
+          location: enriched.location ?? null,
+          caisse: caisse
+            ? {
+                code: caisse.code,
+                label: caisse.label ?? null,
+                zone: caisse.zone ?? null,
+              }
+            : null,
+        },
+      });
+    }
+    return items;
   },
 });
 
