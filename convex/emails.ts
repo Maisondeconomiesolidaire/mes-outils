@@ -156,6 +156,59 @@ function noReplyNotice() {
   </table>`;
 }
 
+/** Horaires de la recyclerie, du lundi au dimanche. */
+const SHOP_HOURS: Array<[string, string | null]> = [
+  ["Lundi", null],
+  ["Mardi", "14h00 – 17h00"],
+  ["Mercredi", "14h00 – 17h00"],
+  ["Jeudi", "14h00 – 17h00"],
+  ["Vendredi", "14h00 – 17h00"],
+  ["Samedi", "14h00 – 17h00"],
+  ["Dimanche", null],
+];
+
+const SHOP_ADDRESS = "4 Rue de la Prairie, 60650 Lachapelle-aux-Pots";
+const SHOP_PHONE = "03 75 15 04 78";
+
+/**
+ * Rappel « click & collect » : l'achat en ligne se retire sur place, donc le
+ * client a besoin de l'adresse et des horaires dans l'email de confirmation.
+ */
+function clickAndCollectNotice() {
+  const rows = SHOP_HOURS.map(([day, hours]) => {
+    const closed = hours === null;
+    return `<tr>
+      <td style="padding:5px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:${closed ? "#a1a1aa" : "#3f3f46"};">${day}</td>
+      <td align="right" style="padding:5px 0;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:${closed ? "400" : "700"};line-height:1.5;color:${closed ? "#a1a1aa" : "#18181b"};">${closed ? "Fermé" : hours}</td>
+    </tr>`;
+  }).join("");
+
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:26px 0 0;border:1px solid #e4e4e7;border-radius:16px;background:#fafafa;">
+    <tr>
+      <td class="px" style="padding:22px 24px;">
+        <p style="margin:0 0 6px;font-family:Helvetica,Arial,sans-serif;font-size:18px;font-weight:800;line-height:1.35;color:#18181b;">
+          🛍️ Retrait en click &amp; collect
+        </p>
+        <p style="margin:0 0 16px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">
+          Votre commande est payée : il ne reste plus qu'à venir la chercher à la
+          recyclerie. Il n'y a pas de livraison, et rien à régler sur place.
+        </p>
+        <p style="margin:0 0 16px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#3f3f46;">
+          <strong>La Recyclerie du Pays de Bray</strong><br/>
+          ${esc(SHOP_ADDRESS)}<br/>
+          ${esc(SHOP_PHONE)}
+        </p>
+        <p style="margin:0 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#71717a;">
+          Horaires d'ouverture
+        </p>
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+          ${rows}
+        </table>
+      </td>
+    </tr>
+  </table>`;
+}
+
 /** Délai laissé au client pour venir chercher un article payé en ligne. */
 export const PICKUP_DEADLINE_DAYS = 5;
 
@@ -381,17 +434,18 @@ export const sendRequestConfirmation = internalAction({
     const orderUrl = `${appUrl()}/compte/commandes/${requestId}`;
     const html = shell({
       preheader: paid
-        ? `Votre commande #${reference} est confirmée. Vous avez ${PICKUP_DEADLINE_DAYS} jours pour la retirer.`
+        ? `Commande #${reference} confirmée — à retirer en click & collect sous ${PICKUP_DEADLINE_DAYS} jours.`
         : `Votre demande ${label} #${reference} est bien enregistrée.`,
       heading: paid
         ? "Votre commande est confirmée 🎉"
         : "Votre demande est bien enregistrée 🎉",
       intro: paid
-        ? `Bonjour ${esc(name)},<br/><br/>Votre paiement est bien reçu et votre commande <strong>#${esc(reference)}</strong> est confirmée. Votre article vous attend en boutique.`
+        ? `Bonjour ${esc(name)},<br/><br/>Votre paiement est bien reçu et votre commande <strong>#${esc(reference)}</strong> est confirmée. C'est une commande en <strong>click &amp; collect</strong> : votre article vous attend à la recyclerie, aux horaires d'ouverture indiqués plus bas.`
         : `Bonjour ${esc(name)},<br/><br/>Nous avons bien reçu votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>). Notre équipe la traite et revient vers vous très prochainement.`,
       contentHtml: `
         ${buildArticleCard(article)}
         <div style="margin:0 0 22px;">${button(orderUrl, paid ? "Voir ma commande" : "Suivre ma demande")}</div>
+        ${paid ? clickAndCollectNotice() : ""}
         ${paid ? pickupDeadlineNotice(pickupDeadline) : ""}
         <p style="margin:22px 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#71717a;">Accès rapides :</p>
         ${quickLinks()}
