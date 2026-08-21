@@ -81,6 +81,82 @@ export const list = query({
   },
 });
 
+/**
+ * Recherche rapide d'un client par email ou par nom, pour la caisse.
+ *
+ * La liste complète des clients est reconstruite à chaque appel à partir de
+ * toutes les demandes : trop lourd pour une saisie au clavier. On filtre donc
+ * ici, et on ne renvoie que le strict nécessaire à l'identification.
+ */
+export const search = query({
+  args: { searchText: v.string() },
+  handler: async (ctx, { searchText }) => {
+    await requireCrmPermission(ctx, "clients", "read");
+    const needle = searchText.trim().toLowerCase();
+    if (needle.length < 2) return [];
+
+    const [requests, importedCustomers] = await Promise.all([
+      ctx.db.query("requests").order("desc").take(2000),
+      ctx.db.query("crmCustomers").order("desc").take(2000),
+    ]);
+
+    const found = new Map<
+      string,
+      {
+        email: string;
+        firstName: string;
+        lastName: string;
+        phone: string;
+        requestCount: number;
+        lastAt: number;
+      }
+    >();
+
+    function consider(
+      customer: {
+        firstName: string;
+        lastName: string;
+        email: string;
+        phone: string;
+      },
+      at: number,
+      counts: boolean,
+    ) {
+      const email = customer.email.trim().toLowerCase();
+      if (!email) return;
+      const haystack =
+        `${customer.firstName} ${customer.lastName} ${email}`.toLowerCase();
+      if (!haystack.includes(needle)) return;
+
+      const existing = found.get(email);
+      if (existing) {
+        if (counts) existing.requestCount += 1;
+        existing.lastAt = Math.max(existing.lastAt, at);
+        return;
+      }
+      found.set(email, {
+        email: customer.email,
+        firstName: titleCaseName(customer.firstName),
+        lastName: titleCaseName(customer.lastName),
+        phone: customer.phone,
+        requestCount: counts ? 1 : 0,
+        lastAt: at,
+      });
+    }
+
+    for (const request of requests) {
+      consider(request.customer, request.createdAt, true);
+    }
+    for (const customer of importedCustomers) {
+      consider(customer, customer.updatedAt, false);
+    }
+
+    return [...found.values()]
+      .sort((a, b) => b.lastAt - a.lastAt)
+      .slice(0, 12);
+  },
+});
+
 /** Fiche client : ses coordonnées + toutes ses demandes (par email). */
 export const get = query({
   args: { email: v.string() },

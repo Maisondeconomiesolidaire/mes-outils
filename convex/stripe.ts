@@ -41,6 +41,15 @@ export const startTestCheckout = action({
     ),
     discountAmount: v.optional(v.number()),
     returnUrl: v.string(),
+    /** Client de la vente : la demande boutique est créée à l'encaissement. */
+    customer: v.optional(
+      v.object({
+        firstName: v.string(),
+        lastName: v.string(),
+        email: v.string(),
+        phone: v.optional(v.string()),
+      }),
+    ),
   },
   handler: async (ctx, args) => {
     const access = await ctx.runQuery(api.permissions.myAccess, {});
@@ -60,6 +69,7 @@ export const startTestCheckout = action({
         items: args.items,
         discountAmount: args.discountAmount,
         createdBy: access.email ?? "caisse",
+        customer: args.customer,
       },
     );
 
@@ -195,6 +205,7 @@ export const confirmTestCheckout = action({
       receiptNumber: string;
       total: number;
       change?: number;
+      requestId: Id<"requests"> | null;
     } = await ctx.runMutation(internal.ventes.finalizeStripeCheckoutDraft, {
       draftId: args.draftId,
       stripeSessionId: session.id,

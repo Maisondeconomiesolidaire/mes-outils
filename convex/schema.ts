@@ -1019,6 +1019,16 @@ export default defineSchema(
     discountAmount: v.optional(v.number()),
     total: v.number(),
     createdBy: v.string(),
+    /** Client de la vente : la demande boutique est créée à l'encaissement. */
+    customer: v.optional(
+      v.object({
+        firstName: v.string(),
+        lastName: v.string(),
+        email: v.string(),
+        phone: v.optional(v.string()),
+      }),
+    ),
+    requestId: v.optional(v.id("requests")),
     stripeSessionId: v.optional(v.string()),
     stripePaymentIntentId: v.optional(v.string()),
     status: v.union(v.literal("pending"), v.literal("completed")),

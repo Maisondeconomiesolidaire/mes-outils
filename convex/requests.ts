@@ -177,10 +177,86 @@ async function createNewRequestNotification(
   }
 }
 
-async function generateReference(ctx: MutationCtx): Promise<string> {
+export async function generateReference(ctx: MutationCtx): Promise<string> {
   const all = await ctx.db.query("requests").collect();
   const n = all.length + 1;
   return n.toString().padStart(6, "0");
+}
+
+/**
+ * Demande créée par une vente au comptoir (caisse).
+ *
+ * Le client est devant nous, il repart avec l'objet : la demande naît donc
+ * ACHEVÉE — « Paiement validé » puis « Retrait effectué » cochés, issue
+ * « gagnée ». Elle ne sert pas à piloter un travail restant mais à nourrir
+ * l'historique du client, exactement comme une commande en ligne retirée.
+ */
+export async function createInShopSaleRequest(
+  ctx: MutationCtx,
+  args: {
+    customer: {
+      firstName: string;
+      lastName: string;
+      email: string;
+      phone: string;
+      address?: string;
+      postalCode?: string;
+      city?: string;
+    };
+    articles: Array<{ articleId: Id<"articles">; articleTitle: string }>;
+    total: number;
+    paymentMethod: "cb" | "especes";
+    receiptNumber?: string;
+    stripePaymentIntentId?: string;
+  },
+): Promise<Id<"requests">> {
+  const customer = normalizeCustomer(args.customer);
+  const steps = resolveProcess("article");
+  const reference = await generateReference(ctx);
+  const now = Date.now();
+
+  const requestId = await ctx.db.insert("requests", {
+    type: "article",
+    stage: "nouveau",
+    outcome: "gagnee",
+    requestOrigin: "internal",
+    complete: isArticleComplete(customer),
+    processSteps: steps,
+    // Vente en personne : les deux jalons sont franchis d'un coup.
+    completedSteps: steps.length,
+    processLog: steps.map((_, index) => ({
+      step: index,
+      by: "Caisse",
+      at: now,
+    })),
+    customer,
+    comment: args.receiptNumber
+      ? `Vente en boutique — ticket ${args.receiptNumber}.`
+      : "Vente en boutique.",
+    photos: [],
+    article: args.articles[0],
+    articles: args.articles,
+    quoteAmount: args.total,
+    payment: {
+      method: args.paymentMethod,
+      status: "paid",
+      validated: true,
+      captured: true,
+      ...(args.stripePaymentIntentId
+        ? {
+            provider: "stripe" as const,
+            stripePaymentIntentId: args.stripePaymentIntentId,
+          }
+        : {}),
+      paidAt: now,
+    },
+    createdAt: now,
+    updatedAt: now,
+    reference,
+  });
+
+  await upsertRequestCustomer(ctx, customer, "/crm/caisse");
+  return requestId;
 }
 
 async function upsertRequestCustomer(
