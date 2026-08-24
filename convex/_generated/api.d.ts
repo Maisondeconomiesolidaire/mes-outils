@@ -35,6 +35,7 @@ import type * as gotravaux from "../gotravaux.js";
 import type * as hrContractNotices from "../hrContractNotices.js";
 import type * as http from "../http.js";
 import type * as importLegacy from "../importLegacy.js";
+import type * as kiosk from "../kiosk.js";
 import type * as klyde from "../klyde.js";
 import type * as klydeTaxonomy from "../klydeTaxonomy.js";
 import type * as leaves from "../leaves.js";
@@ -99,6 +100,7 @@ declare const fullApi: ApiFromModules<{
   hrContractNotices: typeof hrContractNotices;
   http: typeof http;
   importLegacy: typeof importLegacy;
+  kiosk: typeof kiosk;
   klyde: typeof klyde;
   klydeTaxonomy: typeof klydeTaxonomy;
   leaves: typeof leaves;

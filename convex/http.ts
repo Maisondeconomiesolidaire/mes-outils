@@ -118,6 +118,7 @@ async function handleCatalogEvent(
     product?: string;
     unit_amount?: number;
     currency?: string;
+    metadata?: { draftId?: string };
   },
 ) {
   if (type === "product.deleted") {
@@ -159,6 +160,13 @@ async function handleCatalogEvent(
   }
 
   if (type === "checkout.session.completed" && object.id) {
+    // Une session portant un `draftId` est une commande de la boutique ou de
+    // la vitrine : elle a son propre circuit, qui marque les articles vendus
+    // ET enregistre la commande. Les marquer vendus ici les rendrait
+    // indisponibles avant que la commande existe, et la finalisation
+    // échouerait sur un article « déjà vendu ».
+    if (object.metadata?.draftId) return;
+
     // Les lignes de la session ne sont pas dans le webhook : il faut les
     // redemander à Stripe, donc passer par une action.
     await ctx.scheduler.runAfter(

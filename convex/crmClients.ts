@@ -58,6 +58,75 @@ export const recordCrmCustomer = internalMutation({
 });
 
 /**
+ * Crée le compte Clerk d'un client, ou retrouve celui qui existe déjà.
+ *
+ * Aucun mot de passe : le client n'en a pas choisi. Il pourra se connecter plus
+ * tard par code email et retrouvera ses achats. Si l'adresse est déjà connue de
+ * Clerk, on RÉUTILISE le compte — créer un doublon échouerait (Clerk refuse
+ * deux comptes sur la même adresse) et couperait le client de son historique.
+ *
+ * Ne lève jamais : un compte est un confort, il ne doit pas faire échouer une
+ * vente déjà payée. Le motif d'échec est renvoyé pour être journalisé.
+ */
+export async function ensureClerkCustomer(
+  secret: string,
+  customer: {
+    email: string;
+    firstName: string;
+    lastName: string;
+    signupPath: string;
+  },
+): Promise<{ clerkId: string | null; reused: boolean; warning?: string }> {
+  try {
+    const existing = await fetchAllClerkUsers(secret, { query: customer.email });
+    const match = existing.find((user) => clerkPrimaryEmail(user) === customer.email);
+    if (match && typeof match.id === "string") {
+      return { clerkId: match.id, reused: true };
+    }
+
+    const response = await fetch("https://api.clerk.com/v1/users", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${secret}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        email_address: [customer.email],
+        first_name: customer.firstName,
+        last_name: customer.lastName,
+        skip_password_requirement: true,
+        skip_password_checks: true,
+        unsafe_metadata: {
+          signupApp: "recycapp",
+          signupPath: customer.signupPath,
+        },
+      }),
+    });
+    const payload = (await response.json()) as {
+      id?: string;
+      errors?: Array<{ message?: string; long_message?: string }>;
+    };
+    if (!response.ok || !payload.id) {
+      return {
+        clerkId: null,
+        reused: false,
+        warning:
+          payload.errors?.[0]?.long_message ||
+          payload.errors?.[0]?.message ||
+          `Clerk a répondu ${response.status}.`,
+      };
+    }
+    return { clerkId: payload.id, reused: false };
+  } catch (error) {
+    return {
+      clerkId: null,
+      reused: false,
+      warning: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
  * Crée (ou retrouve) le compte client et l'enregistre côté CRM.
  *
  * Si l'adresse est déjà connue de Clerk, on RÉUTILISE le compte : créer un
