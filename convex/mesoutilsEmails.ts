@@ -20,7 +20,6 @@ export const INTENDANCE_EMAIL = "intendance@eco-solidaire.fr";
 /** Adresses des responsables notifiés des demandes de réservation de véhicule. */
 export const VEHICLE_REQUEST_MANAGER_EMAILS = [
   "f.henry@eco-solidaire.fr",
-  "y.prata@eco-solidaire.fr",
   INTENDANCE_EMAIL,
 ];
 
@@ -379,8 +378,8 @@ export const sendRoomFeedbackRequestEmail = internalAction({
 });
 
 /**
- * Notifie les responsables (f.henry / y.prata) d'une nouvelle demande de
- * réservation de véhicule, avec un lien direct vers la validation.
+ * Notifie les responsables d'une nouvelle demande de réservation de véhicule,
+ * avec un lien direct vers la validation.
  */
 export const sendVehicleRequestToManagers = internalAction({
   args: {

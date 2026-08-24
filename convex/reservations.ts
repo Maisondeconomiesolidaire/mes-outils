@@ -37,12 +37,11 @@ function assetImageArgs(asset: { photo?: unknown; photoUrl?: string }) {
 
 const PAGE_KEY = "mesoutils:reservations";
 
-// Destinataire unique des notifications « nouvelle demande de réservation
-// véhicule » : seul ce compte est prévenu de chaque demande.
-const VEHICLE_REQUEST_NOTIFY_EMAILS = [
-  "f.henry@eco-solidaire.fr",
-  "y.prata@eco-solidaire.fr",
-];
+// Comptes prévenus dans l'app à chaque « nouvelle demande de réservation
+// véhicule ». Doit rester aligné sur `VEHICLE_REQUEST_MANAGER_EMAILS`, qui
+// gouverne l'email : un responsable retiré d'une liste et pas de l'autre
+// continuerait d'être sollicité par un seul des deux canaux.
+const VEHICLE_REQUEST_NOTIFY_EMAILS = ["f.henry@eco-solidaire.fr"];
 
 const PERMANENT_DELETE_EMAIL = "lahmerselim@gmail.com";
 
@@ -454,7 +453,7 @@ export const bookRoom = mutation({
       });
     }
 
-    // Email aux responsables des réservations de salle (a.still & y.prata).
+    // Email aux responsables des réservations de salle.
     // Décalé pour ne pas dépasser la limite Resend (2 req/s) avec l'email au demandeur.
     await ctx.scheduler.runAfter(1200, internal.mesoutilsEmails.sendRoomReservationToManagers, {
       requesterName,
