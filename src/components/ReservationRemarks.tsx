@@ -122,11 +122,19 @@ export function ReservationRemarks({
   vehicleId?: Id<"vehicles">;
   onCreateMaintenance?: (proposal: MaintenanceProposal) => void;
 }) {
-  const [vehicleTab, setVehicleTab] = useState<"remarks" | "analyses">("remarks");
+  const [vehicleTab, setVehicleTab] = useState<"remarks" | "returns" | "analyses">(
+    "remarks",
+  );
   const vehicleRemarks = useQuery(
     api.reservations.listVehicleRemarks,
-    kind === "vehicle" ? { vehicleId } : "skip",
+    kind === "vehicle" ? { vehicleId, scope: "incidents" } : "skip",
   );
+  // Les retours sans rien à signaler : ils ne demandent aucune action, mais ils
+  // attestent que le véhicule a bien été rendu, avec son kilométrage.
+  const vehicleReturns = useQuery(
+    api.reservations.listVehicleRemarks,
+    kind === "vehicle" ? { vehicleId, scope: "returns" } : "skip",
+  ) as Remark[] | undefined;
   const roomRemarks = useQuery(
     api.reservations.listRoomRemarks,
     kind === "room" ? {} : "skip",
@@ -137,18 +145,27 @@ export function ReservationRemarks({
   ) as VehicleAnalysis[] | undefined;
   const data = (kind === "vehicle" ? vehicleRemarks : roomRemarks) as Remark[] | undefined;
 
-  if (data === undefined || (kind === "vehicle" && vehicleAnalyses === undefined)) return <FullSpinner label="Chargement des remarques..." />;
-  if (data.length === 0 && (kind !== "vehicle" || vehicleAnalyses?.length === 0)) {
+  if (
+    data === undefined ||
+    (kind === "vehicle" && (vehicleAnalyses === undefined || vehicleReturns === undefined))
+  ) {
+    return <FullSpinner label="Chargement des remarques..." />;
+  }
+
+  // Pour une salle il n'y a pas d'onglets : rien à afficher = état vide.
+  if (kind !== "vehicle" && data.length === 0) {
     return (
       <EmptyState
         icon={<MessageSquareText className="h-8 w-8" />}
         title="Aucune remarque"
-        description={`Les retours laissés après les réservations de ${
-          kind === "vehicle" ? "véhicules" : "salles"
-        } apparaîtront ici.`}
+        description="Les retours laissés après les réservations de salles apparaîtront ici."
       />
     );
   }
+
+  // Côté véhicules, chaque onglet porte son propre état vide : masquer la barre
+  // d'onglets parce qu'un seul est vide cacherait les deux autres.
+  const visibleRemarks = vehicleTab === "returns" ? (vehicleReturns ?? []) : data;
 
   return (
     <div className="space-y-3">
@@ -160,6 +177,13 @@ export function ReservationRemarks({
             className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${vehicleTab === "remarks" ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
           >
             Remarques ({data.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setVehicleTab("returns")}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${vehicleTab === "returns" ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+          >
+            Retours ({vehicleReturns?.length ?? 0})
           </button>
           <button
             type="button"
@@ -248,7 +272,18 @@ export function ReservationRemarks({
           <EmptyState icon={<MessageSquareText className="h-8 w-8" />} title="Rien à signaler pour Mécania" description="Une synthèse apparaîtra dès qu'un retour déclarera un incident technique." />
         )
       ) : null}
-      {(kind !== "vehicle" || vehicleTab === "remarks") ? data.map((remark) => (
+      {kind === "vehicle" && vehicleTab !== "analyses" && visibleRemarks.length === 0 ? (
+        <EmptyState
+          icon={<MessageSquareText className="h-8 w-8" />}
+          title={vehicleTab === "returns" ? "Aucun retour sans remarque" : "Aucune remarque"}
+          description={
+            vehicleTab === "returns"
+              ? "Les retours ne signalant aucun incident apparaîtront ici."
+              : "Les retours signalant un incident apparaîtront ici."
+          }
+        />
+      ) : null}
+      {(kind !== "vehicle" || vehicleTab !== "analyses") ? visibleRemarks.map((remark) => (
         <div key={remark._id} className="premium-panel rounded-2xl p-4">
           <div className="flex flex-wrap items-start gap-3">
             <span className="h-12 w-16 shrink-0 overflow-hidden rounded-xl bg-[var(--accent)]">
