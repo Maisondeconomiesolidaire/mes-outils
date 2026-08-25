@@ -55,8 +55,23 @@ const SCOPES = [
  */
 const KEPT_KINDS = new Set<VintedKind>(["vente", "bordereau", "expedition", "offre"]);
 
-/** Requête Gmail par défaut : tout ce qui vient de Vinted. */
-const DEFAULT_QUERY = "from:(vinted.fr OR vinted.com OR vinted.co.uk)";
+/**
+ * Adresses qui transfèrent les emails Vinted vers la boîte scrutée. En
+ * pratique les notifications n'arrivent pas de Vinted mais d'un collègue qui
+ * les fait suivre depuis son compte : sans ces adresses, la requête Gmail ne
+ * ramène rien.
+ */
+const FORWARDERS = ["s.maccioni@eco-solidaire.fr"];
+
+/** Requête Gmail par défaut : Vinted en direct, plus les transferts internes. */
+const DEFAULT_QUERY = `(from:(vinted.fr OR vinted.com OR vinted.co.uk) OR from:(${FORWARDERS.join(" OR ")}))`;
+
+/**
+ * Requêtes posées par une version antérieure du module : elles ne ramenaient
+ * que les emails envoyés par Vinted, donc rien depuis que les notifications
+ * arrivent par transfert. On les remplace à la volée par la requête courante.
+ */
+const LEGACY_QUERIES = new Set(["from:(vinted.fr OR vinted.com OR vinted.co.uk)"]);
 
 /** Nombre maximal de messages traités par exécution (limites d'action Convex). */
 const MAX_MESSAGES_PER_SYNC = 60;
@@ -234,6 +249,11 @@ export function extractAmount(text: string): number | undefined {
 
 /** Numéro de commande Vinted (« Commande n° 1234567890 », « #1234567 »). */
 export function extractOrderRef(text: string): string | undefined {
+  // Vinted écrit « N° de transaction : 21703139614 » — le n° précède le mot.
+  const prefixed = text.match(
+    /n[°ºo]\s*de\s*(?:transaction|commande|vente)\s*:?\s*([A-Z0-9-]{5,25})/i,
+  );
+  if (prefixed) return prefixed[1];
   const labelled = text.match(
     /(?:commande|transaction|vente)\s*(?:n[°ºo]\s*|num[ée]ro\s*:?\s*|#)\s*([A-Z0-9-]{5,25})/i,
   );
@@ -286,6 +306,103 @@ export function extractLabelUrl(html: string, text: string): string | undefined 
   return found?.slice(0, 1500);
 }
 
+/** Préfixes de transfert/réponse, français et anglais. */
+const FORWARD_PREFIX = /^\s*(?:(?:tr|fwd?|re|rép)\s*:\s*)+/i;
+
+const FRENCH_MONTHS: Record<string, number> = {
+  janvier: 0, "février": 1, fevrier: 1, mars: 2, avril: 3, mai: 4, juin: 5,
+  juillet: 6, "août": 7, aout: 7, septembre: 8, octobre: 9, novembre: 10,
+  "décembre": 11, decembre: 11,
+};
+
+/**
+ * Décalage de Paris par rapport à UTC, en heures, pour un instant donné :
+ * +2 entre le dernier dimanche de mars et le dernier dimanche d'octobre, +1
+ * sinon. Les en-têtes français ne portent pas de fuseau ; sans cette
+ * correction, une notification datée 10:03 à Paris se range à 10:03 UTC,
+ * c'est-à-dire après le transfert qui l'a apportée.
+ */
+function parisOffsetHours(year: number, month: number, day: number): number {
+  const lastSunday = (m: number) => {
+    const last = new Date(Date.UTC(year, m + 1, 0));
+    return last.getUTCDate() - last.getUTCDay();
+  };
+  const afterMarch = month > 2 || (month === 2 && day >= lastSunday(2));
+  const beforeOctober = month < 9 || (month === 9 && day < lastSunday(9));
+  return afterMarch && beforeOctober ? 2 : 1;
+}
+
+/**
+ * Date d'un en-tête de transfert. Outlook et Gmail l'écrivent dans la langue
+ * de l'expéditeur (« mardi 25 août 2026 10:03 ») : `Date.parse` renvoie NaN
+ * sur le français, d'où la lecture manuelle avant de tenter le format anglais.
+ */
+export function parseHeaderDate(value: string): number | undefined {
+  const french = value.match(
+    /(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})(?:\s+(?:à\s+)?(\d{1,2})[:h](\d{2}))?/u,
+  );
+  if (french) {
+    const month = FRENCH_MONTHS[french[2].toLowerCase()];
+    if (month !== undefined) {
+      const year = Number(french[3]);
+      const day = Number(french[1]);
+      return Date.UTC(
+        year,
+        month,
+        day,
+        Number(french[4] ?? 0) - parisOffsetHours(year, month, day),
+        Number(french[5] ?? 0),
+      );
+    }
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export type ForwardedOrigin = {
+  /** Sujet d'origine, une fois les préfixes « TR : » retirés. */
+  subject: string;
+  /** Expéditeur d'origine (Vinted), s'il a pu être relu. */
+  from?: string;
+  /** Date d'origine du message Vinted, si elle est exploitable. */
+  sentAt?: number;
+};
+
+/**
+ * Un email transféré porte le sujet et la date du transfert, pas ceux de la
+ * notification Vinted. Gmail recopie l'en-tête d'origine en tête du corps
+ * (« ---------- Forwarded message --------- », puis De / Date / Objet) : on
+ * le relit pour rattacher la vente à sa vraie date et à son vrai sujet.
+ */
+export function readForwardedOrigin(subject: string, body: string): ForwardedOrigin {
+  const stripped = subject.replace(FORWARD_PREFIX, "").trim();
+  const origin: ForwardedOrigin = { subject: stripped || subject };
+
+  const innerSubject = body.match(/^\s*(?:Objet|Subject)\s*:\s*(.+)$/mu);
+  if (innerSubject) {
+    const value = innerSubject[1].replace(FORWARD_PREFIX, "").trim();
+    if (value) origin.subject = value.slice(0, 300);
+  }
+
+  const innerFrom = body.match(/^\s*(?:De|From)\s*:\s*(.+)$/mu);
+  if (innerFrom) origin.from = innerFrom[1].trim().slice(0, 200);
+
+  const innerDate = body.match(/^\s*(?:Date|Envoy[ée]|Sent)\s*:\s*(.+)$/mu);
+  if (innerDate) {
+    const parsedDate = parseHeaderDate(innerDate[1].trim());
+    if (parsedDate !== undefined) origin.sentAt = parsedDate;
+  }
+  return origin;
+}
+
+/**
+ * Un transfert peut aussi bien porter une notification Vinted qu'un message
+ * sans rapport. On exige une trace explicite de Vinted avant d'importer.
+ */
+export function mentionsVinted(...parts: string[]): boolean {
+  return parts.some((part) => /vinted/i.test(part));
+}
+
 /**
  * Les liens des emails Vinted passent par un traceur (`click.vinted.fr/…?url=…`).
  * On récupère la cible réelle, sinon le bouton renvoie vers une page de
@@ -293,6 +410,19 @@ export function extractLabelUrl(html: string, text: string): string | undefined 
  */
 function unwrapVintedUrl(url: string): string {
   const cleaned = url.replace(/&amp;/g, "&");
+
+  // `links.vinted.com/t/<base64>` encode « url|identifiant|signature » : sans
+  // ce décodage, tous les liens d'un email se ressemblent et aucun filtre
+  // (conversation, annonce, bordereau) ne peut les distinguer.
+  const tracker = cleaned.match(/links\.vinted\.[a-z.]+\/t\/([A-Za-z0-9_-]+=*)/i);
+  if (tracker) {
+    try {
+      const target = decodeBase64UrlToText(tracker[1]).split("|")[0];
+      if (/^https?:\/\//i.test(target)) return target;
+    } catch {
+      // Charge utile illisible : le lien traceur reste fonctionnel.
+    }
+  }
   const wrapped = cleaned.match(/[?&](?:url|u|redirect|target)=([^&]+)/i);
   if (wrapped) {
     try {
@@ -337,28 +467,43 @@ export function extractItemUrl(html: string, text: string): string | undefined {
  * type « Ton article … a été vendu » ; à défaut on prend le sujet nettoyé.
  */
 export function extractItemTitle(subject: string, body: string): string | undefined {
+  // Email de vente : « <pseudo> a acheté » puis le titre, d'abord entre
+  // crochets (texte alternatif de la vignette) puis en clair.
+  const bought = body.match(/a\s+achet[ée]\s*\n+\s*\[?([^\n\]]{3,120})\]?/u);
+  if (bought) return bought[1].trim().slice(0, 120);
+
+  // Email de bordereau : bloc « Informations d'envoi », ligne « Article : ».
+  const labelled = body.match(/^\s*Article\s*:?\s*(.+)$/mu);
+  if (labelled) {
+    const value = labelled[1].trim();
+    if (value && !/^https?:/i.test(value)) return value.slice(0, 120);
+  }
+
+  // Sujet du bordereau : « … à utiliser avant le … pour <titre> ».
+  const inSubject = subject.match(/\bpour\s+(.{3,120})$/u);
+  if (inSubject) return inSubject[1].trim();
+
   const quoted = body.match(/[«"“]\s*([^»"”\n]{3,80})\s*[»"”]/);
   if (quoted) return quoted[1].trim();
-  const afterLabel = body.match(
-    /(?:article|annonce|objet)\s*:?\s*\n?\s*([^\n]{3,80})/i,
-  );
-  if (afterLabel) {
-    const value = afterLabel[1].trim();
-    if (value && !/^https?:/i.test(value)) return value;
-  }
+
+  // Repli : le sujet nettoyé. Volontairement en dernier — c'est souvent une
+  // accroche (« Ton article s'est vendu ! ») et non le nom de l'article.
   const fromSubject = subject
     .replace(/^(re|fwd)\s*:\s*/i, "")
     .replace(/vinted/gi, "")
     .replace(/[!🎉✅📦💶💰]/gu, "")
     .trim();
-  return fromSubject.length >= 3 ? fromSubject.slice(0, 80) : undefined;
+  return fromSubject.length >= 3 ? fromSubject.slice(0, 120) : undefined;
 }
 
 /** Pseudo de l'acheteur (« @pseudo », « acheté par pseudo »). */
 export function extractBuyer(text: string): string | undefined {
-  const labelled = text.match(
-    /(?:acheteur|achet[ée] par|vendu [àa]|de la part de)\s*:?\s*@?([A-Za-z0-9._-]{3,30})/i,
-  );
+  // Formulation systématique des emails de vente : « hamad88 a acheté ».
+  const bought = text.match(/^\s*([A-Za-z0-9._-]{2,30})\s+a\s+achet[ée]/mu);
+  if (bought) return bought[1];
+  const contact = text.match(/contacter\s+@?([A-Za-z0-9._-]{2,30})\b/i);
+  if (contact) return contact[1];
+  const labelled = text.match(/(?:achet[ée] par|vendu [àa])\s*:?\s*@?([A-Za-z0-9._-]{3,30})/i);
   if (labelled) return labelled[1];
   const at = text.match(/(?:^|\s)@([A-Za-z0-9._-]{3,30})\b/);
   return at?.[1];
@@ -752,6 +897,8 @@ export const saveEmail = internalMutation({
     labelUrl: v.optional(v.string()),
     conversationUrl: v.optional(v.string()),
     itemUrl: v.optional(v.string()),
+    forwardedBy: v.optional(v.string()),
+    forwardedAt: v.optional(v.number()),
     attachments: v.optional(
       v.array(
         v.object({
@@ -811,6 +958,8 @@ export const finishSync = internalMutation({
     lastMessageDate: v.optional(v.number()),
     imported: v.number(),
     error: v.optional(v.string()),
+    /** Requête réellement utilisée, quand elle vient de remplacer une ancienne. */
+    query: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const account = await ctx.db.get(args.accountId);
@@ -818,6 +967,7 @@ export const finishSync = internalMutation({
     await ctx.db.patch(args.accountId, {
       lastSyncAt: Date.now(),
       lastSyncError: args.error,
+      ...(args.query ? { query: args.query } : {}),
       lastMessageDate: Math.max(args.lastMessageDate ?? 0, account.lastMessageDate ?? 0) || undefined,
       importedCount: (account.importedCount ?? 0) + args.imported,
       updatedAt: Date.now(),
@@ -848,7 +998,10 @@ export const syncAccount = internalAction({
     let newestDate = account.lastMessageDate ?? 0;
     try {
       const token = await accessTokenFor(ctx, account);
-      const queryParts = [account.query ?? DEFAULT_QUERY];
+      const storedQuery = account.query;
+      const effectiveQuery =
+        !storedQuery || LEGACY_QUERIES.has(storedQuery) ? DEFAULT_QUERY : storedQuery;
+      const queryParts = [effectiveQuery];
       if (!args.full && account.lastMessageDate) {
         const afterSeconds = Math.floor((account.lastMessageDate - 24 * 3600 * 1000) / 1000);
         queryParts.push(`after:${afterSeconds}`);
@@ -866,11 +1019,32 @@ export const syncAccount = internalAction({
         if (known.has(gmailId)) continue;
         scanned += 1;
         const message = await gmailGet<GmailMessage>(token, `/messages/${gmailId}?format=full`);
-        const sentAt = Number(message.internalDate ?? Date.now());
-        const subject = header(message, "Subject");
-        const from = header(message, "From");
+        const receivedAt = Number(message.internalDate ?? Date.now());
+        const rawSubject = header(message, "Subject");
+        const rawFrom = header(message, "From");
         const body = messageBodyText(message);
         const html = messageRawHtml(message);
+
+        // Les notifications arrivent transférées par un collègue : on remonte
+        // au sujet, à l'expéditeur et à la date d'origine avant d'analyser.
+        const forwarded = FORWARDERS.some((address) =>
+          rawFrom.toLowerCase().includes(address.toLowerCase()),
+        );
+        const origin = forwarded
+          ? readForwardedOrigin(rawSubject, body)
+          : { subject: rawSubject, from: rawFrom, sentAt: undefined };
+        const subject = origin.subject;
+        const from = origin.from ?? rawFrom;
+        // Un message ne peut pas avoir été émis après avoir été transféré :
+        // une date d'origine postérieure trahit une lecture ratée.
+        const sentAt =
+          origin.sentAt !== undefined && origin.sentAt <= receivedAt
+            ? origin.sentAt
+            : receivedAt;
+
+        // Un transfert sans rapport avec Vinted n'a rien à faire ici.
+        if (forwarded && !mentionsVinted(rawSubject, subject, from, body)) continue;
+
         const parsed = parseVintedEmail(subject, body, html);
         // Messages, virements et emails divers : lus, jamais stockés.
         if (!KEPT_KINDS.has(parsed.kind)) continue;
@@ -885,7 +1059,9 @@ export const syncAccount = internalAction({
         }> = [];
         for (const part of flattenParts(message.payload)) {
           if (!part.filename || !part.body?.attachmentId) continue;
-          if (!/pdf|image\//i.test(part.mimeType ?? "")) continue;
+          // PDF uniquement : les images inline des emails Vinted ne sont que
+          // des logos de signature, inutiles et coûteux à stocker.
+          if (!/pdf/i.test(part.mimeType ?? "")) continue;
           if ((part.body.size ?? 0) > 8 * 1024 * 1024) continue;
           const attachment = await gmailGet<{ data?: string; size?: number }>(
             token,
@@ -915,17 +1091,22 @@ export const syncAccount = internalAction({
           from,
           snippet: message.snippet?.slice(0, 500),
           bodyText: body || undefined,
+          forwardedBy: forwarded ? rawFrom.slice(0, 200) : undefined,
+          forwardedAt: forwarded ? receivedAt : undefined,
           ...parsed,
           attachments: attachments.length ? attachments : undefined,
         });
         if (result.created) imported += 1;
-        if (sentAt > newestDate) newestDate = sentAt;
+        // `after:` filtre sur la date Gmail : la borne suit la réception, pas
+        // la date d'origine d'un message transféré (souvent bien antérieure).
+        if (receivedAt > newestDate) newestDate = receivedAt;
       }
 
       await ctx.runMutation(internal.klydeGmail.finishSync, {
         accountId: account._id,
         lastMessageDate: newestDate || undefined,
         imported,
+        query: effectiveQuery !== storedQuery ? effectiveQuery : undefined,
       });
       return { imported, scanned };
     } catch (error) {
@@ -1211,6 +1392,29 @@ export const disconnect = action({
       // Révocation best-effort : la suppression locale prime.
     }
     await ctx.runMutation(internal.klydeGmail.deleteAccount, { accountId: args.accountId });
+  },
+});
+
+/**
+ * Vide les emails importés d'une boîte et remet la borne incrémentale à zéro,
+ * pour réimporter depuis Gmail. Utile quand l'extraction évolue : les champs
+ * analysés sont recalculés à l'import, jamais rétroactivement.
+ */
+export const resetAccountEmails = internalMutation({
+  args: { accountId: v.id("klydeGmailAccounts") },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("klydeVintedEmails")
+      .withIndex("by_account", (q) => q.eq("accountId", args.accountId))
+      .collect();
+    for (const row of rows) {
+      for (const attachment of row.attachments ?? []) {
+        await ctx.storage.delete(attachment.storageId);
+      }
+      await ctx.db.delete(row._id);
+    }
+    await ctx.db.patch(args.accountId, { lastMessageDate: undefined, updatedAt: Date.now() });
+    return { deleted: rows.length };
   },
 });
 

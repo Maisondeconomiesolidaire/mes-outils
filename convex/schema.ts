@@ -1915,6 +1915,10 @@ export default defineSchema(
     conversationUrl: v.optional(v.string()),
     /** Lien vers l'annonce Vinted concernée. */
     itemUrl: v.optional(v.string()),
+    /** Adresse qui a transféré la notification Vinted (le cas courant). */
+    forwardedBy: v.optional(v.string()),
+    /** Date de réception du transfert, quand elle diffère de la date d'origine. */
+    forwardedAt: v.optional(v.number()),
     /** Pièces jointes rapatriées dans le stockage Convex (bordereaux PDF). */
     attachments: v.optional(
       v.array(
