@@ -16,7 +16,10 @@ import { bytesToBase64, esc, resendSend } from "./emails";
 import { buildPdf, CONTENT_WIDTH, type PdfColor, type PdfElement } from "./pdf";
 
 const PAGE_KEY = "klyde:rapports";
-const EMAIL_FROM = "Klyd <no-reply@mesoutils.eco-solidaire.fr>";
+/** Expéditeur : domaine vérifié sur Resend, nom de l'enseigne du rapport. */
+function emailFrom(outlet: ReportOutlet) {
+  return `${outletName(outlet)} <no-reply@mesoutils.eco-solidaire.fr>`;
+}
 
 const INK: PdfColor = [0.11, 0.12, 0.14];
 const MUTED: PdfColor = [0.45, 0.47, 0.5];
@@ -38,8 +41,27 @@ export type ReportSale = {
   soldAt: number;
 };
 
+/** Enseigne du rapport, ou « toutes » quand les deux sont additionnées. */
+export type ReportOutlet = "klyd" | "mobifrip" | null;
+
+const OUTLET_NAMES: Record<"klyd" | "mobifrip", string> = {
+  klyd: "Klyd",
+  mobifrip: "Mobifrip",
+};
+
+/** Coordonnées portées par l'enseigne, quand elles sont connues. */
+const OUTLET_ADDRESS: Partial<Record<"klyd" | "mobifrip", string[]>> = {
+  mobifrip: ["4 rue de la Prairie", "60650 Lachapelle-aux-Pots"],
+};
+
+export function outletName(outlet: ReportOutlet) {
+  return outlet ? OUTLET_NAMES[outlet] : "Klyd & Mobifrip";
+}
+
 export type SalesReport = {
   year: number;
+  /** Enseigne retenue, `null` si le rapport couvre les deux. */
+  outlet: ReportOutlet;
   /** 0-11, ou null pour l'année entière. */
   month: number | null;
   label: string;
@@ -102,6 +124,7 @@ async function buildReport(
   ctx: QueryCtx,
   year: number,
   month: number | null,
+  outlet: ReportOutlet,
 ): Promise<SalesReport> {
   const won = await ctx.db
     .query("klydeItems")
@@ -114,6 +137,10 @@ async function buildReport(
   let revenue = 0;
 
   for (const item of won) {
+    const itemOutlet = item.outlet === "mobifrip" ? "mobifrip" : "klyd";
+    // Le filtre s'applique aussi a la serie mensuelle : sans cela, les barres
+    // et le total du rapport raconteraient deux perimetres differents.
+    if (outlet && itemOutlet !== outlet) continue;
     const soldAt = saleDate(item);
     const when = inParis(soldAt);
     if (when.year !== year) continue;
@@ -122,13 +149,12 @@ async function buildReport(
     if (month !== null && when.month !== month) continue;
 
     revenue += amount;
-    const outlet = item.outlet === "mobifrip" ? "mobifrip" : "klyd";
-    byOutlet[outlet] += amount;
+    byOutlet[itemOutlet] += amount;
     sales.push({
       id: item._id,
       title: item.title,
       sku: item.sku,
-      outlet,
+      outlet: itemOutlet,
       amount,
       soldAt,
     });
@@ -141,6 +167,8 @@ async function buildReport(
     .withIndex("by_status", (q) => q.eq("status", "envoye"))
     .collect();
   const pending = shipped.filter((item) => {
+    const itemOutlet = item.outlet === "mobifrip" ? "mobifrip" : "klyd";
+    if (outlet && itemOutlet !== outlet) return false;
     const when = inParis(saleDate(item));
     return when.year === year && (month === null || when.month === month);
   });
@@ -148,6 +176,7 @@ async function buildReport(
   sales.sort((a, b) => b.soldAt - a.soldAt);
   return {
     year,
+    outlet,
     month,
     label: periodLabel(year, month),
     revenue: Math.round(revenue * 100) / 100,
@@ -166,18 +195,30 @@ async function buildReport(
   };
 }
 
+const outletArg = v.optional(
+  v.union(v.literal("klyd"), v.literal("mobifrip"), v.null()),
+);
+
 export const salesReport = query({
-  args: { year: v.number(), month: v.optional(v.union(v.number(), v.null())) },
+  args: {
+    year: v.number(),
+    month: v.optional(v.union(v.number(), v.null())),
+    outlet: outletArg,
+  },
   handler: async (ctx, args): Promise<SalesReport> => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
-    return buildReport(ctx, args.year, args.month ?? null);
+    return buildReport(ctx, args.year, args.month ?? null, args.outlet ?? null);
   },
 });
 
 export const reportForEmail = internalQuery({
-  args: { year: v.number(), month: v.union(v.number(), v.null()) },
+  args: {
+    year: v.number(),
+    month: v.union(v.number(), v.null()),
+    outlet: v.union(v.literal("klyd"), v.literal("mobifrip"), v.null()),
+  },
   handler: async (ctx, args): Promise<SalesReport> =>
-    buildReport(ctx, args.year, args.month),
+    buildReport(ctx, args.year, args.month, args.outlet),
 });
 
 /** Années où au moins une vente a été encaissée, la plus récente d'abord. */
@@ -206,7 +247,7 @@ export function reportDocument(report: SalesReport): PdfElement[] {
     { kind: "text", text: "RAPPORT DE VENTES", size: 22, bold: true, color: INK },
     {
       kind: "text",
-      text: "Klyd",
+      text: outletName(report.outlet),
       size: 13,
       bold: true,
       color: INK,
@@ -216,16 +257,22 @@ export function reportDocument(report: SalesReport): PdfElement[] {
       inline: true,
     },
     { kind: "text", text: report.label, size: 12, color: MUTED, spaceBefore: 2 },
-    {
-      kind: "text",
-      text: `Édité le ${formatDay(report.generatedAt)}`,
+    // Colonne de droite : coordonnées de l'enseigne puis date d'édition. La
+    // première ligne se pose à côté de la période, les suivantes descendent —
+    // sinon elles s'écriraient toutes sur la même ligne de base.
+    ...([
+      ...(report.outlet ? OUTLET_ADDRESS[report.outlet] ?? [] : []),
+      `Édité le ${formatDay(report.generatedAt)}`,
+    ].map((text, index) => ({
+      kind: "text" as const,
+      text,
       size: 9,
       color: MUTED,
       x: rightHalf,
       width: rightHalf,
-      align: "right",
-      inline: true,
-    },
+      align: "right" as const,
+      inline: index === 0,
+    }))),
     { kind: "rule", spaceBefore: 16, color: HAIRLINE },
   ];
 
@@ -264,8 +311,12 @@ export function reportDocument(report: SalesReport): PdfElement[] {
   });
 
   const outletLine = [
-    report.byOutlet.klyd > 0 ? `Klyd ${formatEuro(report.byOutlet.klyd)}` : null,
-    report.byOutlet.mobifrip > 0 ? `Mobifrip ${formatEuro(report.byOutlet.mobifrip)}` : null,
+    report.outlet === null && report.byOutlet.klyd > 0
+      ? `Klyd ${formatEuro(report.byOutlet.klyd)}`
+      : null,
+    report.outlet === null && report.byOutlet.mobifrip > 0
+      ? `Mobifrip ${formatEuro(report.byOutlet.mobifrip)}`
+      : null,
     report.pendingCount > 0
       ? `En cours d'encaissement : ${formatEuro(report.pendingRevenue)} (${report.pendingCount})`
       : null,
@@ -415,7 +466,7 @@ function reportEmailHtml(report: SalesReport, message: string) {
   return `<!doctype html><html><body style="margin:0;background:#f6f7f9;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden">
     <div style="padding:22px 26px;border-bottom:1px solid #e5e7eb">
-      <p style="margin:0;font-size:17px;font-weight:700;color:#111827">Rapport de ventes Klyd</p>
+      <p style="margin:0;font-size:17px;font-weight:700;color:#111827">Rapport de ventes ${esc(outletName(report.outlet))}</p>
       <p style="margin:4px 0 0;font-size:12px;color:#6b7280">${esc(report.label)}</p>
     </div>
     <div style="padding:24px 26px">
@@ -433,23 +484,28 @@ function reportEmailHtml(report: SalesReport, message: string) {
 
 /** Message d'accompagnement par défaut, modifiable avant l'envoi. */
 export function defaultReportMessage(report: SalesReport) {
+  const name = outletName(report.outlet);
   return [
     "Bonjour,",
     "",
-    `Vous trouverez en pièce jointe le rapport de ventes Klyd pour ${report.label.toLowerCase()}.`,
+    `Vous trouverez en pièce jointe le rapport de ventes ${name} pour ${report.label.toLowerCase()}.`,
     "",
     "Bien cordialement,",
-    "Klyd",
+    name,
   ].join("\n");
 }
 
 export const emailDraft = query({
-  args: { year: v.number(), month: v.optional(v.union(v.number(), v.null())) },
+  args: {
+    year: v.number(),
+    month: v.optional(v.union(v.number(), v.null())),
+    outlet: outletArg,
+  },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
-    const report = await buildReport(ctx, args.year, args.month ?? null);
+    const report = await buildReport(ctx, args.year, args.month ?? null, args.outlet ?? null);
     return {
-      subject: `Rapport de ventes Klyd — ${report.label}`,
+      subject: `Rapport de ventes ${outletName(report.outlet)} — ${report.label}`,
       message: defaultReportMessage(report),
       label: report.label,
       revenue: report.revenue,
@@ -468,6 +524,7 @@ export const sendByEmail = action({
     to: v.string(),
     year: v.number(),
     month: v.optional(v.union(v.number(), v.null())),
+    outlet: outletArg,
     subject: v.optional(v.string()),
     message: v.optional(v.string()),
   },
@@ -481,19 +538,21 @@ export const sendByEmail = action({
     const report: SalesReport = await ctx.runQuery(internal.klydeReports.reportForEmail, {
       year: args.year,
       month: args.month ?? null,
+      outlet: args.outlet ?? null,
     });
     const pdf = buildPdf(reportDocument(report));
-    const subject = args.subject?.trim() || `Rapport de ventes Klyd — ${report.label}`;
+    const subject =
+      args.subject?.trim() || `Rapport de ventes ${outletName(report.outlet)} — ${report.label}`;
     const message = args.message?.trim() || defaultReportMessage(report);
 
     const sent = await resendSend(
       to,
       subject,
       reportEmailHtml(report, message),
-      EMAIL_FROM,
+      emailFrom(report.outlet),
       [
         {
-          filename: `Rapport-Klyd-${report.label.replace(/\s+/g, "-")}.pdf`,
+          filename: `Rapport-${outletName(report.outlet).replace(/\s+/g, "")}-${report.label.replace(/\s+/g, "-")}.pdf`,
           content: bytesToBase64(pdf),
         },
       ],
