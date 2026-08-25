@@ -964,6 +964,29 @@ export const updateTask = mutation({
   },
 });
 
+/**
+ * Pièces jointes d'une tâche, depuis l'écran de confirmation des heures.
+ *
+ * Un salarié qui pointe depuis le chantier a les droits « pointages », pas
+ * « tâches » : sans cette mutation dédiée, il ne pourrait joindre ni photo ni
+ * bon de livraison au moment où il les a sous la main.
+ */
+export const updateTaskDocuments = mutation({
+  args: {
+    taskId: v.id("ptTasks"),
+    documentIds: v.array(v.id("ptDocuments")),
+  },
+  handler: async (ctx, args) => {
+    await requireAnyCrmPermission(ctx, [
+      [TIME_ENTRIES_PAGE_KEY, "update"],
+      [TASKS_PAGE_KEY, "update"],
+    ]);
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Tâche introuvable.");
+    await ctx.db.patch(args.taskId, { documentIds: args.documentIds });
+  },
+});
+
 /** Confirmation du temps réel d'un salarié affecté (depuis « Pointages »). */
 export const confirmTaskHours = mutation({
   args: {
