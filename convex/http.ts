@@ -277,7 +277,7 @@ http.route({
     const code = url.searchParams.get("code");
     const state = url.searchParams.get("state");
     const error = url.searchParams.get("error");
-    const fallback = (process.env.KLYDE_APP_URL ?? "https://klyde.groupemes.fr").replace(/\/$/, "");
+    const fallback = (process.env.KLYDE_APP_URL ?? "https://klyd.groupemes.fr").replace(/\/$/, "");
 
     if (error) {
       return Response.redirect(

@@ -70,7 +70,7 @@ function redirectUri() {
 }
 
 function klydeAppUrl() {
-  return (process.env.KLYDE_APP_URL ?? "https://klyde.groupemes.fr").replace(/\/$/, "");
+  return (process.env.KLYDE_APP_URL ?? "https://klyd.groupemes.fr").replace(/\/$/, "");
 }
 
 function googleCredentials() {
