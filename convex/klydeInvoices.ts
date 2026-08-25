@@ -30,7 +30,10 @@ const PAGE_KEY = "klyde:vinted";
  * Volontairement sans logo.
  */
 const SELLER = {
-  name: "Mobifrip",
+  /** Personne morale qui facture. */
+  name: "Recyclerie du Pays de Bray",
+  /** Enseigne connue de l'acheteur sur Vinted. */
+  tradeName: "Mobifrip",
   legalForm: "Association déclarée",
   address: "4 rue de la Prairie",
   city: "60650 Lachapelle-aux-Pots",
@@ -47,13 +50,30 @@ const SELLER = {
 /** Délai de rétractation retenu : le délai légal, comme sur Vinted. */
 const WITHDRAWAL_DAYS = 14;
 
+/**
+ * Taux de TVA applicable. Les prix Vinted sont toujours affichés et encaissés
+ * toutes taxes comprises : le montant hors taxes se déduit du prix payé, et
+ * jamais l'inverse.
+ */
+const VAT_RATE = 0.2;
+
+/**
+ * Ventilation d'un montant TTC. La TVA se calcule par différence pour que
+ * `ht + vat` retombe exactement sur le montant encaissé, sans centime perdu
+ * dans les arrondis.
+ */
+export function vatBreakdown(ttc: number) {
+  const ht = Math.round((ttc / (1 + VAT_RATE)) * 100) / 100;
+  return { ht, vat: Math.round((ttc - ht) * 100) / 100, ttc };
+}
+
 /** Plateforme européenne de règlement en ligne des litiges. */
 const ODR_URL = "https://ec.europa.eu/consumers/odr";
 
 /** Identification légale, telle qu'elle doit figurer sur une facture. */
 function sellerIdentityLines(): string[] {
   return [
-    `${SELLER.name} — ${SELLER.legalForm} · SIREN ${SELLER.siren} · SIRET (siège) ${SELLER.siret}`,
+    `${SELLER.name} (nom commercial ${SELLER.tradeName}) — ${SELLER.legalForm} · SIREN ${SELLER.siren} · SIRET (siège) ${SELLER.siret}`,
     `RNA ${SELLER.rna} (déclarée le ${SELLER.rnaDeclaredOn}) · TVA ${SELLER.vatNumber}`,
     `${SELLER.address}, ${SELLER.city} · ${SELLER.email} · ${SELLER.phone}`,
   ];
@@ -144,6 +164,8 @@ export function invoiceDocument(
   invoiceNumber: string,
 ): PdfElement[] {
   const amount = email.amount ?? 0;
+  // Le prix Vinted est TTC : c'est de lui que se déduisent le HT et la TVA.
+  const totals = vatBreakdown(amount);
   const rightColumnX = CONTENT_WIDTH * 0.52;
   const rightColumnWidth = CONTENT_WIDTH - rightColumnX;
 
@@ -162,13 +184,22 @@ export function invoiceDocument(
     },
     {
       kind: "text",
-      text: SELLER.address,
+      text: `Nom commercial : ${SELLER.tradeName}`,
       size: 9.5,
       color: MUTED,
       x: rightColumnX,
       width: rightColumnWidth,
       align: "right",
       spaceBefore: 4,
+    },
+    {
+      kind: "text",
+      text: SELLER.address,
+      size: 9.5,
+      color: MUTED,
+      x: rightColumnX,
+      width: rightColumnWidth,
+      align: "right",
     },
     {
       kind: "text",
@@ -278,7 +309,7 @@ export function invoiceDocument(
     },
     {
       kind: "text",
-      text: "MONTANT",
+      text: "MONTANT HT",
       size: 8.5,
       bold: true,
       color: MUTED,
@@ -297,7 +328,7 @@ export function invoiceDocument(
     },
     {
       kind: "text",
-      text: formatEuro(amount),
+      text: formatEuro(totals.ht),
       size: 10,
       color: INK,
       width: CONTENT_WIDTH - 10,
@@ -305,18 +336,45 @@ export function invoiceDocument(
       inline: true,
     },
     { kind: "rule", spaceBefore: 12, color: HAIRLINE },
+    { kind: "text", text: "Total HT", size: 10, color: MUTED, x: 10, spaceBefore: 8 },
     {
       kind: "text",
-      text: "Total",
+      text: formatEuro(totals.ht),
+      size: 10,
+      color: INK,
+      width: CONTENT_WIDTH - 10,
+      align: "right",
+      inline: true,
+    },
+    {
+      kind: "text",
+      text: `TVA ${Math.round(VAT_RATE * 100)} %`,
+      size: 10,
+      color: MUTED,
+      x: 10,
+      spaceBefore: 2,
+    },
+    {
+      kind: "text",
+      text: formatEuro(totals.vat),
+      size: 10,
+      color: INK,
+      width: CONTENT_WIDTH - 10,
+      align: "right",
+      inline: true,
+    },
+    {
+      kind: "text",
+      text: "Total TTC",
       size: 12,
       bold: true,
       color: INK,
       x: 10,
-      spaceBefore: 8,
+      spaceBefore: 10,
     },
     {
       kind: "text",
-      text: formatEuro(amount),
+      text: formatEuro(totals.ttc),
       size: 14,
       bold: true,
       color: INK,
@@ -443,7 +501,9 @@ function invoiceEmailHtml(
       <table style="width:100%;border-collapse:collapse;margin-top:18px;border-top:1px solid #e5e7eb">
         ${row("Facture", invoiceNumber)}
         ${row("Article", email.itemTitle ?? "Article d'occasion")}
-        ${row("Montant", formatEuro(email.amount ?? 0))}
+        ${row("Total HT", formatEuro(vatBreakdown(email.amount ?? 0).ht))}
+        ${row(`TVA ${Math.round(VAT_RATE * 100)} %`, formatEuro(vatBreakdown(email.amount ?? 0).vat))}
+        ${row("Total TTC", formatEuro(email.amount ?? 0))}
       </table>
       <p style="margin:18px 0 0;font-size:12px;color:#6b7280">La facture est jointe à cet email au format PDF.</p>
     </div>
