@@ -1757,6 +1757,12 @@ export default defineSchema(
     // Nombre de fois où l'annonce Vinted a été prolongée après l'alerte de 3 semaines.
     vintedExtensionCount: v.optional(v.number()),
     vintedLastExtendedAt: v.optional(v.number()),
+    /**
+     * Date d'encaissement, posée au passage en « gagné ». Les rapports de
+     * vente se groupent par mois : sans cette date, un article vendu ne peut
+     * être rattaché qu'à `updatedAt`, que la moindre retouche déplace.
+     */
+    soldAt: v.optional(v.number()),
     // Décision prise lorsqu'un article sort de Stock B.
     stockBDisposition: v.optional(v.union(
       v.literal("vente_exceptionnelle"),

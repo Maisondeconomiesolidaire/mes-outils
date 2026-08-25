@@ -39,6 +39,7 @@ import type * as kiosk from "../kiosk.js";
 import type * as klyde from "../klyde.js";
 import type * as klydeGmail from "../klydeGmail.js";
 import type * as klydeInvoices from "../klydeInvoices.js";
+import type * as klydeReports from "../klydeReports.js";
 import type * as klydeTaxonomy from "../klydeTaxonomy.js";
 import type * as leaves from "../leaves.js";
 import type * as lib from "../lib.js";
@@ -107,6 +108,7 @@ declare const fullApi: ApiFromModules<{
   klyde: typeof klyde;
   klydeGmail: typeof klydeGmail;
   klydeInvoices: typeof klydeInvoices;
+  klydeReports: typeof klydeReports;
   klydeTaxonomy: typeof klydeTaxonomy;
   leaves: typeof leaves;
   lib: typeof lib;

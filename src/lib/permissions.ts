@@ -297,6 +297,13 @@ export const KLYDE_PAGES: PermissionPage[] = [
   },
   {
     app: "klyde",
+    key: "klyde:rapports",
+    label: "Rapports de ventes",
+    description: "Chiffre d'affaires par mois et par annee, partage du rapport par email.",
+    actions: ["read", "share"],
+  },
+  {
+    app: "klyde",
     key: "klyde:vinted",
     label: "Emails Vinted",
     description: "Boite Gmail connectee : ventes, bordereaux et virements Vinted.",
