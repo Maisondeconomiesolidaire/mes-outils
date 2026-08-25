@@ -1155,7 +1155,17 @@ export const syncAccount = internalAction({
           ...parsed,
           attachments: attachments.length ? attachments : undefined,
         });
-        if (result.created) imported += 1;
+        if (result.created) {
+          imported += 1;
+          // Une vente donne toujours lieu à une facture : elle est préparée
+          // dès l'import. Planifiée plutôt qu'attendue, pour qu'un échec de
+          // génération n'interrompe pas l'import des autres messages.
+          if (parsed.kind === "vente") {
+            await ctx.scheduler.runAfter(0, internal.klydeInvoices.generateForEmail, {
+              emailId: result.id,
+            });
+          }
+        }
         // `after:` filtre sur la date Gmail : la borne suit la réception, pas
         // la date d'origine d'un message transféré (souvent bien antérieure).
         if (receivedAt > newestDate) newestDate = receivedAt;

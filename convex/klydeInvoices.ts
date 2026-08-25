@@ -6,7 +6,13 @@
  * de l'acheteur — d'où une génération en un clic depuis la boîte Vinted plutôt
  * qu'une ressaisie dans un tableur.
  */
-import { action, internalMutation, internalQuery, query } from "./_generated/server";
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  query,
+} from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -366,21 +372,20 @@ function invoiceEmailHtml(
 }
 
 /**
- * Génère (ou regénère) la facture PDF d'une vente et la range dans le stockage
- * Convex. Renvoie le lien de consultation.
+ * Génère la facture PDF d'une vente et la range dans le stockage Convex.
+ *
+ * Déclenchée à l'import de l'email, jamais à la main : une vente Vinted donne
+ * toujours lieu à une facture, et la produire d'office évite qu'une commande
+ * parte sans son justificatif parce que personne n'a cliqué.
  */
-export const generate = action({
+export const generateForEmail = internalAction({
   args: { emailId: v.id("klydeVintedEmails") },
-  handler: async (ctx, args): Promise<{ invoiceNumber: string; url: string | null }> => {
-    await ctx.runQuery(internal.klydeInvoices.assertCanGenerate, {});
+  handler: async (ctx, args): Promise<{ invoiceNumber: string } | null> => {
     const email: Doc<"klydeVintedEmails"> | null = await ctx.runQuery(
       internal.klydeInvoices.getEmail,
       { emailId: args.emailId },
     );
-    if (!email) throw new Error("Email introuvable.");
-    if (email.kind !== "vente") {
-      throw new Error("Seul un email de vente donne lieu à une facture.");
-    }
+    if (!email || email.kind !== "vente") return null;
 
     const invoiceNumber: string = await ctx.runMutation(
       internal.klydeInvoices.reserveInvoiceNumber,
@@ -394,7 +399,7 @@ export const generate = action({
       emailId: args.emailId,
       storageId,
     });
-    return { invoiceNumber, url: await ctx.storage.getUrl(storageId) };
+    return { invoiceNumber };
   },
 });
 
