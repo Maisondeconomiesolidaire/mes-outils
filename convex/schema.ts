@@ -1915,6 +1915,8 @@ export default defineSchema(
     conversationUrl: v.optional(v.string()),
     /** Lien vers l'annonce Vinted concernée. */
     itemUrl: v.optional(v.string()),
+    /** Enseigne d'où vient l'email, déduite de la boîte scrutée. */
+    outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
     /** Adresse qui a transféré la notification Vinted (le cas courant). */
     forwardedBy: v.optional(v.string()),
     /** Date de réception du transfert, quand elle diffère de la date d'origine. */

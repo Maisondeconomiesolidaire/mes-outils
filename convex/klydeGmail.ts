@@ -63,15 +63,38 @@ const KEPT_KINDS = new Set<VintedKind>(["vente", "bordereau", "expedition", "off
  */
 const FORWARDERS = ["s.maccioni@eco-solidaire.fr"];
 
-/** Requête Gmail par défaut : Vinted en direct, plus les transferts internes. */
-const DEFAULT_QUERY = `(from:(vinted.fr OR vinted.com OR vinted.co.uk) OR from:(${FORWARDERS.join(" OR ")}))`;
+/**
+ * Expéditeurs des emails de suivi : les notifications d'expédition ne viennent
+ * pas de Vinted mais du transporteur qui achemine le colis.
+ */
+const CARRIER_SENDERS = [
+  "chronopost.fr",
+  "chronopost.com",
+  "mondialrelay.fr",
+  "mondialrelay.com",
+];
+
+/** Requête Gmail par défaut : Vinted, les transporteurs et les transferts. */
+const DEFAULT_QUERY = `(from:(vinted.fr OR vinted.com OR vinted.co.uk OR ${CARRIER_SENDERS.join(" OR ")}) OR from:(${FORWARDERS.join(" OR ")}))`;
 
 /**
  * Requêtes posées par une version antérieure du module : elles ne ramenaient
  * que les emails envoyés par Vinted, donc rien depuis que les notifications
  * arrivent par transfert. On les remplace à la volée par la requête courante.
  */
-const LEGACY_QUERIES = new Set(["from:(vinted.fr OR vinted.com OR vinted.co.uk)"]);
+const LEGACY_QUERIES = new Set([
+  "from:(vinted.fr OR vinted.com OR vinted.co.uk)",
+  `(from:(vinted.fr OR vinted.com OR vinted.co.uk) OR from:(${FORWARDERS.join(" OR ")}))`,
+]);
+
+/**
+ * Enseigne d'appartenance d'une boîte. Le stock Klyd est partagé entre deux
+ * enseignes : sans ce rattachement, rien ne distingue une vente Mobifrip d'une
+ * vente Klyd dans la file des emails.
+ */
+const ACCOUNT_OUTLETS: Record<string, "klyd" | "mobifrip"> = {
+  "mobifrip42@gmail.com": "mobifrip",
+};
 
 /** Nombre maximal de messages traités par exécution (limites d'action Convex). */
 const MAX_MESSAGES_PER_SYNC = 60;
@@ -396,11 +419,12 @@ export function readForwardedOrigin(subject: string, body: string): ForwardedOri
 }
 
 /**
- * Un transfert peut aussi bien porter une notification Vinted qu'un message
- * sans rapport. On exige une trace explicite de Vinted avant d'importer.
+ * Un transfert peut aussi bien porter une notification exploitable qu'un
+ * message sans rapport. On exige une trace de Vinted ou d'un transporteur —
+ * les emails d'expédition ne mentionnent pas toujours Vinted.
  */
-export function mentionsVinted(...parts: string[]): boolean {
-  return parts.some((part) => /vinted/i.test(part));
+export function isRelevantForward(...parts: string[]): boolean {
+  return parts.some((part) => /vinted|chronopost|mondial\s?relay/i.test(part));
 }
 
 /**
@@ -899,6 +923,7 @@ export const saveEmail = internalMutation({
     itemUrl: v.optional(v.string()),
     forwardedBy: v.optional(v.string()),
     forwardedAt: v.optional(v.number()),
+    outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
     attachments: v.optional(
       v.array(
         v.object({
@@ -1043,7 +1068,7 @@ export const syncAccount = internalAction({
             : receivedAt;
 
         // Un transfert sans rapport avec Vinted n'a rien à faire ici.
-        if (forwarded && !mentionsVinted(rawSubject, subject, from, body)) continue;
+        if (forwarded && !isRelevantForward(rawSubject, subject, from, body)) continue;
 
         const parsed = parseVintedEmail(subject, body, html);
         // Messages, virements et emails divers : lus, jamais stockés.
@@ -1093,6 +1118,7 @@ export const syncAccount = internalAction({
           bodyText: body || undefined,
           forwardedBy: forwarded ? rawFrom.slice(0, 200) : undefined,
           forwardedAt: forwarded ? receivedAt : undefined,
+          outlet: ACCOUNT_OUTLETS[account.email.toLowerCase()],
           ...parsed,
           attachments: attachments.length ? attachments : undefined,
         });
@@ -1257,7 +1283,16 @@ export const listEmails = query({
           bodyText: row.bodyText?.slice(0, 1200),
           attachments,
           matchedItem: item
-            ? { _id: item._id, title: item.title, sku: item.sku, status: item.status, price: item.price }
+            ? {
+                _id: item._id,
+                title: item.title,
+                sku: item.sku,
+                status: item.status,
+                price: item.price,
+                // Vignette : reconnaître l'article d'un coup d'œil vaut mieux
+                // que relire son titre pour vérifier le rapprochement.
+                photoUrl: item.photos[0] ? await ctx.storage.getUrl(item.photos[0]) : null,
+              }
             : null,
         };
       }),
@@ -1271,31 +1306,18 @@ export const stats = query({
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const rows = await ctx.db.query("klydeVintedEmails").withIndex("by_sentAt").order("desc").take(600);
     const byKind: Record<string, number> = {};
-    let pending = 0;
+    let matched = 0;
     let revenue = 0;
     for (const row of rows) {
       byKind[row.kind] = (byKind[row.kind] ?? 0) + 1;
-      if (!row.handled) pending += 1;
+      if (row.matchedItemId) matched += 1;
       if (row.kind === "vente" && row.amount) revenue += row.amount;
     }
-    return { total: rows.length, pending, byKind, revenue };
+    return { total: rows.length, matched, byKind, revenue };
   },
 });
 
 /* ───────────────────────── Actions sur les emails ──────────────────────── */
-
-export const setHandled = mutation({
-  args: { emailId: v.id("klydeVintedEmails"), handled: v.boolean() },
-  handler: async (ctx, args) => {
-    await requireCrmPermission(ctx, PAGE_KEY, "update");
-    const identity = await ctx.auth.getUserIdentity();
-    await ctx.db.patch(args.emailId, {
-      handled: args.handled,
-      handledAt: args.handled ? Date.now() : undefined,
-      handledByClerkId: args.handled ? identity?.subject : undefined,
-    });
-  },
-});
 
 export const linkItem = mutation({
   args: {
@@ -1309,45 +1331,6 @@ export const linkItem = mutation({
       // Rattachement humain : confiance maximale, il ne sera plus recalculé.
       matchConfidence: args.itemId ? 1 : undefined,
     });
-  },
-});
-
-/**
- * Applique un email de vente à l'article rattaché : prix réellement encaissé et
- * passage du statut à « gagné ». C'est le geste qui fait gagner du temps —
- * l'information n'est plus ressaisie à la main depuis la boîte mail.
- */
-export const applySaleToItem = mutation({
-  args: {
-    emailId: v.id("klydeVintedEmails"),
-    itemId: v.optional(v.id("klydeItems")),
-    amount: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    await requireCrmPermission(ctx, PAGE_KEY, "update");
-    await requireCrmPermission(ctx, "klyde:stock", "update");
-    const email = await ctx.db.get(args.emailId);
-    if (!email) throw new Error("Email introuvable.");
-    const itemId = args.itemId ?? email.matchedItemId;
-    if (!itemId) throw new Error("Aucun article rattaché à cet email.");
-    const item = await ctx.db.get(itemId);
-    if (!item) throw new Error("Article introuvable.");
-
-    const amount = args.amount ?? email.amount;
-    await ctx.db.patch(itemId, {
-      status: "gagne",
-      actualSalePrice: amount ?? item.actualSalePrice,
-      updatedAt: Date.now(),
-    });
-    const identity = await ctx.auth.getUserIdentity();
-    await ctx.db.patch(args.emailId, {
-      matchedItemId: itemId,
-      matchConfidence: 1,
-      handled: true,
-      handledAt: Date.now(),
-      handledByClerkId: identity?.subject,
-    });
-    return { itemId, amount };
   },
 });
 
