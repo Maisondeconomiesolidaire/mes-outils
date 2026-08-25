@@ -11,16 +11,25 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireCrmPermission } from "./lib";
-import { buildSimplePdf, type PdfLine } from "./pdf";
+import { buildPdf, CONTENT_WIDTH, type PdfColor, type PdfElement } from "./pdf";
+import { bytesToBase64, esc, resendSend } from "./emails";
 
 const PAGE_KEY = "klyde:vinted";
 
-/** Émetteur des factures. Volontairement sans logo : facture de gestion. */
+/** Émetteur des factures. Volontairement sans logo. */
 const SELLER = {
   name: "Mobifrip",
   address: "4 rue de la Prairie",
   city: "60650 Lachapelle-aux-Pots",
 };
+
+/** Expéditeur des emails : domaine vérifié sur Resend, nom d'enseigne. */
+const EMAIL_FROM = "Mobifrip <no-reply@mesoutils.eco-solidaire.fr>";
+
+const INK: PdfColor = [0.11, 0.12, 0.14];
+const MUTED: PdfColor = [0.45, 0.47, 0.5];
+const HAIRLINE: PdfColor = [0.85, 0.86, 0.88];
+const BAND: PdfColor = [0.95, 0.96, 0.97];
 
 /** Préfixe de numérotation : « MF-2026-004 ». */
 const INVOICE_PREFIX = "MF";
@@ -89,55 +98,271 @@ export const attachInvoice = internalMutation({
   },
 });
 
-/** Composition de la facture, à partir des données extraites de l'email. */
-export function invoiceLines(
+/**
+ * Composition de la facture. Deux colonnes en tête (émetteur à gauche, repères
+ * de la facture à droite), un tableau à bandeau, un total détaché : la lecture
+ * d'une facture est une convention, la respecter vaut mieux qu'inventer.
+ */
+export function invoiceDocument(
   email: Doc<"klydeVintedEmails">,
   invoiceNumber: string,
-): PdfLine[] {
+): PdfElement[] {
   const amount = email.amount ?? 0;
-  const lines: PdfLine[] = [
-    { text: "FACTURE", size: 22, bold: true },
-    { text: `N° ${invoiceNumber}`, size: 10, spaceBefore: 2 },
-    { text: `Date : ${formatDate(email.sentAt)}`, size: 10 },
+  const rightColumnX = CONTENT_WIDTH * 0.52;
+  const rightColumnWidth = CONTENT_WIDTH - rightColumnX;
 
-    { text: SELLER.name, size: 13, bold: true, spaceBefore: 22 },
-    { text: SELLER.address, size: 10 },
-    { text: SELLER.city, size: 10 },
-
-    { text: "Facturé à", size: 11, bold: true, spaceBefore: 22 },
+  const elements: PdfElement[] = [
+    { kind: "text", text: "FACTURE", size: 26, bold: true, color: INK },
+    {
+      kind: "text",
+      text: SELLER.name,
+      size: 13,
+      bold: true,
+      color: INK,
+      x: rightColumnX,
+      width: rightColumnWidth,
+      align: "right",
+      inline: true,
+    },
+    {
+      kind: "text",
+      text: SELLER.address,
+      size: 9.5,
+      color: MUTED,
+      x: rightColumnX,
+      width: rightColumnWidth,
+      align: "right",
+      spaceBefore: 4,
+    },
+    {
+      kind: "text",
+      text: SELLER.city,
+      size: 9.5,
+      color: MUTED,
+      x: rightColumnX,
+      width: rightColumnWidth,
+      align: "right",
+    },
+    { kind: "rule", spaceBefore: 18, color: HAIRLINE },
   ];
 
-  if (email.buyerName) lines.push({ text: email.buyerName, size: 10 });
-  // L'adresse répète le nom : on ne le réaffiche pas deux fois.
-  const postal = email.buyerAddress && email.buyerName
-    ? email.buyerAddress.replace(`${email.buyerName},`, "").trim()
-    : email.buyerAddress;
-  if (postal) lines.push({ text: postal, size: 10 });
-  if (email.buyerEmail) lines.push({ text: email.buyerEmail, size: 10 });
-  if (!email.buyerName && !email.buyerAddress && email.buyer) {
-    lines.push({ text: `Acheteur Vinted : ${email.buyer}`, size: 10 });
-  }
+  // Bloc gauche : repères de la facture. Bloc droit : le client.
+  const meta: Array<[string, string]> = [
+    ["Facture n°", invoiceNumber],
+    ["Date", formatDate(email.sentAt)],
+  ];
+  if (email.orderRef) meta.push(["Commande Vinted", email.orderRef]);
 
-  lines.push(
-    { text: "Désignation", size: 11, bold: true, spaceBefore: 26, right: "Montant" },
+  const buyerLines = [
+    email.buyerName,
+    email.buyerName && email.buyerAddress
+      ? email.buyerAddress.replace(`${email.buyerName},`, "").trim()
+      : email.buyerAddress,
+    email.buyerEmail,
+    !email.buyerName && !email.buyerAddress && email.buyer
+      ? `Acheteur Vinted : ${email.buyer}`
+      : undefined,
+  ].filter((line): line is string => Boolean(line));
+
+  elements.push(
+    { kind: "text", text: "FACTURÉ À", size: 8, bold: true, color: MUTED, spaceBefore: 16 },
     {
-      text: email.itemTitle ?? "Article d'occasion",
-      size: 10,
-      spaceBefore: 6,
-      right: formatEuro(amount),
+      kind: "text",
+      text: "RÉFÉRENCES",
+      size: 8,
+      bold: true,
+      color: MUTED,
+      x: rightColumnX,
+      inline: true,
     },
-    { text: "Total", size: 13, bold: true, spaceBefore: 20, right: formatEuro(amount) },
   );
 
-  const references = [
-    email.orderRef ? `Commande n° ${email.orderRef}` : null,
-    email.buyer ? `Acheteur Vinted : ${email.buyer}` : null,
-  ].filter((value): value is string => Boolean(value));
-  if (references.length > 0) {
-    lines.push({ text: references.join(" · "), size: 9, spaceBefore: 26 });
+  // Les deux colonnes avancent ligne à ligne : la plus courte se contente
+  // d'une ligne vide, pour que le curseur reste commun aux deux.
+  const rows = Math.max(buyerLines.length, meta.length);
+  for (let index = 0; index < rows; index += 1) {
+    const buyerLine = buyerLines[index];
+    const metaLine = meta[index];
+    elements.push({
+      kind: "text",
+      text: buyerLine ?? "",
+      size: 10,
+      bold: index === 0,
+      color: index === 0 ? INK : MUTED,
+      width: rightColumnX - 12,
+      spaceBefore: index === 0 ? 6 : 0,
+    });
+    if (metaLine) {
+      elements.push(
+        {
+          kind: "text",
+          text: metaLine[0],
+          size: 9.5,
+          color: MUTED,
+          x: rightColumnX,
+          inline: true,
+        },
+        {
+          kind: "text",
+          text: metaLine[1],
+          size: 9.5,
+          bold: true,
+          color: INK,
+          x: rightColumnX,
+          width: rightColumnWidth,
+          align: "right",
+          inline: true,
+        },
+      );
+    }
   }
-  lines.push({ text: "Vente réalisée sur Vinted.", size: 9, spaceBefore: 2 });
-  return lines;
+
+  // Tableau des postes : bandeau d'en-tête, puis la ligne de l'article.
+  elements.push(
+    // Le bandeau ne déplace pas le curseur : l'en-tête du tableau se pose
+    // dedans, à 15 points sous son bord supérieur.
+    { kind: "band", height: 24, color: BAND, spaceBefore: 34 },
+    {
+      kind: "text",
+      text: "DÉSIGNATION",
+      size: 8.5,
+      bold: true,
+      color: MUTED,
+      x: 10,
+      spaceBefore: 4,
+    },
+    {
+      kind: "text",
+      text: "MONTANT",
+      size: 8.5,
+      bold: true,
+      color: MUTED,
+      width: CONTENT_WIDTH - 10,
+      align: "right",
+      inline: true,
+    },
+    {
+      kind: "text",
+      text: email.itemTitle ?? "Article d'occasion",
+      size: 10,
+      color: INK,
+      x: 10,
+      width: CONTENT_WIDTH * 0.7,
+      spaceBefore: 14,
+    },
+    {
+      kind: "text",
+      text: formatEuro(amount),
+      size: 10,
+      color: INK,
+      width: CONTENT_WIDTH - 10,
+      align: "right",
+      inline: true,
+    },
+    { kind: "rule", spaceBefore: 12, color: HAIRLINE },
+    {
+      kind: "text",
+      text: "Total",
+      size: 12,
+      bold: true,
+      color: INK,
+      x: 10,
+      spaceBefore: 8,
+    },
+    {
+      kind: "text",
+      text: formatEuro(amount),
+      size: 14,
+      bold: true,
+      color: INK,
+      width: CONTENT_WIDTH - 10,
+      align: "right",
+      inline: true,
+    },
+    { kind: "rule", spaceBefore: 12, color: HAIRLINE },
+  );
+
+  const footer = [
+    "Vente réalisée sur Vinted.",
+    email.buyer ? `Acheteur : ${email.buyer}` : null,
+    email.trackingNumber ? `Suivi : ${email.trackingNumber}` : null,
+  ].filter((value): value is string => Boolean(value));
+  elements.push({
+    kind: "text",
+    text: footer.join(" · "),
+    size: 8.5,
+    color: MUTED,
+    spaceBefore: 22,
+  });
+
+  return elements;
+}
+
+/** Corps par défaut du message d'accompagnement, modifiable avant envoi. */
+export function defaultInvoiceMessage(
+  email: Doc<"klydeVintedEmails">,
+  invoiceNumber: string,
+): string {
+  const buyer = email.buyerName ?? email.buyer ?? "";
+  const item = email.itemTitle ?? "votre article";
+  return [
+    buyer ? `Bonjour ${buyer},` : "Bonjour,",
+    "",
+    `Merci pour votre achat sur Vinted. Vous trouverez en pièce jointe la facture ${invoiceNumber} correspondant à votre commande « ${item} ».`,
+    "",
+    "Votre colis part dans les meilleurs délais. N'hésitez pas à répondre à ce message pour toute question.",
+    "",
+    "Bien cordialement,",
+    SELLER.name,
+  ].join("\n");
+}
+
+/** Objet par défaut du message. */
+export function defaultInvoiceSubject(invoiceNumber: string): string {
+  return `Votre facture ${invoiceNumber} — ${SELLER.name}`;
+}
+
+/**
+ * Habillage HTML du message. Le vendeur ne modifie que le texte : l'ossature
+ * (en-tête, récapitulatif, pied) reste posée ici, donc un email envoyé après
+ * modification est toujours lisible et complet.
+ */
+function invoiceEmailHtml(
+  email: Doc<"klydeVintedEmails">,
+  invoiceNumber: string,
+  message: string,
+): string {
+  const paragraphs = message
+    .split(/\n{2,}/)
+    .map((block) => esc(block.trim()).replace(/\n/g, "<br>"))
+    .filter(Boolean)
+    .map(
+      (block) =>
+        `<p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#1f2937">${block}</p>`,
+    )
+    .join("");
+
+  const row = (label: string, value: string) =>
+    `<tr><td style="padding:6px 0;font-size:13px;color:#6b7280">${esc(label)}</td>` +
+    `<td style="padding:6px 0;font-size:13px;color:#111827;text-align:right;font-weight:600">${esc(value)}</td></tr>`;
+
+  return `<!doctype html><html><body style="margin:0;background:#f6f7f9;padding:24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden">
+    <div style="padding:22px 26px;border-bottom:1px solid #e5e7eb">
+      <p style="margin:0;font-size:17px;font-weight:700;color:#111827">${esc(SELLER.name)}</p>
+      <p style="margin:4px 0 0;font-size:12px;color:#6b7280">${esc(SELLER.address)} · ${esc(SELLER.city)}</p>
+    </div>
+    <div style="padding:24px 26px">
+      ${paragraphs}
+      <table style="width:100%;border-collapse:collapse;margin-top:18px;border-top:1px solid #e5e7eb">
+        ${row("Facture", invoiceNumber)}
+        ${row("Article", email.itemTitle ?? "Article d'occasion")}
+        ${row("Montant", formatEuro(email.amount ?? 0))}
+      </table>
+      <p style="margin:18px 0 0;font-size:12px;color:#6b7280">La facture est jointe à cet email au format PDF.</p>
+    </div>
+  </div>
+</body></html>`;
 }
 
 /**
@@ -161,7 +386,7 @@ export const generate = action({
       internal.klydeInvoices.reserveInvoiceNumber,
       { emailId: args.emailId },
     );
-    const pdf = buildSimplePdf(invoiceLines(email, invoiceNumber));
+    const pdf = buildPdf(invoiceDocument(email, invoiceNumber));
     const storageId: Id<"_storage"> = await ctx.storage.store(
       new Blob([pdf as unknown as BlobPart], { type: "application/pdf" }),
     );
@@ -178,6 +403,98 @@ export const assertCanGenerate = internalQuery({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
     return true;
+  },
+});
+
+/**
+ * Brouillon du message d'accompagnement : destinataire, objet et texte
+ * pré-remplis. Le vendeur relit et corrige avant l'envoi — l'email au client
+ * est le seul geste de cette page qui sorte de l'entreprise.
+ */
+export const emailDraft = query({
+  args: { emailId: v.id("klydeVintedEmails") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const email = await ctx.db.get(args.emailId);
+    if (!email) return null;
+    const invoiceNumber = email.invoiceNumber ?? "";
+    return {
+      to: email.buyerEmail ?? "",
+      subject: defaultInvoiceSubject(invoiceNumber),
+      message: defaultInvoiceMessage(email, invoiceNumber),
+      invoiceNumber,
+      hasInvoice: Boolean(email.invoiceStorageId),
+      sentAt: email.invoiceSentAt ?? null,
+      sentTo: email.invoiceSentTo ?? null,
+    };
+  },
+});
+
+export const markInvoiceSent = internalMutation({
+  args: { emailId: v.id("klydeVintedEmails"), to: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.emailId, {
+      invoiceSentAt: Date.now(),
+      invoiceSentTo: args.to,
+    });
+  },
+});
+
+/**
+ * Envoie la facture au client, en pièce jointe d'un message d'accompagnement.
+ * Le texte vient du formulaire ; l'ossature HTML et le récapitulatif sont
+ * ajoutés ici, pour qu'un message raccourci reste un email complet.
+ */
+export const sendByEmail = action({
+  args: {
+    emailId: v.id("klydeVintedEmails"),
+    to: v.string(),
+    subject: v.string(),
+    message: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ sentTo: string }> => {
+    await ctx.runQuery(internal.klydeInvoices.assertCanGenerate, {});
+    const email: Doc<"klydeVintedEmails"> | null = await ctx.runQuery(
+      internal.klydeInvoices.getEmail,
+      { emailId: args.emailId },
+    );
+    if (!email) throw new Error("Email introuvable.");
+    if (!email.invoiceStorageId || !email.invoiceNumber) {
+      throw new Error("Générez d'abord la facture.");
+    }
+
+    const to = args.to.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+      throw new Error("Adresse email du client invalide.");
+    }
+    const subject = args.subject.trim() || defaultInvoiceSubject(email.invoiceNumber);
+    // Un message vidé par mégarde repart sur le texte type : mieux vaut un
+    // message convenu qu'un email sans un mot d'explication.
+    const message = args.message.trim() || defaultInvoiceMessage(email, email.invoiceNumber);
+
+    const blob = await ctx.storage.get(email.invoiceStorageId);
+    if (!blob) throw new Error("Facture introuvable dans le stockage.");
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+
+    const sent = await resendSend(
+      to,
+      subject,
+      invoiceEmailHtml(email, email.invoiceNumber, message),
+      EMAIL_FROM,
+      [
+        {
+          filename: `Facture-${email.invoiceNumber}.pdf`,
+          content: bytesToBase64(bytes),
+        },
+      ],
+    );
+    if (!sent) throw new Error("L'envoi a échoué. Réessayez dans un instant.");
+
+    await ctx.runMutation(internal.klydeInvoices.markInvoiceSent, {
+      emailId: args.emailId,
+      to,
+    });
+    return { sentTo: to };
   },
 });
 

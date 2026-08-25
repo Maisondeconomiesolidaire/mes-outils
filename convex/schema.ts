@@ -1925,6 +1925,9 @@ export default defineSchema(
     invoiceStorageId: v.optional(v.id("_storage")),
     invoiceNumber: v.optional(v.string()),
     invoiceGeneratedAt: v.optional(v.number()),
+    /** Envoi de la facture au client (date et adresse réellement servie). */
+    invoiceSentAt: v.optional(v.number()),
+    invoiceSentTo: v.optional(v.string()),
     /** Adresse qui a transféré la notification Vinted (le cas courant). */
     forwardedBy: v.optional(v.string()),
     /** Date de réception du transfert, quand elle diffère de la date d'origine. */
