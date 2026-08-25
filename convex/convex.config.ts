@@ -23,5 +23,10 @@ export default defineApp({
     EMAIL_LOGO_ID: v.optional(v.string()),
     OPENAI_API_KEY: v.optional(v.string()),
     OPENAI_REQUEST_ANALYSIS_MODEL: v.optional(v.string()),
+    /** OAuth Google (client « Application Web ») — boîte Gmail Vinted de Klyd. */
+    GOOGLE_CLIENT_ID: v.optional(v.string()),
+    GOOGLE_CLIENT_SECRET: v.optional(v.string()),
+    /** URL publique de Klyd : retour de l'utilisateur après le consentement. */
+    KLYDE_APP_URL: v.optional(v.string()),
   },
 });

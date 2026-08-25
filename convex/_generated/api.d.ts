@@ -37,6 +37,7 @@ import type * as http from "../http.js";
 import type * as importLegacy from "../importLegacy.js";
 import type * as kiosk from "../kiosk.js";
 import type * as klyde from "../klyde.js";
+import type * as klydeGmail from "../klydeGmail.js";
 import type * as klydeTaxonomy from "../klydeTaxonomy.js";
 import type * as leaves from "../leaves.js";
 import type * as lib from "../lib.js";
@@ -102,6 +103,7 @@ declare const fullApi: ApiFromModules<{
   importLegacy: typeof importLegacy;
   kiosk: typeof kiosk;
   klyde: typeof klyde;
+  klydeGmail: typeof klydeGmail;
   klydeTaxonomy: typeof klydeTaxonomy;
   leaves: typeof leaves;
   lib: typeof lib;

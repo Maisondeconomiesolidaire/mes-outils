@@ -260,4 +260,41 @@ http.route({
   }),
 });
 
+/* ─── OAuth Google — connexion de la boîte Gmail Vinted de Klyd ────────────
+ *
+ * Google renvoie l'utilisateur ici après le consentement. On échange le `code`
+ * contre un refresh token côté serveur (le secret client ne quitte jamais
+ * Convex), puis on renvoie l'utilisateur dans Klyd.
+ *
+ * URI de redirection à déclarer dans Google Cloud Console :
+ *   https://hip-marten-394.eu-west-1.convex.site/klyde/gmail/oauth/callback
+ */
+http.route({
+  path: "/klyde/gmail/oauth/callback",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const url = new URL(request.url);
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const error = url.searchParams.get("error");
+    const fallback = (process.env.KLYDE_APP_URL ?? "https://klyde.groupemes.fr").replace(/\/$/, "");
+
+    if (error) {
+      return Response.redirect(
+        `${fallback}/?gmail=error&message=${encodeURIComponent(error)}`,
+        302,
+      );
+    }
+    if (!code || !state) {
+      return Response.redirect(
+        `${fallback}/?gmail=error&message=${encodeURIComponent("Réponse Google incomplète.")}`,
+        302,
+      );
+    }
+
+    const redirect = await ctx.runAction(internal.klydeGmail.completeOAuth, { code, state });
+    return Response.redirect(redirect, 302);
+  }),
+});
+
 export default http;

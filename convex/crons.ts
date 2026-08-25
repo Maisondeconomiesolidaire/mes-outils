@@ -54,4 +54,12 @@ crons.daily(
   internal.stripeCatalog.reconcile,
 );
 
+// Boîte Gmail Vinted de Klyd : import des ventes, bordereaux et virements.
+// Toutes les heures — Vinted n'a pas d'API, l'email est la seule source.
+crons.hourly(
+  "import emails vinted klyd",
+  { minuteUTC: 40 },
+  internal.klydeGmail.syncAll,
+);
+
 export default crons;

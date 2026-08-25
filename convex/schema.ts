@@ -1830,6 +1830,116 @@ export default defineSchema(
     .index("by_clerkId_itemId", ["clerkId", "itemId"])
     .index("by_itemId", ["itemId"]),
 
+  /* ─── Klyd — boîte Gmail Vinted (OAuth Google + emails analysés) ─────────
+   *
+   * Vinted n'expose pas d'API publique : la seule source fiable sur ce qui est
+   * vendu, expédié ou payé reste la boîte mail du compte. On lit donc, en
+   * lecture seule (scope `gmail.readonly`), les emails Vinted du compte Gmail
+   * connecté, et on en extrait les informations exploitables dans Klyd.
+   */
+
+  /** Compte Gmail connecté via OAuth Google (un par boîte, réutilisable). */
+  klydeGmailAccounts: defineTable({
+    /** Adresse Gmail réellement connectée (renvoyée par Google, pas saisie). */
+    email: v.string(),
+    /** Clerk de la personne qui a autorisé l'accès (traçabilité). */
+    connectedByClerkId: v.string(),
+    connectedByName: v.optional(v.string()),
+    /**
+     * Jeton de rafraîchissement Google : c'est LUI qui donne l'accès durable.
+     * Google ne le renvoie qu'au premier consentement (`prompt=consent` force
+     * son renvoi) — on ne l'écrase donc jamais par une valeur vide.
+     */
+    refreshToken: v.string(),
+    accessToken: v.optional(v.string()),
+    accessTokenExpiresAt: v.optional(v.number()),
+    /** Requête Gmail appliquée à la synchronisation (surchargeable). */
+    query: v.optional(v.string()),
+    active: v.boolean(),
+    /** Date (ms) du message le plus récent déjà importé : borne du sync incrémental. */
+    lastMessageDate: v.optional(v.number()),
+    lastSyncAt: v.optional(v.number()),
+    lastSyncError: v.optional(v.string()),
+    importedCount: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_email", ["email"])
+    .index("by_active", ["active"]),
+
+  /**
+   * État anti-CSRF de la redirection OAuth. Créé avant l'envoi chez Google,
+   * consommé (et supprimé) au retour : un `code` sans état connu est rejeté.
+   */
+  klydeGmailOAuthStates: defineTable({
+    state: v.string(),
+    clerkId: v.string(),
+    clerkName: v.optional(v.string()),
+    returnUrl: v.string(),
+    createdAt: v.number(),
+  }).index("by_state", ["state"]),
+
+  /** Email Vinted importé et analysé (une ligne par message Gmail). */
+  klydeVintedEmails: defineTable({
+    accountId: v.id("klydeGmailAccounts"),
+    /** Identifiant Gmail du message : clé d'idempotence de l'import. */
+    gmailId: v.string(),
+    threadId: v.optional(v.string()),
+    /** Date d'envoi (ms), telle que donnée par Gmail (`internalDate`). */
+    sentAt: v.number(),
+    subject: v.string(),
+    from: v.string(),
+    snippet: v.optional(v.string()),
+    /** Corps en texte brut (HTML aplati si l'email n'a pas de partie texte). */
+    bodyText: v.optional(v.string()),
+    /** Nature du message, déduite du sujet et du corps. */
+    kind: v.union(
+      v.literal("vente"),
+      v.literal("bordereau"),
+      v.literal("expedition"),
+      v.literal("paiement"),
+      v.literal("offre"),
+      v.literal("message"),
+      v.literal("autre"),
+    ),
+    /** Informations extraites (regex, complétées si besoin par l'IA). */
+    itemTitle: v.optional(v.string()),
+    amount: v.optional(v.number()),
+    buyer: v.optional(v.string()),
+    orderRef: v.optional(v.string()),
+    trackingNumber: v.optional(v.string()),
+    carrier: v.optional(v.string()),
+    /** Lien « imprimer le bordereau » trouvé dans l'email. */
+    labelUrl: v.optional(v.string()),
+    /** Pièces jointes rapatriées dans le stockage Convex (bordereaux PDF). */
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          filename: v.string(),
+          mimeType: v.string(),
+          size: v.optional(v.number()),
+        }),
+      ),
+    ),
+    /** `true` si l'extraction a été complétée par l'IA. */
+    aiParsed: v.optional(v.boolean()),
+    /** Article Klyd rattaché (rapprochement automatique ou manuel). */
+    matchedItemId: v.optional(v.id("klydeItems")),
+    matchConfidence: v.optional(v.number()),
+    /** Email traité par l'équipe (masqué de la file d'attente). */
+    handled: v.optional(v.boolean()),
+    handledAt: v.optional(v.number()),
+    handledByClerkId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_gmailId", ["gmailId"])
+    .index("by_sentAt", ["sentAt"])
+    .index("by_kind", ["kind"])
+    .index("by_handled", ["handled"])
+    .index("by_account", ["accountId"])
+    .index("by_matchedItem", ["matchedItemId"]),
+
   /* ─── App « Bennes & Pro » : dépôts de déchets par les entreprises ──────── */
 
   /** Entreprises qui déposent des déchets sur le site. */

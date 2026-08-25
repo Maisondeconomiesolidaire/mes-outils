@@ -297,6 +297,13 @@ export const KLYDE_PAGES: PermissionPage[] = [
   },
   {
     app: "klyde",
+    key: "klyde:vinted",
+    label: "Emails Vinted",
+    description: "Boite Gmail connectee : ventes, bordereaux et virements Vinted.",
+    actions: ["read", "update", "manage"],
+  },
+  {
+    app: "klyde",
     key: "klyde:commandes",
     label: "Commandes",
     description: "Suivi des commandes boutique et expeditions.",
