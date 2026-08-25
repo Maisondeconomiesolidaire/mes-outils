@@ -22,12 +22,42 @@ import { bytesToBase64, esc, resendSend } from "./emails";
 
 const PAGE_KEY = "klyde:vinted";
 
-/** Émetteur des factures. Volontairement sans logo. */
+/**
+ * Émetteur des factures — source unique de ses coordonnées.
+ *
+ * Ces mentions valent identification légale du vendeur : une correction se
+ * fait ici et se répercute sur la facture PDF comme sur l'email au client.
+ * Volontairement sans logo.
+ */
 const SELLER = {
   name: "Mobifrip",
+  legalForm: "Association déclarée",
   address: "4 rue de la Prairie",
   city: "60650 Lachapelle-aux-Pots",
+  siren: "503 123 044",
+  siret: "503 123 044 00011",
+  /** Les associations ne sont pas au RCS : l'identifiant RNA en tient lieu. */
+  rna: "W601001874",
+  rnaDeclaredOn: "21/06/2007",
+  vatNumber: "FR62503123044",
+  email: "s.maccioni@eco-solidaire.fr",
+  phone: "06 52 24 83 39",
 };
+
+/** Délai de rétractation retenu : le délai légal, comme sur Vinted. */
+const WITHDRAWAL_DAYS = 14;
+
+/** Plateforme européenne de règlement en ligne des litiges. */
+const ODR_URL = "https://ec.europa.eu/consumers/odr";
+
+/** Identification légale, telle qu'elle doit figurer sur une facture. */
+function sellerIdentityLines(): string[] {
+  return [
+    `${SELLER.name} — ${SELLER.legalForm} · SIREN ${SELLER.siren} · SIRET (siège) ${SELLER.siret}`,
+    `RNA ${SELLER.rna} (déclarée le ${SELLER.rnaDeclaredOn}) · TVA ${SELLER.vatNumber}`,
+    `${SELLER.address}, ${SELLER.city} · ${SELLER.email} · ${SELLER.phone}`,
+  ];
+}
 
 /** Expéditeur des emails : domaine vérifié sur Resend, nom d'enseigne. */
 const EMAIL_FROM = "Mobifrip <no-reply@mesoutils.eco-solidaire.fr>";
@@ -143,6 +173,15 @@ export function invoiceDocument(
     {
       kind: "text",
       text: SELLER.city,
+      size: 9.5,
+      color: MUTED,
+      x: rightColumnX,
+      width: rightColumnWidth,
+      align: "right",
+    },
+    {
+      kind: "text",
+      text: `${SELLER.email} · ${SELLER.phone}`,
       size: 9.5,
       color: MUTED,
       x: rightColumnX,
@@ -288,17 +327,36 @@ export function invoiceDocument(
     { kind: "rule", spaceBefore: 12, color: HAIRLINE },
   );
 
-  const footer = [
+  const context = [
     "Vente réalisée sur Vinted.",
     email.buyer ? `Acheteur : ${email.buyer}` : null,
     email.trackingNumber ? `Suivi : ${email.trackingNumber}` : null,
   ].filter((value): value is string => Boolean(value));
   elements.push({
     kind: "text",
-    text: footer.join(" · "),
+    text: context.join(" · "),
     size: 8.5,
     color: MUTED,
-    spaceBefore: 22,
+    spaceBefore: 20,
+  });
+  elements.push({
+    kind: "text",
+    text: `Droit de rétractation : ${WITHDRAWAL_DAYS} jours à compter de la réception, dans les conditions prévues par Vinted.`,
+    size: 8,
+    color: MUTED,
+    spaceBefore: 2,
+  });
+
+  // Identification légale du vendeur, en pied de page.
+  elements.push({ kind: "rule", spaceBefore: 18, color: HAIRLINE });
+  sellerIdentityLines().forEach((line, index) => {
+    elements.push({
+      kind: "text",
+      text: line,
+      size: 7.5,
+      color: MUTED,
+      spaceBefore: index === 0 ? 4 : -2,
+    });
   });
 
   return elements;
@@ -333,6 +391,28 @@ export function defaultInvoiceSubject(invoiceNumber: string): string {
  * (en-tête, récapitulatif, pied) reste posée ici, donc un email envoyé après
  * modification est toujours lisible et complet.
  */
+/**
+ * Mentions légales du pied d'email : identification du vendeur, rétractation,
+ * garanties, réclamations et lien ODR. En petit et en retrait — ce sont des
+ * informations obligatoires, pas le propos du message.
+ */
+function legalFooterHtml(): string {
+  const lines = [
+    ...sellerIdentityLines(),
+    `Droit de rétractation : ${WITHDRAWAL_DAYS} jours à compter de la réception de l'article, dans les conditions prévues par Vinted. Les frais de retour suivent la politique Vinted applicable à la commande.`,
+    `Garanties légales de conformité et contre les vices cachés : pour les exercer, écrivez à ${SELLER.email} ou appelez le ${SELLER.phone}.`,
+    `Réclamations : ${SELLER.email}. Plateforme européenne de règlement en ligne des litiges : ${ODR_URL}`,
+  ];
+  return `<div style="padding:16px 26px 20px;border-top:1px solid #e5e7eb;background:#fbfbfc">
+      ${lines
+        .map(
+          (line) =>
+            `<p style="margin:0 0 5px;font-size:10px;line-height:1.5;font-style:italic;color:#9ca3af">${esc(line)}</p>`,
+        )
+        .join("")}
+    </div>`;
+}
+
 function invoiceEmailHtml(
   email: Doc<"klydeVintedEmails">,
   invoiceNumber: string,
@@ -367,6 +447,7 @@ function invoiceEmailHtml(
       </table>
       <p style="margin:18px 0 0;font-size:12px;color:#6b7280">La facture est jointe à cet email au format PDF.</p>
     </div>
+    ${legalFooterHtml()}
   </div>
 </body></html>`;
 }
