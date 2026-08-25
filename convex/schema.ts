@@ -1917,6 +1917,14 @@ export default defineSchema(
     itemUrl: v.optional(v.string()),
     /** Enseigne d'où vient l'email, déduite de la boîte scrutée. */
     outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
+    /** Coordonnées de l'acheteur, telles que Vinted les donne dans l'email. */
+    buyerName: v.optional(v.string()),
+    buyerAddress: v.optional(v.string()),
+    buyerEmail: v.optional(v.string()),
+    /** Facture générée pour cette vente (PDF dans le stockage Convex). */
+    invoiceStorageId: v.optional(v.id("_storage")),
+    invoiceNumber: v.optional(v.string()),
+    invoiceGeneratedAt: v.optional(v.number()),
     /** Adresse qui a transféré la notification Vinted (le cas courant). */
     forwardedBy: v.optional(v.string()),
     /** Date de réception du transfert, quand elle diffère de la date d'origine. */

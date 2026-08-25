@@ -533,6 +533,32 @@ export function extractBuyer(text: string): string | undefined {
   return at?.[1];
 }
 
+/**
+ * Coordonnées de facturation de l'acheteur. Vinted les donne en clair dans
+ * l'email de vente (« Coordonnées de l'acheteur »), puisque le vendeur Pro doit
+ * joindre une facture au colis — c'est la seule source pour l'établir.
+ */
+export function extractBuyerContact(body: string): {
+  buyerName?: string;
+  buyerAddress?: string;
+  buyerEmail?: string;
+} {
+  // « Adresse e-mail : » ne doit pas être confondue avec « Adresse : ».
+  const address = body.match(/^\s*Adresse\s*:\s*(.+)$/mu)?.[1]?.trim();
+  const email = body
+    .match(/^\s*Adresse\s+e-?mail\s*:\s*(\S+@\S+)$/mu)?.[1]
+    ?.trim();
+  // Vinted écrit « Nom Prénom, rue, ville, code postal, pays » : le nom est le
+  // premier segment, l'adresse postale est le reste.
+  const [first, ...rest] = (address ?? "").split(",");
+  const name = first?.trim();
+  return {
+    buyerName: name && rest.length > 0 ? name.slice(0, 120) : undefined,
+    buyerAddress: address ? address.slice(0, 300) : undefined,
+    buyerEmail: email?.slice(0, 200),
+  };
+}
+
 export type ParsedEmail = {
   kind: VintedKind;
   itemTitle?: string;
@@ -544,6 +570,9 @@ export type ParsedEmail = {
   labelUrl?: string;
   conversationUrl?: string;
   itemUrl?: string;
+  buyerName?: string;
+  buyerAddress?: string;
+  buyerEmail?: string;
 };
 
 /** Extraction complète, purement locale (aucun appel réseau). */
@@ -561,6 +590,7 @@ export function parseVintedEmail(subject: string, body: string, html: string): P
     labelUrl: kind === "bordereau" || kind === "expedition" ? extractLabelUrl(html, body) : undefined,
     conversationUrl: extractConversationUrl(html, body),
     itemUrl: extractItemUrl(html, body),
+    ...(kind === "vente" ? extractBuyerContact(body) : {}),
   };
 }
 
@@ -924,6 +954,9 @@ export const saveEmail = internalMutation({
     forwardedBy: v.optional(v.string()),
     forwardedAt: v.optional(v.number()),
     outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
+    buyerName: v.optional(v.string()),
+    buyerAddress: v.optional(v.string()),
+    buyerEmail: v.optional(v.string()),
     attachments: v.optional(
       v.array(
         v.object({
@@ -1292,6 +1325,9 @@ export const listEmails = query({
           ...row,
           // Le corps complet n'est pas utile en liste : il alourdit la souscription.
           bodyText: row.bodyText?.slice(0, 1200),
+          invoiceUrl: row.invoiceStorageId
+            ? await ctx.storage.getUrl(row.invoiceStorageId)
+            : null,
           attachments,
           matchedItem: item
             ? {
