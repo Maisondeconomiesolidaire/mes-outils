@@ -1209,19 +1209,30 @@ export const listAccounts = query({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const accounts = await ctx.db.query("klydeGmailAccounts").collect();
-    // Les jetons ne sortent jamais du backend.
-    return accounts.map((account) => ({
-      _id: account._id,
-      email: account.email,
-      active: account.active,
-      connectedByName: account.connectedByName,
-      query: account.query ?? DEFAULT_QUERY,
-      lastSyncAt: account.lastSyncAt,
-      lastSyncError: account.lastSyncError,
-      lastMessageDate: account.lastMessageDate,
-      importedCount: account.importedCount ?? 0,
-      createdAt: account.createdAt,
-    }));
+    return Promise.all(
+      accounts.map(async (account) => {
+        // `importedCount` cumule les imports successifs : après un réimport,
+        // il compte plusieurs fois les mêmes messages. Le nombre affiché est
+        // donc celui des emails réellement présents en base.
+        const stored = await ctx.db
+          .query("klydeVintedEmails")
+          .withIndex("by_account", (q) => q.eq("accountId", account._id))
+          .collect();
+        // Les jetons ne sortent jamais du backend.
+        return {
+          _id: account._id,
+          email: account.email,
+          active: account.active,
+          connectedByName: account.connectedByName,
+          query: account.query ?? DEFAULT_QUERY,
+          lastSyncAt: account.lastSyncAt,
+          lastSyncError: account.lastSyncError,
+          lastMessageDate: account.lastMessageDate,
+          importedCount: stored.length,
+          createdAt: account.createdAt,
+        };
+      }),
+    );
   },
 });
 
