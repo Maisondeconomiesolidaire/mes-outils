@@ -48,6 +48,13 @@ const SCOPES = [
   "openid",
 ].join(" ");
 
+/**
+ * Natures d'emails effectivement importées. Les notifications de messagerie et
+ * les emails purement transactionnels (virements, promos) ne servent pas au
+ * suivi du stock : on les laisse dans la boîte plutôt que d'encombrer la file.
+ */
+const KEPT_KINDS = new Set<VintedKind>(["vente", "bordereau", "expedition", "offre"]);
+
 /** Requête Gmail par défaut : tout ce qui vient de Vinted. */
 const DEFAULT_QUERY = "from:(vinted.fr OR vinted.com OR vinted.co.uk)";
 
@@ -273,13 +280,56 @@ export function extractTrackingNumber(text: string): string | undefined {
 
 /** Lien de téléchargement/impression du bordereau, cherché dans le HTML. */
 export function extractLabelUrl(html: string, text: string): string | undefined {
-  const hrefs = [...html.matchAll(/href="([^"]+)"/gi)].map((m) => m[1]);
-  const inline = [...text.matchAll(/https?:\/\/[^\s<>")]+/gi)].map((m) => m[0]);
-  const candidates = [...hrefs, ...inline];
-  const scored = candidates.find((url) =>
+  const found = allUrls(html, text).find((url) =>
     /label|shipping|bordereau|etiquette|étiquette|\.pdf/i.test(url),
   );
-  return scored?.replace(/&amp;/g, "&").slice(0, 1500);
+  return found?.slice(0, 1500);
+}
+
+/**
+ * Les liens des emails Vinted passent par un traceur (`click.vinted.fr/…?url=…`).
+ * On récupère la cible réelle, sinon le bouton renvoie vers une page de
+ * redirection qui expire.
+ */
+function unwrapVintedUrl(url: string): string {
+  const cleaned = url.replace(/&amp;/g, "&");
+  const wrapped = cleaned.match(/[?&](?:url|u|redirect|target)=([^&]+)/i);
+  if (wrapped) {
+    try {
+      const decoded = decodeURIComponent(wrapped[1]);
+      if (/^https?:\/\//i.test(decoded)) return decoded;
+    } catch {
+      // Cible illisible : on garde le lien traceur, il fonctionne aussi.
+    }
+  }
+  return cleaned;
+}
+
+/** Tous les liens d'un email, HTML et texte confondus, cibles démasquées. */
+function allUrls(html: string, text: string): string[] {
+  const hrefs = [...html.matchAll(/href="([^"]+)"/gi)].map((m) => m[1]);
+  const inline = [...text.matchAll(/https?:\/\/[^\s<>")]+/gi)].map((m) => m[0]);
+  return [...hrefs, ...inline].map(unwrapVintedUrl);
+}
+
+/**
+ * Lien vers la conversation Vinted avec l'acheteur. C'est le geste le plus
+ * fréquent après une vente (répondre, envoyer le suivi) : sans ce lien il faut
+ * rouvrir la boîte mail pour retrouver le fil.
+ */
+export function extractConversationUrl(html: string, text: string): string | undefined {
+  const found = allUrls(html, text).find((url) =>
+    /vinted\.[a-z.]+\/(?:inbox|conversations?|messages)\b|\/msg\/|conversation_id=/i.test(url),
+  );
+  return found?.slice(0, 1500);
+}
+
+/** Lien vers l'annonce concernée (`vinted.fr/items/123…`). */
+export function extractItemUrl(html: string, text: string): string | undefined {
+  const found = allUrls(html, text).find((url) =>
+    /vinted\.[a-z.]+\/(?:items|articles)\/\d+/i.test(url),
+  );
+  return found?.slice(0, 1500);
 }
 
 /**
@@ -323,6 +373,8 @@ export type ParsedEmail = {
   trackingNumber?: string;
   carrier?: string;
   labelUrl?: string;
+  conversationUrl?: string;
+  itemUrl?: string;
 };
 
 /** Extraction complète, purement locale (aucun appel réseau). */
@@ -338,6 +390,8 @@ export function parseVintedEmail(subject: string, body: string, html: string): P
     trackingNumber: extractTrackingNumber(haystack),
     carrier: extractCarrier(haystack),
     labelUrl: kind === "bordereau" || kind === "expedition" ? extractLabelUrl(html, body) : undefined,
+    conversationUrl: extractConversationUrl(html, body),
+    itemUrl: extractItemUrl(html, body),
   };
 }
 
@@ -696,6 +750,8 @@ export const saveEmail = internalMutation({
     trackingNumber: v.optional(v.string()),
     carrier: v.optional(v.string()),
     labelUrl: v.optional(v.string()),
+    conversationUrl: v.optional(v.string()),
+    itemUrl: v.optional(v.string()),
     attachments: v.optional(
       v.array(
         v.object({
@@ -816,6 +872,8 @@ export const syncAccount = internalAction({
         const body = messageBodyText(message);
         const html = messageRawHtml(message);
         const parsed = parseVintedEmail(subject, body, html);
+        // Messages, virements et emails divers : lus, jamais stockés.
+        if (!KEPT_KINDS.has(parsed.kind)) continue;
 
         // Pièces jointes (bordereaux PDF) rapatriées dans le stockage Convex :
         // elles restent consultables même si le lien Vinted expire.

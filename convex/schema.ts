@@ -1911,6 +1911,10 @@ export default defineSchema(
     carrier: v.optional(v.string()),
     /** Lien « imprimer le bordereau » trouvé dans l'email. */
     labelUrl: v.optional(v.string()),
+    /** Lien vers la conversation Vinted avec l'acheteur. */
+    conversationUrl: v.optional(v.string()),
+    /** Lien vers l'annonce Vinted concernée. */
+    itemUrl: v.optional(v.string()),
     /** Pièces jointes rapatriées dans le stockage Convex (bordereaux PDF). */
     attachments: v.optional(
       v.array(
