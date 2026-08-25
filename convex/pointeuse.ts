@@ -631,6 +631,8 @@ export const updateTimeEntry = mutation({
     ),
     roundTrips: v.optional(v.number()),
     notes: v.optional(v.string()),
+    /** Liste complète des pièces jointes après modification (pas un ajout). */
+    documentIds: v.optional(v.array(v.id("ptDocuments"))),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, TIME_ENTRIES_PAGE_KEY, "update");
@@ -685,6 +687,25 @@ export const updateTimeEntry = mutation({
         ? { roundTrips, distanceKm, ratePerKm, cost: travelCost }
         : undefined;
 
+    // Pièces jointes : `documentIds` est la liste finale voulue. Le rattachement
+    // inverse (`timeEntryId`) suit, sinon un document retiré resterait affiché
+    // comme appartenant au pointage.
+    const documentIds = args.documentIds ?? entry.documentIds;
+    if (args.documentIds) {
+      const before = new Set(entry.documentIds.map((id) => id as string));
+      const after = new Set(args.documentIds.map((id) => id as string));
+      for (const documentId of args.documentIds) {
+        if (!before.has(documentId as string)) {
+          await ctx.db.patch(documentId, { timeEntryId: args.entryId });
+        }
+      }
+      for (const documentId of entry.documentIds) {
+        if (!after.has(documentId as string)) {
+          await ctx.db.patch(documentId, { timeEntryId: undefined });
+        }
+      }
+    }
+
     await ctx.db.patch(args.entryId, {
       projectId,
       clientId: project.clientId,
@@ -695,6 +716,7 @@ export const updateTimeEntry = mutation({
       travelCost,
       totalCost: round2(laborCost + travelCost),
       notes: args.notes === undefined ? entry.notes : args.notes || undefined,
+      documentIds,
     });
   },
 });
@@ -853,6 +875,8 @@ export const updateTask = mutation({
     ),
     roundTrips: v.optional(v.number()),
     notes: v.optional(v.string()),
+    /** Liste complète des pièces jointes après modification (pas un ajout). */
+    documentIds: v.optional(v.array(v.id("ptDocuments"))),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, TASKS_PAGE_KEY, "update");
@@ -930,6 +954,9 @@ export const updateTask = mutation({
       assignments,
       travel,
       notes: args.notes === undefined ? task.notes : args.notes || undefined,
+      // `timeEntryId` reste réservé aux pointages : une tâche ne porte ses
+      // documents que par sa propre liste.
+      documentIds: args.documentIds ?? task.documentIds,
       status: assignments.every((a) => typeof a.confirmedHours === "number")
         ? "confirmed"
         : "pending",
@@ -1124,6 +1151,38 @@ export const deleteInvoice = mutation({
  * rattache à un projet. S'il provient d'un pointage, `timeEntryId` sera posé au
  * moment de la création du pointage.
  */
+/**
+ * Détail des pièces jointes d'une tâche ou d'un pointage (nom, type, lien).
+ * Les listes ne renvoient que les identifiants : les recharger ici évite de
+ * signer une URL de stockage pour chaque document de chaque ligne affichée.
+ */
+export const documentsByIds = query({
+  args: { documentIds: v.array(v.id("ptDocuments")) },
+  handler: async (ctx, { documentIds }) => {
+    await requireAnyCrmPermission(ctx, [
+      [TASKS_PAGE_KEY, "read"],
+      [TIME_ENTRIES_PAGE_KEY, "read"],
+      [PROJECTS_PAGE_KEY, "read"],
+    ]);
+    const documents = await Promise.all(
+      documentIds.map(async (documentId) => {
+        const document = await ctx.db.get(documentId);
+        if (!document) return null;
+        return {
+          _id: document._id,
+          name: document.name,
+          mimeType: document.mimeType,
+          kind: document.kind ?? "other",
+          url: await ctx.storage.getUrl(document.storageId),
+        };
+      }),
+    );
+    return documents.filter(
+      (document): document is NonNullable<typeof document> => Boolean(document),
+    );
+  },
+});
+
 export const registerDocument = mutation({
   args: {
     storageId: v.id("_storage"),
@@ -1147,6 +1206,9 @@ export const registerDocument = mutation({
       [PROJECTS_PAGE_KEY, "create"],
       [PROJECTS_PAGE_KEY, "update"],
       [TIME_ENTRIES_PAGE_KEY, "create"],
+      [TIME_ENTRIES_PAGE_KEY, "update"],
+      [TASKS_PAGE_KEY, "create"],
+      [TASKS_PAGE_KEY, "update"],
       [EXPENSES_PAGE_KEY, "create"],
       [INVOICES_PAGE_KEY, "create"],
     ]);
@@ -1171,6 +1233,7 @@ export const deleteDocument = mutation({
     await requireAnyCrmPermission(ctx, [
       [PROJECTS_PAGE_KEY, "update"],
       [TIME_ENTRIES_PAGE_KEY, "update"],
+      [TASKS_PAGE_KEY, "update"],
       [EXPENSES_PAGE_KEY, "update"],
       [INVOICES_PAGE_KEY, "update"],
       [PROJECTS_PAGE_KEY, "delete"],
