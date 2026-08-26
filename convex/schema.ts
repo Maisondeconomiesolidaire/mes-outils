@@ -810,6 +810,9 @@ export default defineSchema(
     role: v.optional(v.string()),
     email: v.optional(v.string()),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    /** Sites de rattachement : un salarié peut intervenir sur les deux. */
+    sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
     active: v.boolean(),
     createdAt: v.number(),
   }),

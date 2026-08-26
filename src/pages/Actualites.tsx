@@ -120,7 +120,6 @@ type PostLike = { _id: Id<"postLikes">; name: string; imageUrl?: string; created
 
 function Publications({ canCreate, canManage }: { canCreate: boolean; canManage: boolean }) {
   const { user } = useUser();
-  const access = usePermissionsAccess();
   const posts = useQuery(api.posts.list, { limit: 60 }) as Post[] | undefined;
   const createPost = useMutation(api.posts.create);
   const addComment = useMutation(api.posts.addComment);

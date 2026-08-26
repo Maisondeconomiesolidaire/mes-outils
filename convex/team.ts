@@ -31,6 +31,8 @@ export const create = mutation({
     role: v.optional(v.string()),
     email: v.optional(v.string()),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "equipe", "create");
@@ -49,6 +51,8 @@ export const update = mutation({
     role: v.optional(v.string()),
     email: v.optional(v.string()),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
     active: v.boolean(),
   },
   handler: async (ctx, { id, ...rest }) => {
