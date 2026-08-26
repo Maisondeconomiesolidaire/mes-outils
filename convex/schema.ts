@@ -2454,7 +2454,8 @@ export default defineSchema(
 
   polyvalentActivities: defineTable({
     taskId: v.id("polyvalentTasks"),
-    workerId: v.id("polyvalentWorkers"),
+    /** Une tâche peut être planifiée avant qu'un salarié lui soit affecté. */
+    workerId: v.optional(v.id("polyvalentWorkers")),
     /** Début et fin du créneau, en millisecondes epoch (date + heure). */
     startAt: v.number(),
     endAt: v.number(),

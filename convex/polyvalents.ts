@@ -168,13 +168,13 @@ export const listActivities = query({
     const workerById = new Map(workers.map((worker) => [String(worker._id), worker]));
     return activities.map((activity) => {
       const task = taskById.get(String(activity.taskId)) ?? null;
-      const worker = workerById.get(String(activity.workerId)) ?? null;
+      const worker = activity.workerId ? workerById.get(String(activity.workerId)) ?? null : null;
       return {
         ...activity,
         taskName: task?.name ?? "Tâche supprimée",
         workerName: worker
           ? `${worker.firstName} ${worker.lastName}`.trim()
-          : "Ouvrier supprimé",
+          : "Aucun salarié affecté",
       };
     });
   },
@@ -183,7 +183,7 @@ export const listActivities = query({
 export const createActivity = mutation({
   args: {
     taskId: v.id("polyvalentTasks"),
-    workerId: v.id("polyvalentWorkers"),
+    workerId: v.optional(v.id("polyvalentWorkers")),
     startAt: v.number(),
     endAt: v.number(),
   },
@@ -196,12 +196,9 @@ export const createActivity = mutation({
     if (args.endAt < args.startAt) {
       throw new Error("La fin doit être après le début.");
     }
-    const [task, worker] = await Promise.all([
-      ctx.db.get(args.taskId),
-      ctx.db.get(args.workerId),
-    ]);
+    const [task, worker] = await Promise.all([ctx.db.get(args.taskId), args.workerId ? ctx.db.get(args.workerId) : null]);
     if (!task) throw new Error("Tâche introuvable.");
-    if (!worker) throw new Error("Ouvrier introuvable.");
+    if (args.workerId && !worker) throw new Error("Ouvrier introuvable.");
     return await ctx.db.insert("polyvalentActivities", {
       taskId: args.taskId,
       workerId: args.workerId,
@@ -214,28 +211,27 @@ export const createActivity = mutation({
 });
 
 /**
- * Crée plusieurs créneaux en une seule opération. Utilisé par le planning pour
- * les répétitions hebdomadaires, afin qu'une série soit validée atomiquement.
+ * Crée plusieurs créneaux indépendants en une seule opération.
  */
 export const createActivities = mutation({
   args: {
     taskId: v.id("polyvalentTasks"),
-    workerId: v.id("polyvalentWorkers"),
+    workerId: v.optional(v.id("polyvalentWorkers")),
     slots: v.array(v.object({ startAt: v.number(), endAt: v.number() })),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
     const identity = await requireUser(ctx);
     if (args.slots.length === 0) throw new Error("Ajoutez au moins un créneau.");
-    if (args.slots.length > 100) throw new Error("Une récurrence est limitée à 100 créneaux.");
+    if (args.slots.length > 100) throw new Error("Une création est limitée à 100 créneaux.");
     for (const slot of args.slots) {
       if (!Number.isFinite(slot.startAt) || !Number.isFinite(slot.endAt) || slot.endAt <= slot.startAt) {
         throw new Error("Chaque créneau doit avoir une fin après son début.");
       }
     }
-    const [task, worker] = await Promise.all([ctx.db.get(args.taskId), ctx.db.get(args.workerId)]);
+    const [task, worker] = await Promise.all([ctx.db.get(args.taskId), args.workerId ? ctx.db.get(args.workerId) : null]);
     if (!task) throw new Error("Tâche introuvable.");
-    if (!worker) throw new Error("Ouvrier introuvable.");
+    if (args.workerId && !worker) throw new Error("Ouvrier introuvable.");
     const createdBy = formatUserName(identity);
     const createdAt = Date.now();
     return await Promise.all(
@@ -256,7 +252,7 @@ export const updateActivity = mutation({
   args: {
     id: v.id("polyvalentActivities"),
     taskId: v.id("polyvalentTasks"),
-    workerId: v.id("polyvalentWorkers"),
+    workerId: v.optional(v.id("polyvalentWorkers")),
     startAt: v.number(),
     endAt: v.number(),
   },
@@ -268,12 +264,9 @@ export const updateActivity = mutation({
     if (args.endAt < args.startAt) {
       throw new Error("La fin doit être après le début.");
     }
-    const [task, worker] = await Promise.all([
-      ctx.db.get(args.taskId),
-      ctx.db.get(args.workerId),
-    ]);
+    const [task, worker] = await Promise.all([ctx.db.get(args.taskId), args.workerId ? ctx.db.get(args.workerId) : null]);
     if (!task) throw new Error("Tâche introuvable.");
-    if (!worker) throw new Error("Ouvrier introuvable.");
+    if (args.workerId && !worker) throw new Error("Ouvrier introuvable.");
     await ctx.db.patch(args.id, {
       taskId: args.taskId,
       workerId: args.workerId,
