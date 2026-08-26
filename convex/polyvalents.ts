@@ -107,8 +107,45 @@ export const deleteWorker = mutation({
       .query("polyvalentActivities")
       .withIndex("by_worker", (q) => q.eq("workerId", args.id))
       .collect();
+    const schedule = await ctx.db
+      .query("polyvalentWorkerSchedules")
+      .withIndex("by_worker", (q) => q.eq("workerId", args.id))
+      .unique();
     await Promise.all(activities.map((activity) => ctx.db.delete(activity._id)));
+    if (schedule) await ctx.db.delete(schedule._id);
     await ctx.db.delete(args.id);
+  },
+});
+
+const availabilityValidator = v.array(v.object({
+  weekday: v.number(),
+  start: v.string(),
+  end: v.string(),
+}));
+
+export const listWorkerSchedules = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    return await ctx.db.query("polyvalentWorkerSchedules").take(500);
+  },
+});
+
+export const setWorkerSchedule = mutation({
+  args: { workerId: v.id("polyvalentWorkers"), availability: availabilityValidator },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    if (args.availability.length > 7) throw new Error("Un planning contient au maximum 7 jours.");
+    const days = new Set<number>();
+    for (const slot of args.availability) {
+      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 7 || days.has(slot.weekday)) throw new Error("Les jours de disponibilité sont invalides.");
+      if (!/^\d{2}:\d{2}$/.test(slot.start) || !/^\d{2}:\d{2}$/.test(slot.end) || slot.end <= slot.start) throw new Error("Les horaires de disponibilité sont invalides.");
+      days.add(slot.weekday);
+    }
+    if (!await ctx.db.get(args.workerId)) throw new Error("Ouvrier introuvable.");
+    const schedule = await ctx.db.query("polyvalentWorkerSchedules").withIndex("by_worker", (q) => q.eq("workerId", args.workerId)).unique();
+    if (schedule) await ctx.db.patch(schedule._id, { availability: args.availability });
+    else await ctx.db.insert("polyvalentWorkerSchedules", args);
   },
 });
 
@@ -173,6 +210,45 @@ export const createActivity = mutation({
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
+  },
+});
+
+/**
+ * Crée plusieurs créneaux en une seule opération. Utilisé par le planning pour
+ * les répétitions hebdomadaires, afin qu'une série soit validée atomiquement.
+ */
+export const createActivities = mutation({
+  args: {
+    taskId: v.id("polyvalentTasks"),
+    workerId: v.id("polyvalentWorkers"),
+    slots: v.array(v.object({ startAt: v.number(), endAt: v.number() })),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "create");
+    const identity = await requireUser(ctx);
+    if (args.slots.length === 0) throw new Error("Ajoutez au moins un créneau.");
+    if (args.slots.length > 100) throw new Error("Une récurrence est limitée à 100 créneaux.");
+    for (const slot of args.slots) {
+      if (!Number.isFinite(slot.startAt) || !Number.isFinite(slot.endAt) || slot.endAt <= slot.startAt) {
+        throw new Error("Chaque créneau doit avoir une fin après son début.");
+      }
+    }
+    const [task, worker] = await Promise.all([ctx.db.get(args.taskId), ctx.db.get(args.workerId)]);
+    if (!task) throw new Error("Tâche introuvable.");
+    if (!worker) throw new Error("Ouvrier introuvable.");
+    const createdBy = formatUserName(identity);
+    const createdAt = Date.now();
+    return await Promise.all(
+      args.slots.map((slot) =>
+        ctx.db.insert("polyvalentActivities", {
+          taskId: args.taskId,
+          workerId: args.workerId,
+          ...slot,
+          createdBy,
+          createdAt,
+        }),
+      ),
+    );
   },
 });
 

@@ -2443,6 +2443,15 @@ export default defineSchema(
     createdAt: v.number(),
   }),
 
+  polyvalentWorkerSchedules: defineTable({
+    workerId: v.id("polyvalentWorkers"),
+    availability: v.array(v.object({
+      weekday: v.number(),
+      start: v.string(),
+      end: v.string(),
+    })),
+  }).index("by_worker", ["workerId"]),
+
   polyvalentActivities: defineTable({
     taskId: v.id("polyvalentTasks"),
     workerId: v.id("polyvalentWorkers"),
