@@ -242,7 +242,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
           <PostCard
             key={post._id}
             post={post}
-            currentName={user?.fullName ?? access?.email ?? "Moi"}
+            currentName={"Moi"}
             currentImage={user?.imageUrl}
             canManage={canManage}
             canCreate={canCreate}
