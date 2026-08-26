@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router-dom";
+import { readSheet } from "read-excel-file/browser";
 import {
   CalendarClock,
   CalendarDays,
@@ -19,6 +20,7 @@ import {
   Route,
   Search,
   Trash2,
+  Upload,
   Users,
   Wrench,
   X,
@@ -541,6 +543,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
   const [laborMins, setLaborMins] = useState("");
   const [partsCost, setPartsCost] = useState("");
   const [saving, setSaving] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   async function add() {
     if (!title.trim()) return;
@@ -609,7 +612,10 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
           </div>
         </div>
       ) : canCreate ? (
-        <Button className="w-full" onClick={() => setAdding(true)}><Plus className="h-4 w-4" />Nouvelle maintenance</Button>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Button className="w-full" onClick={() => setAdding(true)}><Plus className="h-4 w-4" />Nouvelle maintenance</Button>
+          <Button className="w-full" variant="secondary" onClick={() => setImportOpen(true)}><Upload className="h-4 w-4" />Importer un Excel</Button>
+        </div>
       ) : null}
 
       {tasks === undefined ? (
@@ -633,7 +639,123 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
         }}
         onUpdate={updateTask}
       />
+      <MaintenanceImportModal open={importOpen} onClose={() => setImportOpen(false)} vehicleId={vehicleId} onImport={createTask} />
     </>
+  );
+}
+
+type ImportedMaintenance = { title: string; dueDate: number; odometerKm: number };
+
+function normalizedExcelHeader(value: unknown) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function excelDateToTimestamp(value: unknown): number | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+  if (typeof value === "number") {
+    const date = new Date(1899, 11, 30 + value);
+    return Number.isNaN(date.getTime()) ? null : new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  }
+  const text = String(value ?? "").trim();
+  const french = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+  if (french) {
+    const year = Number(french[3].length === 2 ? `20${french[3]}` : french[3]);
+    const date = new Date(year, Number(french[2]) - 1, Number(french[1]));
+    return date.getFullYear() === year && date.getMonth() === Number(french[2]) - 1 && date.getDate() === Number(french[1]) ? date.getTime() : null;
+  }
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()).getTime();
+}
+
+function excelOdometer(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.round(value);
+  const normalized = String(value ?? "").replace(/\s/g, "").replace(/[^\d,.-]/g, "").replace(/,/g, ".");
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
+}
+
+async function extractMaintenanceRows(file: File): Promise<{ rows: ImportedMaintenance[]; skipped: number }> {
+    const values = await readSheet(file);
+    const headers = (values[0] ?? []).map(normalizedExcelHeader);
+    const dateIndex = headers.findIndex((header) => ["date", "datedintervention", "dateintervention"].includes(header));
+    const titleIndex = headers.findIndex((header) => ["tache", "nomdelatache", "intitule", "libelle", "maintenance", "intervention", "description"].includes(header));
+    const odometerIndex = headers.findIndex((header) => ["kilometrage", "km", "compteur", "odometre", "odometer"].includes(header));
+    if (dateIndex < 0 || titleIndex < 0 || odometerIndex < 0) {
+      throw new Error("Colonnes introuvables. La première ligne doit contenir Date, Tâche et Kilométrage (ou leurs variantes usuelles).");
+    }
+    const rows: ImportedMaintenance[] = [];
+    let skipped = 0;
+    for (const row of values.slice(1)) {
+      if (!row.some((cell) => cell !== null && String(cell).trim() !== "")) continue;
+      const title = String(row[titleIndex] ?? "").trim();
+      const dueDate = excelDateToTimestamp(row[dateIndex]);
+      const odometerKm = excelOdometer(row[odometerIndex]);
+      if (!title || dueDate === null || odometerKm === null) { skipped += 1; continue; }
+      rows.push({ title, dueDate, odometerKm });
+    }
+    if (!rows.length) throw new Error("Aucune ligne valide à importer. Vérifiez les dates, les tâches et les kilométrages.");
+    if (rows.length > 200) throw new Error("Le fichier contient plus de 200 lignes valides. Importez-le en plusieurs fois.");
+    return { rows, skipped };
+}
+
+function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: boolean; onClose: () => void; vehicleId: Id<"vehicles">; onImport: (args: { vehicleId: Id<"vehicles">; title: string; dueDate: number; odometerKm: number; priority: TaskPriority }) => Promise<unknown> }) {
+  const [rows, setRows] = useState<ImportedMaintenance[]>([]);
+  const [skipped, setSkipped] = useState(0);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  useEffect(() => {
+    if (!open) { setRows([]); setSkipped(0); setError(""); setLoading(false); setImporting(false); }
+  }, [open]);
+
+  async function selectFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setLoading(true); setError(""); setRows([]); setSkipped(0);
+    try {
+      const result = await extractMaintenanceRows(file);
+      setRows(result.rows); setSkipped(result.skipped);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Impossible de lire ce fichier.");
+    } finally { setLoading(false); }
+  }
+
+  async function importRows() {
+    setImporting(true); setError("");
+    try {
+      for (const row of rows) await onImport({ vehicleId, title: row.title, dueDate: row.dueDate, odometerKm: row.odometerKm, priority: "medium" });
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? `Import interrompu : ${cause.message}` : "Import interrompu.");
+    } finally { setImporting(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title="Importer des maintenances">
+      <div className="grid gap-4">
+        <p className="text-sm text-[var(--muted-foreground)]">Importez un fichier Excel (.xlsx) dont la première ligne contient <strong>Date</strong>, <strong>Tâche</strong> et <strong>Kilométrage</strong>. Chaque ligne valide créera une maintenance à faire pour ce véhicule.</p>
+        <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={selectFile} className="block w-full text-sm text-[var(--muted-foreground)] file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600" />
+        {loading ? <p className="text-sm text-[var(--muted-foreground)]">Lecture du fichier…</p> : null}
+        {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">{error}</p> : null}
+        {rows.length ? <>
+          <div className="rounded-xl border border-[var(--border)]">
+            <div className="border-b border-[var(--border)] px-3 py-2 text-sm font-semibold">{rows.length} maintenance{rows.length > 1 ? "s" : ""} prête{rows.length > 1 ? "s" : ""} à importer{skipped ? ` · ${skipped} ligne${skipped > 1 ? "s" : ""} ignorée${skipped > 1 ? "s" : ""}` : ""}</div>
+            <div className="max-h-52 overflow-auto text-sm">
+              {rows.slice(0, 10).map((row, index) => <div key={`${row.title}-${index}`} className="grid grid-cols-[1fr_auto] gap-3 border-b border-[var(--border)] px-3 py-2 last:border-0"><span>{row.title}</span><span className="text-right text-[var(--muted-foreground)]">{formatDate(row.dueDate)} · {row.odometerKm.toLocaleString("fr-FR")} km</span></div>)}
+              {rows.length > 10 ? <p className="px-3 py-2 text-[var(--muted-foreground)]">… et {rows.length - 10} autre{rows.length - 10 > 1 ? "s" : ""}</p> : null}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Annuler</Button><Button onClick={importRows} disabled={importing}>{importing ? "Import en cours…" : `Importer ${rows.length} maintenance${rows.length > 1 ? "s" : ""}`}</Button></div>
+        </> : null}
+      </div>
+    </Modal>
   );
 }
 
