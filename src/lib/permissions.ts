@@ -201,8 +201,8 @@ export const RECYCAPP_PAGES: PermissionPage[] = [
   {
     app: "recycapp",
     key: "agents-polyvalents",
-    label: "Tâches & équipe",
-    description: "Équipe de la Recyclerie : salariés, tâches et planning d'activités.",
+    label: "Gestion",
+    description: "Recyclerie 60 : salariés, tâches et planning d'activités.",
     actions: ["read", "create", "update", "delete"],
   },
   {

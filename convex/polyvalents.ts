@@ -700,3 +700,4 @@ export const setWorkerEmploymentType = mutation({
     await ctx.db.patch(args.id, { employmentType: args.employmentType });
   },
 });
+
