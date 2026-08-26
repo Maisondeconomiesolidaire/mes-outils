@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ChangeEvent } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useSearchParams } from "react-router-dom";
-import { readSheet } from "read-excel-file/browser";
+import * as XLSX from "@e965/xlsx";
 import {
   CalendarClock,
   CalendarDays,
@@ -680,17 +680,34 @@ function excelOdometer(value: unknown): number | null {
 }
 
 async function extractMaintenanceRows(file: File): Promise<{ rows: ImportedMaintenance[]; skipped: number }> {
-    const values = await readSheet(file);
-    const headers = (values[0] ?? []).map(normalizedExcelHeader);
-    const dateIndex = headers.findIndex((header) => ["date", "datedintervention", "dateintervention"].includes(header));
-    const titleIndex = headers.findIndex((header) => ["tache", "nomdelatache", "intitule", "libelle", "maintenance", "intervention", "description"].includes(header));
-    const odometerIndex = headers.findIndex((header) => ["kilometrage", "km", "compteur", "odometre", "odometer"].includes(header));
-    if (dateIndex < 0 || titleIndex < 0 || odometerIndex < 0) {
-      throw new Error("Colonnes introuvables. La première ligne doit contenir Date, Tâche et Kilométrage (ou leurs variantes usuelles).");
+    const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true, WTF: false });
+    let values: unknown[][] | null = null;
+    let headerRowIndex = -1;
+    let dateIndex = -1;
+    let titleIndex = -1;
+    let odometerIndex = -1;
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) continue;
+      const candidate = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
+      for (let index = 0; index < Math.min(candidate.length, 20); index += 1) {
+        const headers = (candidate[index] ?? []).map(normalizedExcelHeader);
+        const nextDateIndex = headers.findIndex((header) => ["date", "datedintervention", "dateintervention"].includes(header));
+        const nextTitleIndex = headers.findIndex((header) => ["tache", "nomdelatache", "intitule", "libelle", "maintenance", "intervention", "description"].includes(header));
+        const nextOdometerIndex = headers.findIndex((header) => ["kilometrage", "km", "compteur", "odometre", "odometer"].includes(header));
+        if (nextDateIndex >= 0 && nextTitleIndex >= 0 && nextOdometerIndex >= 0) {
+          values = candidate; headerRowIndex = index; dateIndex = nextDateIndex; titleIndex = nextTitleIndex; odometerIndex = nextOdometerIndex;
+          break;
+        }
+      }
+      if (values) break;
+    }
+    if (!values) {
+      throw new Error("Colonnes introuvables. L'une des 20 premières lignes doit contenir Date, Tâche et Kilométrage (ou leurs variantes usuelles).");
     }
     const rows: ImportedMaintenance[] = [];
     let skipped = 0;
-    for (const row of values.slice(1)) {
+    for (const row of values.slice(headerRowIndex + 1)) {
       if (!row.some((cell) => cell !== null && String(cell).trim() !== "")) continue;
       const title = String(row[titleIndex] ?? "").trim();
       const dueDate = excelDateToTimestamp(row[dateIndex]);
@@ -740,8 +757,8 @@ function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: 
   return (
     <Modal open={open} onClose={onClose} title="Importer des maintenances">
       <div className="grid gap-4">
-        <p className="text-sm text-[var(--muted-foreground)]">Importez un fichier Excel (.xlsx) dont la première ligne contient <strong>Date</strong>, <strong>Tâche</strong> et <strong>Kilométrage</strong>. Chaque ligne valide créera une maintenance à faire pour ce véhicule.</p>
-        <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={selectFile} className="block w-full text-sm text-[var(--muted-foreground)] file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600" />
+        <p className="text-sm text-[var(--muted-foreground)]">Importez un fichier Excel (.xlsx, .xls, .xlsm, .xlsb), XML Spreadsheet, CSV ou ODS. L'une des 20 premières lignes doit contenir <strong>Date</strong>, <strong>Tâche</strong> et <strong>Kilométrage</strong>. Chaque ligne valide créera une maintenance à faire pour ce véhicule.</p>
+        <input type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.xml,.csv,.ods,application/vnd.ms-excel,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.ms-excel.sheet.binary.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/xml" onChange={selectFile} className="block w-full text-sm text-[var(--muted-foreground)] file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600" />
         {loading ? <p className="text-sm text-[var(--muted-foreground)]">Lecture du fichier…</p> : null}
         {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">{error}</p> : null}
         {rows.length ? <>
