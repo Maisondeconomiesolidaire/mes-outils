@@ -645,6 +645,9 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
 }
 
 type ImportedMaintenance = { title: string; dueDate: number; odometerKm: number };
+type SpreadsheetColumn = { index: number; label: string };
+type ImportedSpreadsheet = { columns: SpreadsheetColumn[]; rows: unknown[][] };
+type ImportFieldMapping = { date: number | ""; title: number | ""; odometer: number | "" };
 
 function normalizedExcelHeader(value: unknown) {
   return String(value ?? "")
@@ -679,72 +682,100 @@ function excelOdometer(value: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : null;
 }
 
-async function extractMaintenanceRows(file: File): Promise<{ rows: ImportedMaintenance[]; skipped: number }> {
-    const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true, WTF: false });
-    let values: unknown[][] | null = null;
-    let headerRowIndex = -1;
-    let dateIndex = -1;
-    let titleIndex = -1;
-    let odometerIndex = -1;
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName];
-      if (!sheet) continue;
-      const candidate = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
-      for (let index = 0; index < Math.min(candidate.length, 20); index += 1) {
-        const headers = (candidate[index] ?? []).map(normalizedExcelHeader);
-        const nextDateIndex = headers.findIndex((header) => ["date", "datedintervention", "dateintervention"].includes(header));
-        const nextTitleIndex = headers.findIndex((header) => ["tache", "nomdelatache", "intitule", "libelle", "maintenance", "intervention", "description"].includes(header));
-        const nextOdometerIndex = headers.findIndex((header) => ["kilometrage", "km", "compteur", "odometre", "odometer"].includes(header));
-        if (nextDateIndex >= 0 && nextTitleIndex >= 0 && nextOdometerIndex >= 0) {
-          values = candidate; headerRowIndex = index; dateIndex = nextDateIndex; titleIndex = nextTitleIndex; odometerIndex = nextOdometerIndex;
-          break;
-        }
-      }
-      if (values) break;
+function columnLabel(index: number) {
+  return `Colonne ${String.fromCharCode(65 + index)}`;
+}
+
+function headerScore(row: unknown[]) {
+  return row.reduce<number>((score, cell) => {
+    const value = normalizedExcelHeader(cell);
+    if (["date", "datedintervention", "dateintervention", "tache", "nomdelatache", "intitule", "libelle", "maintenance", "intervention", "description", "kilometrage", "km", "compteur", "odometre", "odometer"].includes(value)) return score + 100;
+    return score + (value ? 1 : 0);
+  }, 0);
+}
+
+function matchingColumn(columns: SpreadsheetColumn[], names: string[]) {
+  return columns.find((column) => names.includes(normalizedExcelHeader(column.label)))?.index ?? "";
+}
+
+async function extractSpreadsheet(file: File): Promise<ImportedSpreadsheet> {
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: true, WTF: false });
+  let best: { values: unknown[][]; headerRowIndex: number; score: number } | null = null;
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const values = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
+    for (let index = 0; index < Math.min(values.length, 20); index += 1) {
+      const score = headerScore(values[index] ?? []);
+      if (score > 0 && (!best || score > best.score)) best = { values, headerRowIndex: index, score };
     }
-    if (!values) {
-      throw new Error("Colonnes introuvables. L'une des 20 premières lignes doit contenir Date, Tâche et Kilométrage (ou leurs variantes usuelles).");
-    }
+  }
+  if (!best) throw new Error("Le fichier ne contient aucune ligne avec des intitulés de colonnes.");
+  const header = best.values[best.headerRowIndex] ?? [];
+  const lastColumn = Math.max(header.length, ...best.values.slice(best.headerRowIndex + 1).map((row) => row.length));
+  const columns = Array.from({ length: lastColumn }, (_, index) => ({ index, label: String(header[index] ?? "").trim() || columnLabel(index) }));
+  const rows = best.values.slice(best.headerRowIndex + 1).filter((row) => row.some((cell) => cell !== null && String(cell).trim() !== ""));
+  if (!rows.length) throw new Error("Le fichier ne contient aucune ligne de données après les intitulés.");
+  return { columns, rows };
+}
+
+function maintenancePreview(spreadsheet: ImportedSpreadsheet | null, mapping: ImportFieldMapping): { rows: ImportedMaintenance[]; skipped: number; error: string } {
+  if (!spreadsheet || mapping.date === "" || mapping.title === "" || mapping.odometer === "") return { rows: [], skipped: 0, error: "Associez les trois champs avant de continuer." };
+  if (new Set([mapping.date, mapping.title, mapping.odometer]).size !== 3) return { rows: [], skipped: 0, error: "Chaque champ Gotravaux doit correspondre à une colonne différente." };
     const rows: ImportedMaintenance[] = [];
     let skipped = 0;
-    for (const row of values.slice(headerRowIndex + 1)) {
-      if (!row.some((cell) => cell !== null && String(cell).trim() !== "")) continue;
-      const title = String(row[titleIndex] ?? "").trim();
-      const dueDate = excelDateToTimestamp(row[dateIndex]);
-      const odometerKm = excelOdometer(row[odometerIndex]);
+    for (const row of spreadsheet.rows) {
+      const title = String(row[mapping.title] ?? "").trim();
+      const dueDate = excelDateToTimestamp(row[mapping.date]);
+      const odometerKm = excelOdometer(row[mapping.odometer]);
       if (!title || dueDate === null || odometerKm === null) { skipped += 1; continue; }
       rows.push({ title, dueDate, odometerKm });
     }
-    if (!rows.length) throw new Error("Aucune ligne valide à importer. Vérifiez les dates, les tâches et les kilométrages.");
-    if (rows.length > 200) throw new Error("Le fichier contient plus de 200 lignes valides. Importez-le en plusieurs fois.");
-    return { rows, skipped };
+    if (!rows.length) return { rows, skipped, error: "Aucune ligne valide avec cette correspondance. Vérifiez les champs choisis." };
+    if (rows.length > 200) return { rows, skipped, error: "Le fichier contient plus de 200 lignes valides. Importez-le en plusieurs fois." };
+    return { rows, skipped, error: "" };
 }
 
 function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: boolean; onClose: () => void; vehicleId: Id<"vehicles">; onImport: (args: { vehicleId: Id<"vehicles">; title: string; dueDate: number; odometerKm: number; priority: TaskPriority }) => Promise<unknown> }) {
   const [rows, setRows] = useState<ImportedMaintenance[]>([]);
   const [skipped, setSkipped] = useState(0);
+  const [spreadsheet, setSpreadsheet] = useState<ImportedSpreadsheet | null>(null);
+  const [mapping, setMapping] = useState<ImportFieldMapping>({ date: "", title: "", odometer: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
 
   useEffect(() => {
-    if (!open) { setRows([]); setSkipped(0); setError(""); setLoading(false); setImporting(false); }
+    if (!open) { setRows([]); setSkipped(0); setSpreadsheet(null); setMapping({ date: "", title: "", odometer: "" }); setError(""); setLoading(false); setImporting(false); }
   }, [open]);
+
+  const preview = useMemo(() => maintenancePreview(spreadsheet, mapping), [spreadsheet, mapping]);
+
+  useEffect(() => {
+    setRows(preview.rows);
+    setSkipped(preview.skipped);
+  }, [preview]);
 
   async function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    setLoading(true); setError(""); setRows([]); setSkipped(0);
+    setLoading(true); setError(""); setRows([]); setSkipped(0); setSpreadsheet(null); setMapping({ date: "", title: "", odometer: "" });
     try {
-      const result = await extractMaintenanceRows(file);
-      setRows(result.rows); setSkipped(result.skipped);
+      const result = await extractSpreadsheet(file);
+      setSpreadsheet(result);
+      setMapping({
+        date: matchingColumn(result.columns, ["date", "datedintervention", "dateintervention"]),
+        title: matchingColumn(result.columns, ["tache", "nomdelatache", "intitule", "libelle", "maintenance", "intervention", "description"]),
+        odometer: matchingColumn(result.columns, ["kilometrage", "km", "compteur", "odometre", "odometer"]),
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Impossible de lire ce fichier.");
     } finally { setLoading(false); }
   }
 
   async function importRows() {
+    if (preview.error || !rows.length) return;
     setImporting(true); setError("");
     try {
       for (const row of rows) await onImport({ vehicleId, title: row.title, dueDate: row.dueDate, odometerKm: row.odometerKm, priority: "medium" });
@@ -757,10 +788,27 @@ function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: 
   return (
     <Modal open={open} onClose={onClose} title="Importer des maintenances">
       <div className="grid gap-4">
-        <p className="text-sm text-[var(--muted-foreground)]">Importez un fichier Excel (.xlsx, .xls, .xlsm, .xlsb), XML Spreadsheet, CSV ou ODS. L'une des 20 premières lignes doit contenir <strong>Date</strong>, <strong>Tâche</strong> et <strong>Kilométrage</strong>. Chaque ligne valide créera une maintenance à faire pour ce véhicule.</p>
+        <p className="text-sm text-[var(--muted-foreground)]">Importez un fichier Excel (.xlsx, .xls, .xlsm, .xlsb), XML Spreadsheet, CSV ou ODS. Vous choisirez ensuite les colonnes à importer.</p>
         <input type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.xml,.csv,.ods,application/vnd.ms-excel,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.ms-excel.sheet.binary.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/xml" onChange={selectFile} className="block w-full text-sm text-[var(--muted-foreground)] file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600" />
         {loading ? <p className="text-sm text-[var(--muted-foreground)]">Lecture du fichier…</p> : null}
         {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">{error}</p> : null}
+        {spreadsheet ? <div className="grid gap-3 rounded-xl border border-[var(--border)] bg-[var(--accent)] p-4">
+          <p className="text-sm font-semibold">Associer les colonnes détectées</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {([
+              ["title", "Nom de la maintenance"],
+              ["date", "Date de maintenance"],
+              ["odometer", "Kilométrage"],
+            ] as const).map(([field, label]) => <Field key={field} label={label} required>
+              <Select value={mapping[field] === "" ? "" : String(mapping[field])} onChange={(event) => setMapping((current) => ({ ...current, [field]: event.target.value === "" ? "" : Number(event.target.value) }))}>
+                <option value="">Choisir une colonne</option>
+                {spreadsheet.columns.map((column) => <option key={column.index} value={column.index}>{column.label}</option>)}
+              </Select>
+            </Field>)}
+          </div>
+          <p className="text-xs text-[var(--muted-foreground)]">{spreadsheet.columns.length} colonne{spreadsheet.columns.length > 1 ? "s" : ""} détectée{spreadsheet.columns.length > 1 ? "s" : ""} · {spreadsheet.rows.length} ligne{spreadsheet.rows.length > 1 ? "s" : ""} de données</p>
+        </div> : null}
+        {spreadsheet && preview.error ? <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{preview.error}</p> : null}
         {rows.length ? <>
           <div className="rounded-xl border border-[var(--border)]">
             <div className="border-b border-[var(--border)] px-3 py-2 text-sm font-semibold">{rows.length} maintenance{rows.length > 1 ? "s" : ""} prête{rows.length > 1 ? "s" : ""} à importer{skipped ? ` · ${skipped} ligne${skipped > 1 ? "s" : ""} ignorée${skipped > 1 ? "s" : ""}` : ""}</div>
@@ -769,7 +817,7 @@ function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: 
               {rows.length > 10 ? <p className="px-3 py-2 text-[var(--muted-foreground)]">… et {rows.length - 10} autre{rows.length - 10 > 1 ? "s" : ""}</p> : null}
             </div>
           </div>
-          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Annuler</Button><Button onClick={importRows} disabled={importing}>{importing ? "Import en cours…" : `Importer ${rows.length} maintenance${rows.length > 1 ? "s" : ""}`}</Button></div>
+          <div className="flex justify-end gap-2"><Button variant="ghost" onClick={onClose}>Annuler</Button><Button onClick={importRows} disabled={importing || Boolean(preview.error)}>{importing ? "Import en cours…" : `Importer ${rows.length} maintenance${rows.length > 1 ? "s" : ""}`}</Button></div>
         </> : null}
       </div>
     </Modal>
