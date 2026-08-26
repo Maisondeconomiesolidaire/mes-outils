@@ -1903,6 +1903,9 @@ function MaintenanceDetailsModal({
    *  quand on tente de clôturer une tâche sans en avoir saisi le coût. */
   initialEditing?: boolean;
 }) {
+  const access = usePermissionsAccess();
+  const canDelete = canAccess(access, "mesoutils:gotravaux", "delete");
+  const removeTask = useMutation(api.gotravaux.removeVehicleTask);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
@@ -2008,6 +2011,20 @@ function MaintenanceDetailsModal({
       setEditing(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Enregistrement impossible.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeWithConfirmation() {
+    if (!(await confirmPermanentDelete(`Supprimer définitivement la maintenance « ${currentTask.title} » ? Cette action est irréversible.`))) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await removeTask({ taskId: currentTask._id });
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Suppression impossible.");
     } finally {
       setSaving(false);
     }
@@ -2261,6 +2278,11 @@ function MaintenanceDetailsModal({
 
           <div className="mt-auto flex flex-wrap justify-end gap-2 border-t border-[var(--border)] pt-4">
             <Button variant="ghost" onClick={onClose}>Fermer</Button>
+            {canDelete ? (
+              <Button variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-500/10" onClick={() => void removeWithConfirmation()} disabled={saving}>
+                <Trash2 className="h-4 w-4" />Supprimer définitivement
+              </Button>
+            ) : null}
             {canEdit && editing ? (
               <Button onClick={() => void save()} disabled={saving || !title.trim()}>
                 {saving ? "Enregistrement..." : "Enregistrer"}

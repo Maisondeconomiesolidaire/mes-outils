@@ -482,6 +482,17 @@ export const updateVehicleTask = mutation({
   },
 });
 
+/** Supprime définitivement une maintenance, après confirmation côté interface. */
+export const removeVehicleTask = mutation({
+  args: { taskId: v.id("vehicleMaintenanceTasks") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "delete");
+    const task = await ctx.db.get(args.taskId);
+    if (!task) throw new Error("Maintenance introuvable.");
+    await ctx.db.delete(args.taskId);
+  },
+});
+
 /* ─── Services planifiés avec véhicule affecté (calendrier flotte) ─────────── */
 
 /** Adresse pertinente où le véhicule se rend pour un service donné. */
