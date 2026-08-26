@@ -7,6 +7,7 @@ import {
   mutation,
   query,
   type MutationCtx,
+  type QueryCtx,
 } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { accessAllows, customerFullName, requireCrmPermission } from "./lib";
@@ -275,6 +276,7 @@ export const createTournee = mutation({
     label: v.string(),
     date: v.number(),
     driverId: v.optional(v.id("teamMembers")),
+    driverWorkerId: v.optional(v.id("polyvalentWorkers")),
     fleetVehicleId: v.optional(v.id("vehicles")),
     stops: v.array(tourneeStopValidator),
     notes: v.optional(v.string()),
@@ -723,6 +725,22 @@ export const getPublicTrackingByToken = query({
   },
 });
 
+/** Nom du chauffeur, quelle que soit l'équipe d'origine (nouvelle ou ancienne). */
+async function tourneeDriverName(
+  ctx: QueryCtx,
+  tournee: Pick<Doc<"tournees">, "driverWorkerId" | "driverId">,
+): Promise<string | null> {
+  if (tournee.driverWorkerId) {
+    const worker = await ctx.db.get(tournee.driverWorkerId);
+    if (worker) return `${worker.firstName} ${worker.lastName}`.trim() || null;
+  }
+  if (tournee.driverId) {
+    const member = await ctx.db.get(tournee.driverId);
+    if (member) return member.name ?? null;
+  }
+  return null;
+}
+
 export const listTournees = query({
   args: { startDate: v.number(), endDate: v.number() },
   handler: async (ctx, { startDate, endDate }) => {
@@ -734,7 +752,7 @@ export const listTournees = query({
       .collect();
     return await Promise.all(
       tournees.map(async (t) => {
-        const driver = t.driverId ? await ctx.db.get(t.driverId) : null;
+        const driverName = await tourneeDriverName(ctx, t);
         const vehicle = t.fleetVehicleId ? await ctx.db.get(t.fleetVehicleId) : null;
         const stops = await Promise.all(
           t.stops.map(async (stop) => {
@@ -753,7 +771,7 @@ export const listTournees = query({
         return {
           ...rest,
           stops,
-          driverName: driver?.name ?? null,
+          driverName,
           vehicleName: vehicle?.name ?? null,
         };
       }),
@@ -767,7 +785,7 @@ export const getTournee = query({
     await requireCrmPermission(ctx, "tournees", "read");
     const tournee = await ctx.db.get(tourneeId);
     if (!tournee) return null;
-    const driver = tournee.driverId ? await ctx.db.get(tournee.driverId) : null;
+    const driverName = await tourneeDriverName(ctx, tournee);
     const fleetVehicle = tournee.fleetVehicleId
       ? await ctx.db.get(tournee.fleetVehicleId)
       : null;
@@ -787,7 +805,7 @@ export const getTournee = query({
     return {
       ...tournee,
       stops,
-      driverName: driver?.name ?? null,
+      driverName,
       vehicleName: fleetVehicle?.name ?? null,
       vehicleLocation: vehicleLocation
         ? {

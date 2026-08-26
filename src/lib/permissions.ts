@@ -200,16 +200,9 @@ export const RECYCAPP_PAGES: PermissionPage[] = [
   },
   {
     app: "recycapp",
-    key: "equipe",
-    label: "Agents permanents",
-    description: "Gestion des agents permanents (salariés).",
-    actions: ["read", "create", "update", "delete"],
-  },
-  {
-    app: "recycapp",
     key: "agents-polyvalents",
-    label: "Agents polyvalents",
-    description: "Ouvriers polyvalents : tâches, ouvriers et planning d'activités.",
+    label: "Tâches & équipe",
+    description: "Équipe de la Recyclerie : salariés, tâches et planning d'activités.",
     actions: ["read", "create", "update", "delete"],
   },
   {
@@ -326,6 +319,13 @@ export const KLYDE_PAGES: PermissionPage[] = [
 ];
 
 export const CYCLEENBRAY_PAGES: PermissionPage[] = [
+  {
+    app: "cycleenbray",
+    key: "equipe",
+    label: "Équipe Cycle en Bray",
+    description: "Salariés attribuables aux demandes et tournées Cycle en Bray.",
+    actions: ["read", "create", "update", "delete"],
+  },
   {
     app: "cycleenbray",
     key: "cycle:stock",

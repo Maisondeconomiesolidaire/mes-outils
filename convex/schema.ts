@@ -1163,6 +1163,8 @@ export default defineSchema(
     // Véhicule de la flotte affecté à la tournée.
     fleetVehicleId: v.optional(v.id("vehicles")),
     driverId: v.optional(v.id("teamMembers")),
+    /** Chauffeur issu de l'équipe opérationnelle (remplace `driverId`). */
+    driverWorkerId: v.optional(v.id("polyvalentWorkers")),
     stops: v.array(v.object({
       requestId: v.optional(v.id("requests")),
       address: v.string(),
@@ -2435,7 +2437,8 @@ export default defineSchema(
   /* ─── Agents polyvalents (Recyclerie) ─────────────────────────────────────
    * Gestion des ouvriers polyvalents : un catalogue de tâches, une liste
    * d'ouvriers (nom/prénom), et des activités qui affectent un ouvrier à une
-   * tâche sur un créneau daté. Distinct de `teamMembers` (agents permanents). */
+   * tâche sur un créneau daté. `polyvalentWorkers` est désormais l'unique
+   * équipe Recyclerie (les anciens « agents permanents » y ont été fusionnés). */
   polyvalentTasks: defineTable({
     name: v.string(),
     createdBy: v.string(),
@@ -2445,6 +2448,13 @@ export default defineSchema(
   polyvalentWorkers: defineTable({
     firstName: v.string(),
     lastName: v.string(),
+    email: v.optional(v.string()),
+    /** Recycleries de rattachement : un salarié peut intervenir sur les deux. */
+    sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
+    /** Type de contrat : agent permanent ou agent polyvalent. */
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
+    /** Inactif = conservé pour l'historique mais plus attribuable. */
+    active: v.optional(v.boolean()),
     createdBy: v.string(),
     createdAt: v.number(),
   }),

@@ -1,6 +1,7 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { formatUserName, requireCrmPermission, requireUser } from "./lib";
+import type { Doc } from "./_generated/dataModel";
+import { formatUserName, requireCrmPermission, requireStaff, requireUser } from "./lib";
 
 /**
  * Agents polyvalents (Recyclerie) — gestion des ouvriers polyvalents.
@@ -76,41 +77,145 @@ export const listWorkers = query({
   },
 });
 
-/** Rattache une seule fois les anciennes affectations d'équipe aux agents du planning. */
+/**
+ * Reprise unique de l'ancienne équipe (`teamMembers`, « agents permanents ») :
+ * rattache les demandes attribuées aux agents du planning portant les mêmes
+ * nom et prénom, et complète leur fiche (email, recycleries, type de contrat).
+ */
+async function migrateLegacyTeam(ctx: MutationCtx) {
+  const [workers, legacy, requests] = await Promise.all([
+    ctx.db.query("polyvalentWorkers").take(500),
+    ctx.db.query("teamMembers").take(500),
+    ctx.db.query("requests").take(1000),
+  ]);
+  const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  /** Les deux ordres (« Jean Dupont » / « Dupont Jean ») pointent vers le même agent. */
+  const workerByName = new Map<string, Doc<"polyvalentWorkers">>();
+  for (const worker of workers) {
+    workerByName.set(normalize(`${worker.firstName} ${worker.lastName}`), worker);
+    workerByName.set(normalize(`${worker.lastName} ${worker.firstName}`), worker);
+  }
+  const legacySites = (member: Doc<"teamMembers">) =>
+    member.sites?.length ? member.sites : member.site ? [member.site] : undefined;
+
+  // 1. Les anciens salariés sans homonyme dans l'équipe y sont recréés : la
+  //    bascule ne doit perdre personne.
+  let created = 0;
+  for (const member of legacy) {
+    if (workerByName.has(normalize(member.name))) continue;
+    const parts = member.name.trim().split(/\s+/);
+    const firstName = parts.shift() ?? member.name.trim();
+    const lastName = parts.join(" ");
+    const id = await ctx.db.insert("polyvalentWorkers", {
+      firstName,
+      lastName,
+      email: member.email,
+      sites: legacySites(member),
+      employmentType: member.employmentType ?? "permanent",
+      active: member.active,
+      createdBy: "Reprise agents permanents",
+      createdAt: member.createdAt,
+    });
+    const worker = (await ctx.db.get(id))!;
+    workerByName.set(normalize(`${firstName} ${lastName}`), worker);
+    workerByName.set(normalize(`${lastName} ${firstName}`), worker);
+    created++;
+  }
+
+  // 2. Les demandes attribuées à l'ancienne équipe pointent vers le nouvel agent.
+  const legacyById = new Map(legacy.map((member) => [String(member._id), member]));
+  let migrated = 0;
+  for (const request of requests) {
+    if (request.assignedWorkerId || !request.assignedTo) continue;
+    const member = legacyById.get(String(request.assignedTo));
+    const worker = member ? workerByName.get(normalize(member.name)) : undefined;
+    if (worker) { await ctx.db.patch(request._id, { assignedWorkerId: worker._id }); migrated++; }
+  }
+
+  // 3. Reprise des fiches : on ne remplit que les champs encore vides côté agent.
+  let enriched = 0;
+  for (const member of legacy) {
+    const worker = workerByName.get(normalize(member.name));
+    if (!worker) continue;
+    const patch: Record<string, unknown> = {};
+    if (!worker.email && member.email) patch.email = member.email;
+    if (!worker.sites?.length && legacySites(member)) patch.sites = legacySites(member);
+    // Tout l'ancien annuaire était constitué d'agents permanents : à défaut de
+    // type stocké côté legacy, c'est celui-là qu'on reprend.
+    if (!worker.employmentType) patch.employmentType = member.employmentType ?? "permanent";
+    if (worker.active === undefined) patch.active = member.active;
+    if (Object.keys(patch).length) { await ctx.db.patch(worker._id, patch); enriched++; }
+  }
+  return { created, migrated, enriched };
+}
+
 export const migrateLegacyAssignments = mutation({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
-    const [workers, legacy, requests] = await Promise.all([
-      ctx.db.query("polyvalentWorkers").take(500),
-      ctx.db.query("teamMembers").take(500),
-      ctx.db.query("requests").take(1000),
-    ]);
-    const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
-    const workerByName = new Map(workers.map((worker) => [normalize(`${worker.firstName} ${worker.lastName}`), worker._id]));
-    const legacyById = new Map(legacy.map((member) => [String(member._id), member]));
-    let migrated = 0;
-    for (const request of requests) {
-      if (request.assignedWorkerId || !request.assignedTo) continue;
-      const member = legacyById.get(String(request.assignedTo));
-      const workerId = member ? workerByName.get(normalize(member.name)) : undefined;
-      if (workerId) { await ctx.db.patch(request._id, { assignedWorkerId: workerId }); migrated++; }
-    }
-    return { migrated };
+    return await migrateLegacyTeam(ctx);
   },
 });
 
+/**
+ * Personas (équipe active) pour la sélection sur le compte partagé accueil.
+ * Accessible à tout staff, sans droit `agents-polyvalents`.
+ */
+export const listPersonas = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    const workers = await ctx.db.query("polyvalentWorkers").take(500);
+    return workers
+      .filter((worker) => worker.active !== false)
+      .map((worker) => ({
+        _id: worker._id,
+        name: `${worker.firstName} ${worker.lastName}`.trim(),
+        role: worker.employmentType === "permanent" ? "Agent permanent" : "Agent polyvalent",
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  },
+});
+
+const workerSites = v.array(v.union(v.literal("60"), v.literal("76")));
+const workerEmploymentType = v.union(v.literal("permanent"), v.literal("polyvalent"));
+
+/** Champs de fiche partagés par la création et la modification d'un salarié. */
+function workerProfile(args: {
+  firstName: string;
+  lastName: string;
+  email?: string;
+  sites?: ("60" | "76")[];
+  employmentType?: "permanent" | "polyvalent";
+}) {
+  const firstName = args.firstName.trim();
+  const lastName = args.lastName.trim();
+  if (!firstName && !lastName) throw new Error("Le nom du salarié est requis.");
+  const email = args.email?.trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("L'adresse email est invalide.");
+  return {
+    firstName,
+    lastName,
+    email: email || undefined,
+    sites: args.sites?.length ? args.sites : undefined,
+    employmentType: args.employmentType,
+  };
+}
+
 export const createWorker = mutation({
-  args: { firstName: v.string(), lastName: v.string() },
+  args: {
+    firstName: v.string(),
+    lastName: v.string(),
+    email: v.optional(v.string()),
+    sites: v.optional(workerSites),
+    employmentType: v.optional(workerEmploymentType),
+  },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
     const identity = await requireUser(ctx);
-    const firstName = args.firstName.trim();
-    const lastName = args.lastName.trim();
-    if (!firstName && !lastName) throw new Error("Le nom de l'ouvrier est requis.");
     return await ctx.db.insert("polyvalentWorkers", {
-      firstName,
-      lastName,
+      ...workerProfile(args),
+      active: true,
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
@@ -118,13 +223,21 @@ export const createWorker = mutation({
 });
 
 export const updateWorker = mutation({
-  args: { id: v.id("polyvalentWorkers"), firstName: v.string(), lastName: v.string() },
+  args: {
+    id: v.id("polyvalentWorkers"),
+    firstName: v.string(),
+    lastName: v.string(),
+    email: v.optional(v.string()),
+    sites: v.optional(workerSites),
+    employmentType: v.optional(workerEmploymentType),
+    active: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
-    const firstName = args.firstName.trim();
-    const lastName = args.lastName.trim();
-    if (!firstName && !lastName) throw new Error("Le nom de l'ouvrier est requis.");
-    await ctx.db.patch(args.id, { firstName, lastName });
+    await ctx.db.patch(args.id, {
+      ...workerProfile(args),
+      active: args.active ?? true,
+    });
   },
 });
 

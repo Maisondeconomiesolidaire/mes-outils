@@ -70,15 +70,17 @@ export const snapshot = query({
     await requireCrmPermission(ctx, "demandes", "read");
     const [requests, team] = await Promise.all([
       ctx.db.query("requests").order("desc").collect(),
-      ctx.db.query("teamMembers").order("desc").collect(),
+      ctx.db.query("polyvalentWorkers").take(500),
     ]);
-    const teamNames = new Map(team.map((member) => [String(member._id), member.name]));
+    const teamNames = new Map(
+      team.map((worker) => [String(worker._id), `${worker.firstName} ${worker.lastName}`.trim()]),
+    );
 
     return {
       generatedAt: Date.now(),
-      team: team.map((member) => ({
-        id: String(member._id),
-        name: member.name,
+      team: team.map((worker) => ({
+        id: String(worker._id),
+        name: teamNames.get(String(worker._id)) ?? "",
       })),
       requests: requests.map((request) => ({
         id: String(request._id),
@@ -90,8 +92,8 @@ export const snapshot = query({
         outcome: request.outcome,
         complete: request.complete,
         scheduledDate: request.scheduledDate ?? null,
-        assignedTo: request.assignedTo ? String(request.assignedTo) : null,
-        assignedName: request.assignedTo ? teamNames.get(String(request.assignedTo)) ?? null : null,
+        assignedTo: request.assignedWorkerId ? String(request.assignedWorkerId) : null,
+        assignedName: request.assignedWorkerId ? teamNames.get(String(request.assignedWorkerId)) ?? null : null,
         site: request.site ?? null,
         city: request.customer.city ?? null,
         postalCode: request.customer.postalCode ?? null,
