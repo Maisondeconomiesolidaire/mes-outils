@@ -1324,6 +1324,9 @@ export const finalizePaymentLink = internalMutation({
         completedSteps: progress.completedSteps,
         updatedAt: now,
       });
+      if (progress.outcome === "gagnee" && request.outcome !== "gagnee") {
+        await scheduleReviewInvite(ctx, request);
+      }
     } else {
       // Lien généré depuis un article : on crée la demande boutique payée.
       const linkCustomer = normalizeCustomer(
@@ -1688,6 +1691,28 @@ export const get = query({
   },
 });
 
+/**
+ * Invitation à noter la Recyclerie sur Google, à l'issue d'une demande gagnée.
+ *
+ * Envoyée une seule fois par demande (`reviewInviteSentAt`) : une demande
+ * rouverte puis re-soldée ne relance pas le client. Sans email client, il n'y
+ * a rien à envoyer. Le lien dépend du site de traitement, la Recyclerie 60
+ * servant de défaut quand il n'est pas renseigné.
+ */
+async function scheduleReviewInvite(ctx: MutationCtx, request: Doc<"requests">) {
+  if (request.reviewInviteSentAt) return;
+  const email = request.customer.email?.trim();
+  if (!email) return;
+  await ctx.db.patch(request._id, { reviewInviteSentAt: Date.now() });
+  await ctx.scheduler.runAfter(0, internal.emails.sendReviewInvite, {
+    email,
+    name: customerFullName(request.customer) || "à vous",
+    reference: request.reference ?? String(request._id).slice(-6),
+    type: request.type,
+    site: request.site ?? "60",
+  });
+}
+
 export const setOutcome = mutation({
   args: {
     id: v.id("requests"),
@@ -1710,6 +1735,9 @@ export const setOutcome = mutation({
         outcome === "perdue" ? (lostReasonDetails ?? undefined) : undefined,
       updatedAt: Date.now(),
     });
+    if (outcome === "gagnee" && request.outcome !== "gagnee") {
+      await scheduleReviewInvite(ctx, request);
+    }
     if (request.type === "article") {
       const articleStatus =
         outcome === "gagnee"
@@ -2161,6 +2189,9 @@ export const advanceProcess = mutation({
       outcome: done ? "gagnee" : "open",
       updatedAt: Date.now(),
     });
+    if (done && r.outcome !== "gagnee") {
+      await scheduleReviewInvite(ctx, r);
+    }
     if (done && r.type === "article") {
       for (const articleId of requestArticleIds(r)) {
         await ctx.db.patch(articleId, { status: "vendu" });

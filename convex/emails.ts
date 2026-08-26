@@ -807,3 +807,50 @@ export const sendInvoicePendingDigest = internalAction({
     );
   },
 });
+
+// ─── Avis Google ─────────────────────────────────────────────────────────────
+
+/**
+ * Fiche Google à noter, par site de traitement. Une demande sans site part sur
+ * la Recyclerie 60 : c'est le site principal, et un lien vaut mieux qu'aucun.
+ */
+const GOOGLE_REVIEW_LINKS: Record<string, { url: string; label: string }> = {
+  "60": { url: "https://share.google/6Vi8FRjpkRx6dSek6", label: "Recyclerie du Pays de Bray (60)" },
+  "76": { url: "https://share.google/1entOnue5Ej2HWcCt", label: "Recyclerie de Gournay en Bray (76)" },
+};
+
+/** Invitation à laisser un avis Google, envoyée une fois la demande gagnée. */
+export const sendReviewInvite = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    reference: v.string(),
+    type: v.string(),
+    site: v.optional(v.string()),
+  },
+  handler: async (_ctx, { email, name, reference, type, site }) => {
+    const label = typeLabel(type);
+    const review = GOOGLE_REVIEW_LINKS[site ?? "60"] ?? GOOGLE_REVIEW_LINKS["60"];
+    const stars = "★★★★★";
+    const html = shell({
+      preheader: `Votre demande ${label} #${reference} est terminée : donnez-nous votre avis en une minute.`,
+      heading: "Merci de votre confiance 🙌",
+      intro: `Bonjour ${esc(name)},<br/><br/>Votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>) est terminée. Nous espérons que tout s'est bien passé !`,
+      contentHtml: `
+        <div style="margin:0 0 22px;padding:18px;background:linear-gradient(135deg,#fff7ef,#ffe9d6);border:1px solid #ffe0c4;border-radius:14px;text-align:center;">
+          <p style="margin:0 0 6px;font-family:Helvetica,Arial,sans-serif;font-size:26px;letter-spacing:3px;color:#f59e0b;">${stars}</p>
+          <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:23px;color:#3f3f46;">
+            Votre avis nous aide à faire connaître la ${esc(review.label)} et à nous améliorer. Cela prend moins d'une minute.
+          </p>
+        </div>
+        <div style="margin:0 0 22px;">${button(review.url, "Laisser un avis Google")}</div>
+        <p style="margin:0 0 22px;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:21px;color:#71717a;">
+          Un souci à nous signaler plutôt qu'un avis ? Répondez-nous depuis votre messagerie : nous reprenons contact avec vous.
+        </p>
+        <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#71717a;">Accès rapides :</p>
+        ${quickLinks()}
+      `,
+    });
+    await resendSend(email, `Votre avis compte · ${label} #${reference}`, html);
+  },
+});

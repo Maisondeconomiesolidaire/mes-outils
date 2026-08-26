@@ -580,6 +580,8 @@ export default defineSchema(
     createdAt: v.number(),
     updatedAt: v.number(),
     reference: v.optional(v.string()),
+    /** Envoi de l'invitation à noter la Recyclerie sur Google (une seule fois). */
+    reviewInviteSentAt: v.optional(v.number()),
     visitNeeded: v.optional(v.boolean()),
     legacyImport: v.optional(
       v.object({
