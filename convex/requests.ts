@@ -1939,6 +1939,7 @@ export const patchManagement = mutation({
     id: v.id("requests"),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     assignedTo: v.optional(v.union(v.id("teamMembers"), v.null())),
+    assignedWorkerId: v.optional(v.union(v.id("polyvalentWorkers"), v.null())),
     estimatedHours: v.optional(v.union(v.number(), v.null())),
     actualHours: v.optional(v.union(v.number(), v.null())),
     quoteAmount: v.optional(v.union(v.number(), v.null())),
@@ -1967,6 +1968,9 @@ export const patchManagement = mutation({
         request.assignedTo,
         args.assignedTo ?? undefined,
       );
+    }
+    if (args.assignedWorkerId !== undefined) {
+      setPatchIfChanged(patch, changed, "assignedWorkerId", request.assignedWorkerId, args.assignedWorkerId ?? undefined);
     }
     if (args.assignedVehicle !== undefined) {
       if (args.assignedVehicle) {
@@ -2676,4 +2680,3 @@ export const sendPendingInvoicesDigest = internalAction({
     return { count: requests.length };
   },
 });
-

@@ -76,6 +76,30 @@ export const listWorkers = query({
   },
 });
 
+/** Rattache une seule fois les anciennes affectations d'équipe aux agents du planning. */
+export const migrateLegacyAssignments = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    const [workers, legacy, requests] = await Promise.all([
+      ctx.db.query("polyvalentWorkers").take(500),
+      ctx.db.query("teamMembers").take(500),
+      ctx.db.query("requests").take(1000),
+    ]);
+    const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const workerByName = new Map(workers.map((worker) => [normalize(`${worker.firstName} ${worker.lastName}`), worker._id]));
+    const legacyById = new Map(legacy.map((member) => [String(member._id), member]));
+    let migrated = 0;
+    for (const request of requests) {
+      if (request.assignedWorkerId || !request.assignedTo) continue;
+      const member = legacyById.get(String(request.assignedTo));
+      const workerId = member ? workerByName.get(normalize(member.name)) : undefined;
+      if (workerId) { await ctx.db.patch(request._id, { assignedWorkerId: workerId }); migrated++; }
+    }
+    return { migrated };
+  },
+});
+
 export const createWorker = mutation({
   args: { firstName: v.string(), lastName: v.string() },
   handler: async (ctx, args) => {

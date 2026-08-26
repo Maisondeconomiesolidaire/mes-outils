@@ -551,6 +551,8 @@ export default defineSchema(
     // --- Gestion interne (onglet Gestion du CRM) ---
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     assignedTo: v.optional(v.id("teamMembers")),
+    /** Équipe opérationnelle Recyclerie (remplace progressivement assignedTo). */
+    assignedWorkerId: v.optional(v.id("polyvalentWorkers")),
     estimatedHours: v.optional(v.number()),
     actualHours: v.optional(v.number()),
     quoteAmount: v.optional(v.number()),
@@ -597,6 +599,7 @@ export default defineSchema(
     .index("by_userId", ["userId"])
     .index("by_scheduledDate", ["scheduledDate"])
     .index("by_assignedVehicle", ["assignedVehicle"])
+    .index("by_assignedWorkerId", ["assignedWorkerId"])
     .index("by_reference", ["reference"]),
 
   /**
