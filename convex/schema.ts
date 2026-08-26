@@ -1798,10 +1798,16 @@ export default defineSchema(
     aiNotes: v.optional(v.string()),
     trackingNotes: v.optional(v.string()),
     featured: v.optional(v.boolean()),
+    /**
+     * Mise aux archives : l'article sort du stock, de la boutique et des
+     * rapports, mais garde son statut pour pouvoir être remis en ligne.
+     */
+    archivedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
     .index("by_status", ["status"])
+    .index("by_archivedAt", ["archivedAt"])
     .index("by_createdAt", ["createdAt"])
     .index("by_sku", ["sku"])
     .index("by_boutiquePublished", ["publishedOnBoutique"])

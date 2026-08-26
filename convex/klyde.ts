@@ -252,16 +252,21 @@ export const list = query({
   args: {
     searchText: v.optional(v.string()),
     status: v.optional(itemStatus),
+    /** `true` = uniquement les archives ; par défaut elles sont exclues. */
+    archived: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, "klyde:stock", "read");
-    const items = args.status
+    const all = args.status
       ? await ctx.db
           .query("klydeItems")
           .withIndex("by_status", (q) => q.eq("status", args.status!))
           .order("desc")
           .collect()
       : await ctx.db.query("klydeItems").order("desc").collect();
+    const items = all.filter((item) =>
+      args.archived ? item.archivedAt !== undefined : item.archivedAt === undefined,
+    );
 
     const search = args.searchText?.trim().toLowerCase();
     const filtered = search
@@ -312,7 +317,7 @@ export const listPublic = query({
       if (args.subcategory && nfc(item.subcategory) !== nfc(args.subcategory)) return false;
       if (args.gender && item.gender !== args.gender) return false;
       if (args.size && item.size !== args.size) return false;
-      if (!item.publishedOnBoutique || item.price == null) return false;
+      if (!item.publishedOnBoutique || item.price == null || item.archivedAt) return false;
       if (!search) return true;
       return [
         item.title,
@@ -384,7 +389,7 @@ export const getFeatured = query({
       .withIndex("by_featured", (q) => q.eq("featured", true))
       .collect();
     const online = featured.find(
-      (item) => item.publishedOnBoutique && item.price != null,
+      (item) => item.publishedOnBoutique && item.price != null && !item.archivedAt,
     );
     if (!online) return null;
     return await withPhotoUrls(ctx, online);
@@ -395,7 +400,7 @@ export const getPublic = query({
   args: { id: v.id("klydeItems") },
   handler: async (ctx, { id }) => {
     const item = await ctx.db.get(id);
-    if (!item || !item.publishedOnBoutique || item.price == null) return null;
+    if (!item || !item.publishedOnBoutique || item.price == null || item.archivedAt) return null;
     return await withPhotoUrls(ctx, item);
   },
 });
@@ -407,7 +412,7 @@ export const getManyPublic = query({
     const items = await Promise.all(uniqueIds.map((id) => ctx.db.get(id)));
     return Promise.all(
       items
-        .filter((item): item is Doc<"klydeItems"> => Boolean(item?.publishedOnBoutique && item.price != null))
+        .filter((item): item is Doc<"klydeItems"> => Boolean(item?.publishedOnBoutique && item.price != null && !item.archivedAt))
         .map((item) => withPhotoUrls(ctx, item)),
     );
   },
@@ -422,7 +427,7 @@ export const latestByCategory = query({
       .order("desc")
       .take(80);
     const filtered = items
-      .filter((item) => item.publishedOnBoutique && item.category === category && item.price != null)
+      .filter((item) => item.publishedOnBoutique && item.category === category && item.price != null && !item.archivedAt)
       .slice(0, Math.min(limit ?? 4, 8));
     return Promise.all(filtered.map((item) => withPhotoUrls(ctx, item)));
   },
@@ -856,6 +861,30 @@ export const update = mutation({
   },
 });
 
+/**
+ * Mise aux archives, et retour.
+ *
+ * L'article garde son statut : archiver n'est pas une étape du workflow de
+ * vente mais une mise de côté, réversible depuis la page Archives. Un article
+ * archivé quitte la boutique et le stock — le laisser publié le maintiendrait
+ * en vente. Les rapports de ventes, eux, gardent l'historique : archiver un
+ * article vendu ne doit pas réécrire un chiffre d'affaires déjà encaissé.
+ */
+export const setArchived = mutation({
+  args: { id: v.id("klydeItems"), archived: v.boolean() },
+  handler: async (ctx, { id, archived }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    await ctx.db.patch(id, {
+      archivedAt: archived ? Date.now() : undefined,
+      publishedOnBoutique: archived ? false : item.publishedOnBoutique,
+      featured: archived ? undefined : item.featured,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const remove = mutation({
   args: { id: v.id("klydeItems") },
   handler: async (ctx, { id }) => {
@@ -1197,6 +1226,7 @@ export const listVintedAlertCandidates = internalQuery({
           item.vintedAt <= cutoff &&
           item.status !== "gagne" &&
           item.status !== "archive" &&
+          item.archivedAt === undefined &&
           item.vintedAlertSentAt == null,
       )
       .map((item) => ({
