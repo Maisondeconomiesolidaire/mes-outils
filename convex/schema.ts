@@ -2441,6 +2441,10 @@ export default defineSchema(
    * équipe Recyclerie (les anciens « agents permanents » y ont été fusionnés). */
   polyvalentTasks: defineTable({
     name: v.string(),
+    /** Site de traitement : une tâche appartient à une recyclerie. */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
+    /** Main d'œuvre requise par mois, en heures (base du plan de charge). */
+    requiredMonthlyHours: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
   }).index("by_name", ["name"]),
@@ -2481,9 +2485,9 @@ export default defineSchema(
     taskId: v.id("polyvalentTasks"),
     workerId: v.optional(v.id("polyvalentWorkers")),
     slots: v.array(v.object({ weekday: v.number(), start: v.string(), end: v.string() })),
-    /** Charge hebdomadaire annoncée ; à défaut, la durée des créneaux fait foi. */
+    /** @deprecated La charge d'un créneau est la durée du créneau. */
     plannedHours: v.optional(v.number()),
-    /** Recyclerie qui porte la charge (à défaut, celle du salarié affecté). */
+    /** @deprecated La recyclerie vient désormais de la tâche. */
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     createdBy: v.string(),
     createdAt: v.number(),
@@ -2498,9 +2502,9 @@ export default defineSchema(
     /** Début et fin du créneau, en millisecondes epoch (date + heure). */
     startAt: v.number(),
     endAt: v.number(),
-    /** Charge annoncée en heures ; à défaut, la durée du créneau fait foi. */
+    /** @deprecated La charge d'un créneau est la durée du créneau. */
     plannedHours: v.optional(v.number()),
-    /** Recyclerie qui porte la charge (à défaut, celle du salarié affecté). */
+    /** @deprecated La recyclerie vient désormais de la tâche. */
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     createdBy: v.string(),
     createdAt: v.number(),

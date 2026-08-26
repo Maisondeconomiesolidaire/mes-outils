@@ -22,15 +22,30 @@ export const listTasks = query({
   },
 });
 
+const taskSite = v.union(v.literal("60"), v.literal("76"));
+
+/** Nom, site de traitement et main d'œuvre requise : la fiche d'une tâche. */
+function taskProfile(args: { name: string; site?: "60" | "76"; requiredMonthlyHours?: number }) {
+  const name = args.name.trim();
+  if (!name) throw new Error("Le nom de la tâche est requis.");
+  const hours = args.requiredMonthlyHours;
+  if (hours !== undefined && (!Number.isFinite(hours) || hours <= 0)) {
+    throw new Error("Les heures requises doivent être un nombre positif.");
+  }
+  return { name, site: args.site, requiredMonthlyHours: hours };
+}
+
 export const createTask = mutation({
-  args: { name: v.string() },
+  args: {
+    name: v.string(),
+    site: v.optional(taskSite),
+    requiredMonthlyHours: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
     const identity = await requireUser(ctx);
-    const name = args.name.trim();
-    if (!name) throw new Error("Le nom de la tâche est requis.");
     return await ctx.db.insert("polyvalentTasks", {
-      name,
+      ...taskProfile(args),
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
@@ -38,12 +53,15 @@ export const createTask = mutation({
 });
 
 export const updateTask = mutation({
-  args: { id: v.id("polyvalentTasks"), name: v.string() },
+  args: {
+    id: v.id("polyvalentTasks"),
+    name: v.string(),
+    site: v.optional(taskSite),
+    requiredMonthlyHours: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
-    const name = args.name.trim();
-    if (!name) throw new Error("Le nom de la tâche est requis.");
-    await ctx.db.patch(args.id, { name });
+    await ctx.db.patch(args.id, taskProfile(args));
   },
 });
 
@@ -304,8 +322,6 @@ export const setWorkerSchedule = mutation({
   },
 });
 
-const activitySite = v.union(v.literal("60"), v.literal("76"));
-
 const recurrenceSlotsValidator = v.array(v.object({ weekday: v.number(), start: v.string(), end: v.string() }));
 
 export const listRecurrences = query({
@@ -322,6 +338,7 @@ export const listRecurrences = query({
     return recurrences.map((recurrence) => ({
       ...recurrence,
       taskName: taskById.get(String(recurrence.taskId))?.name ?? "Tâche supprimée",
+      taskSite: taskById.get(String(recurrence.taskId))?.site ?? null,
       workerName: recurrence.workerId ? `${workerById.get(String(recurrence.workerId))?.firstName ?? ""} ${workerById.get(String(recurrence.workerId))?.lastName ?? ""}`.trim() || "Salarié supprimé" : "Aucun salarié affecté",
     }));
   },
@@ -332,8 +349,6 @@ export const createRecurrence = mutation({
     taskId: v.id("polyvalentTasks"),
     workerId: v.optional(v.id("polyvalentWorkers")),
     slots: recurrenceSlotsValidator,
-    plannedHours: v.optional(v.number()),
-    site: v.optional(activitySite),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -349,7 +364,6 @@ export const createRecurrence = mutation({
     if (args.workerId && !worker) throw new Error("Salarié introuvable.");
     return await ctx.db.insert("polyvalentTaskRecurrences", {
       ...args,
-      site: args.site ?? worker?.sites?.[0],
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
@@ -387,6 +401,7 @@ export const listActivities = query({
       return {
         ...activity,
         taskName: task?.name ?? "Tâche supprimée",
+        taskSite: task?.site ?? null,
         workerName: worker
           ? `${worker.firstName} ${worker.lastName}`.trim()
           : "Aucun salarié affecté",
@@ -401,8 +416,6 @@ export const createActivity = mutation({
     workerId: v.optional(v.id("polyvalentWorkers")),
     startAt: v.number(),
     endAt: v.number(),
-    plannedHours: v.optional(v.number()),
-    site: v.optional(activitySite),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -421,8 +434,6 @@ export const createActivity = mutation({
       workerId: args.workerId,
       startAt: args.startAt,
       endAt: args.endAt,
-      plannedHours: args.plannedHours,
-      site: args.site ?? worker?.sites?.[0],
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
@@ -437,8 +448,6 @@ export const createActivities = mutation({
     taskId: v.id("polyvalentTasks"),
     workerId: v.optional(v.id("polyvalentWorkers")),
     slots: v.array(v.object({ startAt: v.number(), endAt: v.number() })),
-    plannedHours: v.optional(v.number()),
-    site: v.optional(activitySite),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -461,8 +470,6 @@ export const createActivities = mutation({
           taskId: args.taskId,
           workerId: args.workerId,
           ...slot,
-          plannedHours: args.plannedHours,
-          site: args.site ?? worker?.sites?.[0],
           createdBy,
           createdAt,
         }),
@@ -478,8 +485,6 @@ export const updateActivity = mutation({
     workerId: v.optional(v.id("polyvalentWorkers")),
     startAt: v.number(),
     endAt: v.number(),
-    plannedHours: v.optional(v.number()),
-    site: v.optional(activitySite),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
@@ -497,8 +502,6 @@ export const updateActivity = mutation({
       workerId: args.workerId,
       startAt: args.startAt,
       endAt: args.endAt,
-      plannedHours: args.plannedHours,
-      site: args.site ?? worker?.sites?.[0],
     });
   },
 });
