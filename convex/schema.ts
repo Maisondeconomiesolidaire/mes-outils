@@ -2465,6 +2465,11 @@ export default defineSchema(
     contractEndAt: v.optional(v.string()),
     /** Réactivation manuelle : la synchro RH ne redésactive plus ce salarié. */
     reactivatedAt: v.optional(v.number()),
+    /**
+     * Statut forcé à la main dans l'app. Il l'emporte sur la fin de contrat,
+     * mais pas sur une sortie d'effectif RH.
+     */
+    activeOverride: v.optional(v.boolean()),
     /** Durée mensuelle de travail du dernier contrat, en heures (source RH). */
     monthlyHours: v.optional(v.number()),
     createdBy: v.string(),

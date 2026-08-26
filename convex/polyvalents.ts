@@ -632,9 +632,13 @@ async function syncTeamFromHr(ctx: MutationCtx) {
       continue;
     }
 
-    // Une réactivation manuelle protège le salarié de la seule désactivation
-    // automatique (fin de contrat) — pas d'une sortie d'effectif côté RH.
-    const active = activeInHr || (employee.active && worker.reactivatedAt !== undefined);
+    // Un statut forcé à la main (activé comme désactivé) l'emporte sur la
+    // seule désactivation automatique — la fin de contrat — mais pas sur une
+    // sortie d'effectif côté RH. `reactivatedAt` couvre les réactivations
+    // enregistrées avant l'ajout de `activeOverride`.
+    const override =
+      worker.activeOverride ?? (worker.reactivatedAt !== undefined ? true : undefined);
+    const active = employee.active ? override ?? !contractOver : false;
     const patch: Record<string, unknown> = {};
     if (worker.hrEmployeeId !== employee._id) patch.hrEmployeeId = employee._id;
     if (worker.firstName !== employee.firstName) patch.firstName = employee.firstName;
@@ -679,6 +683,7 @@ export const setWorkerActive = mutation({
     await requireCrmPermission(ctx, PAGE_KEY, "update");
     await ctx.db.patch(args.id, {
       active: args.active,
+      activeOverride: args.active,
       reactivatedAt: args.active ? Date.now() : undefined,
     });
   },
