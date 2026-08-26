@@ -2452,6 +2452,17 @@ export default defineSchema(
     })),
   }).index("by_worker", ["workerId"]),
 
+  /** Règles hebdomadaires durables : elles restent actives jusqu'à annulation. */
+  polyvalentTaskRecurrences: defineTable({
+    taskId: v.id("polyvalentTasks"),
+    workerId: v.optional(v.id("polyvalentWorkers")),
+    slots: v.array(v.object({ weekday: v.number(), start: v.string(), end: v.string() })),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_task", ["taskId"])
+    .index("by_worker", ["workerId"]),
+
   polyvalentActivities: defineTable({
     taskId: v.id("polyvalentTasks"),
     /** Une tâche peut être planifiée avant qu'un salarié lui soit affecté. */

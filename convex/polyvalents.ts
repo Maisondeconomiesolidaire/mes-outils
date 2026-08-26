@@ -56,7 +56,12 @@ export const deleteTask = mutation({
       .query("polyvalentActivities")
       .withIndex("by_task", (q) => q.eq("taskId", args.id))
       .collect();
+    const recurrences = await ctx.db
+      .query("polyvalentTaskRecurrences")
+      .withIndex("by_task", (q) => q.eq("taskId", args.id))
+      .collect();
     await Promise.all(activities.map((activity) => ctx.db.delete(activity._id)));
+    await Promise.all(recurrences.map((recurrence) => ctx.db.delete(recurrence._id)));
     await ctx.db.delete(args.id);
   },
 });
@@ -111,7 +116,12 @@ export const deleteWorker = mutation({
       .query("polyvalentWorkerSchedules")
       .withIndex("by_worker", (q) => q.eq("workerId", args.id))
       .unique();
+    const recurrences = await ctx.db
+      .query("polyvalentTaskRecurrences")
+      .withIndex("by_worker", (q) => q.eq("workerId", args.id))
+      .collect();
     await Promise.all(activities.map((activity) => ctx.db.delete(activity._id)));
+    await Promise.all(recurrences.map((recurrence) => ctx.db.delete(recurrence._id)));
     if (schedule) await ctx.db.delete(schedule._id);
     await ctx.db.delete(args.id);
   },
@@ -146,6 +156,53 @@ export const setWorkerSchedule = mutation({
     const schedule = await ctx.db.query("polyvalentWorkerSchedules").withIndex("by_worker", (q) => q.eq("workerId", args.workerId)).unique();
     if (schedule) await ctx.db.patch(schedule._id, { availability: args.availability });
     else await ctx.db.insert("polyvalentWorkerSchedules", args);
+  },
+});
+
+const recurrenceSlotsValidator = v.array(v.object({ weekday: v.number(), start: v.string(), end: v.string() }));
+
+export const listRecurrences = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const [recurrences, tasks, workers] = await Promise.all([
+      ctx.db.query("polyvalentTaskRecurrences").take(500),
+      ctx.db.query("polyvalentTasks").take(500),
+      ctx.db.query("polyvalentWorkers").take(500),
+    ]);
+    const taskById = new Map(tasks.map((task) => [String(task._id), task]));
+    const workerById = new Map(workers.map((worker) => [String(worker._id), worker]));
+    return recurrences.map((recurrence) => ({
+      ...recurrence,
+      taskName: taskById.get(String(recurrence.taskId))?.name ?? "Tâche supprimée",
+      workerName: recurrence.workerId ? `${workerById.get(String(recurrence.workerId))?.firstName ?? ""} ${workerById.get(String(recurrence.workerId))?.lastName ?? ""}`.trim() || "Salarié supprimé" : "Aucun salarié affecté",
+    }));
+  },
+});
+
+export const createRecurrence = mutation({
+  args: { taskId: v.id("polyvalentTasks"), workerId: v.optional(v.id("polyvalentWorkers")), slots: recurrenceSlotsValidator },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "create");
+    const identity = await requireUser(ctx);
+    if (args.slots.length === 0 || args.slots.length > 7) throw new Error("Choisissez entre un et sept créneaux hebdomadaires.");
+    const days = new Set<number>();
+    for (const slot of args.slots) {
+      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 7 || days.has(slot.weekday) || !/^\d{2}:\d{2}$/.test(slot.start) || !/^\d{2}:\d{2}$/.test(slot.end) || slot.end <= slot.start) throw new Error("Les créneaux récurrents sont invalides.");
+      days.add(slot.weekday);
+    }
+    const [task, worker] = await Promise.all([ctx.db.get(args.taskId), args.workerId ? ctx.db.get(args.workerId) : null]);
+    if (!task) throw new Error("Tâche introuvable.");
+    if (args.workerId && !worker) throw new Error("Salarié introuvable.");
+    return await ctx.db.insert("polyvalentTaskRecurrences", { ...args, createdBy: formatUserName(identity), createdAt: Date.now() });
+  },
+});
+
+export const deleteRecurrence = mutation({
+  args: { id: v.id("polyvalentTaskRecurrences") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "delete");
+    await ctx.db.delete(args.id);
   },
 });
 
