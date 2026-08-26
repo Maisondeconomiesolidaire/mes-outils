@@ -345,6 +345,23 @@ export const addVehicleDocument = mutation({
   },
 });
 
+/**
+ * Renomme un document. Le nom repris à l'import est celui du fichier
+ * (« IMG_4821.pdf », « scan0007.pdf ») : sans renommage, une carte grise ne se
+ * distingue d'un devis qu'en l'ouvrant.
+ */
+export const renameVehicleDocument = mutation({
+  args: { documentId: v.id("vehicleDocuments"), name: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, FLEET_PAGE_KEY, "update");
+    const name = args.name.trim();
+    if (!name) throw new Error("Le nom du document ne peut pas être vide.");
+    const document = await ctx.db.get(args.documentId);
+    if (!document) throw new Error("Document introuvable.");
+    await ctx.db.patch(args.documentId, { name: name.slice(0, 200) });
+  },
+});
+
 export const removeVehicleDocument = mutation({
   args: { documentId: v.id("vehicleDocuments") },
   handler: async (ctx, args) => {

@@ -14,6 +14,7 @@ import {
   Mail,
   MapPin,
   MessageSquareText,
+  Pencil,
   Plus,
   Route,
   Search,
@@ -640,8 +641,19 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
   const documents = useQuery(api.gotravaux.listVehicleDocuments, { vehicleId });
   const addDocument = useMutation(api.gotravaux.addVehicleDocument);
   const removeDocument = useMutation(api.gotravaux.removeVehicleDocument);
+  const renameDocument = useMutation(api.gotravaux.renameVehicleDocument);
   const upload = useUpload();
   const [uploadingCategory, setUploadingCategory] = useState<DocCategory | null>(null);
+  /** Document en cours de renommage, et le nom saisi. */
+  const [renamingId, setRenamingId] = useState<Id<"vehicleDocuments"> | null>(null);
+  const [draftName, setDraftName] = useState("");
+
+  async function commitRename(documentId: Id<"vehicleDocuments">, previous: string) {
+    const name = draftName.trim();
+    setRenamingId(null);
+    if (!name || name === previous) return;
+    await renameDocument({ documentId, name });
+  }
 
   async function handleFile(category: DocCategory, file: File | undefined) {
     if (!file) return;
@@ -702,10 +714,45 @@ function VehicleDocumentsTab({ vehicleId, canEdit }: { vehicleId: Id<"vehicles">
             {documents.map((document) => (
               <div key={document._id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] p-3">
                 <FileText className="h-5 w-5 shrink-0 text-brand-600" />
-                <a href={document.url ?? "#"} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-[var(--foreground)] hover:underline">{document.name}</p>
-                  <p className="text-xs text-[var(--muted-foreground)]">{DOC_CATEGORIES.find((c) => c.key === document.category)?.label} · {document.uploadedBy}</p>
-                </a>
+                {renamingId === document._id ? (
+                  <div className="min-w-0 flex-1">
+                    <input
+                      autoFocus
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      onBlur={() => void commitRename(document._id, document.name)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void commitRename(document._id, document.name);
+                        }
+                        // Échap abandonne la saisie sans rien enregistrer.
+                        if (e.key === "Escape") setRenamingId(null);
+                      }}
+                      className="h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--card)] px-2.5 text-sm font-semibold text-[var(--foreground)] outline-none focus:border-brand-500"
+                    />
+                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">Entrée pour valider, Échap pour annuler</p>
+                  </div>
+                ) : (
+                  <a href={document.url ?? "#"} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold text-[var(--foreground)] hover:underline">{document.name}</p>
+                    <p className="text-xs text-[var(--muted-foreground)]">{DOC_CATEGORIES.find((c) => c.key === document.category)?.label} · {document.uploadedBy}</p>
+                  </a>
+                )}
+                {canEdit && renamingId !== document._id ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRenamingId(document._id);
+                      setDraftName(document.name);
+                    }}
+                    aria-label="Renommer le document"
+                    title="Renommer"
+                    className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-[var(--accent)] hover:text-brand-600"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </button>
+                ) : null}
                 {canEdit ? <button type="button" onClick={() => removeDocumentWithConfirmation(document._id)} className="rounded-full p-2 text-[var(--muted-foreground)] hover:bg-red-50 hover:text-red-600"><Trash2 className="h-4 w-4" /></button> : null}
               </div>
             ))}
