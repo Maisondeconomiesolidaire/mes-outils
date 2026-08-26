@@ -304,6 +304,8 @@ export const setWorkerSchedule = mutation({
   },
 });
 
+const activitySite = v.union(v.literal("60"), v.literal("76"));
+
 const recurrenceSlotsValidator = v.array(v.object({ weekday: v.number(), start: v.string(), end: v.string() }));
 
 export const listRecurrences = query({
@@ -326,7 +328,13 @@ export const listRecurrences = query({
 });
 
 export const createRecurrence = mutation({
-  args: { taskId: v.id("polyvalentTasks"), workerId: v.optional(v.id("polyvalentWorkers")), slots: recurrenceSlotsValidator },
+  args: {
+    taskId: v.id("polyvalentTasks"),
+    workerId: v.optional(v.id("polyvalentWorkers")),
+    slots: recurrenceSlotsValidator,
+    plannedHours: v.optional(v.number()),
+    site: v.optional(activitySite),
+  },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
     const identity = await requireUser(ctx);
@@ -339,7 +347,12 @@ export const createRecurrence = mutation({
     const [task, worker] = await Promise.all([ctx.db.get(args.taskId), args.workerId ? ctx.db.get(args.workerId) : null]);
     if (!task) throw new Error("Tâche introuvable.");
     if (args.workerId && !worker) throw new Error("Salarié introuvable.");
-    return await ctx.db.insert("polyvalentTaskRecurrences", { ...args, createdBy: formatUserName(identity), createdAt: Date.now() });
+    return await ctx.db.insert("polyvalentTaskRecurrences", {
+      ...args,
+      site: args.site ?? worker?.sites?.[0],
+      createdBy: formatUserName(identity),
+      createdAt: Date.now(),
+    });
   },
 });
 
@@ -388,6 +401,8 @@ export const createActivity = mutation({
     workerId: v.optional(v.id("polyvalentWorkers")),
     startAt: v.number(),
     endAt: v.number(),
+    plannedHours: v.optional(v.number()),
+    site: v.optional(activitySite),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -406,6 +421,8 @@ export const createActivity = mutation({
       workerId: args.workerId,
       startAt: args.startAt,
       endAt: args.endAt,
+      plannedHours: args.plannedHours,
+      site: args.site ?? worker?.sites?.[0],
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
@@ -420,6 +437,8 @@ export const createActivities = mutation({
     taskId: v.id("polyvalentTasks"),
     workerId: v.optional(v.id("polyvalentWorkers")),
     slots: v.array(v.object({ startAt: v.number(), endAt: v.number() })),
+    plannedHours: v.optional(v.number()),
+    site: v.optional(activitySite),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -442,6 +461,8 @@ export const createActivities = mutation({
           taskId: args.taskId,
           workerId: args.workerId,
           ...slot,
+          plannedHours: args.plannedHours,
+          site: args.site ?? worker?.sites?.[0],
           createdBy,
           createdAt,
         }),
@@ -457,6 +478,8 @@ export const updateActivity = mutation({
     workerId: v.optional(v.id("polyvalentWorkers")),
     startAt: v.number(),
     endAt: v.number(),
+    plannedHours: v.optional(v.number()),
+    site: v.optional(activitySite),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
@@ -474,6 +497,8 @@ export const updateActivity = mutation({
       workerId: args.workerId,
       startAt: args.startAt,
       endAt: args.endAt,
+      plannedHours: args.plannedHours,
+      site: args.site ?? worker?.sites?.[0],
     });
   },
 });
@@ -519,17 +544,35 @@ function normalizeName(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/** Fin du dernier contrat généré, ou `undefined` si CDI / aucun contrat. */
-async function contractEndFor(ctx: MutationCtx, employeeId: Id<"hrEmployees">) {
+/**
+ * Durée mensuelle de travail du contrat, en heures.
+ *
+ * La saisie RH est libre (« 151,67 », « 104 h », « 35h/semaine ») : on retient
+ * le premier nombre, virgule décimale comprise.
+ */
+function parseMonthlyHours(value: string | undefined) {
+  const match = value?.match(/(\d+(?:[.,]\d+)?)/);
+  if (!match) return undefined;
+  const hours = Number(match[1].replace(",", "."));
+  return Number.isFinite(hours) && hours > 0 ? hours : undefined;
+}
+
+/** Échéance et durée mensuelle issues du dernier contrat généré du salarié. */
+async function contractDataFor(ctx: MutationCtx, employeeId: Id<"hrEmployees">) {
   const lastContract = await ctx.db
     .query("hrContracts")
     .withIndex("by_employee_and_requestedAt", (q) => q.eq("employeeId", employeeId))
     .order("desc")
     .filter((q) => q.eq(q.field("webhookStatus"), "success"))
     .first();
-  if (!lastContract) return undefined;
-  if (OPEN_ENDED_CONTRACT_TYPES.has(lastContract.payload.type_contrat)) return undefined;
-  return normalizeContractDate(lastContract.payload.date_fin_contrat) ?? undefined;
+  if (!lastContract) return { contractEndAt: undefined, monthlyHours: undefined };
+  return {
+    // Un CDI n'a pas d'échéance : sa `date_fin_contrat` ne désactive personne.
+    contractEndAt: OPEN_ENDED_CONTRACT_TYPES.has(lastContract.payload.type_contrat)
+      ? undefined
+      : normalizeContractDate(lastContract.payload.date_fin_contrat) ?? undefined,
+    monthlyHours: parseMonthlyHours(lastContract.payload.duree_mensuel_travail),
+  };
 }
 
 async function syncTeamFromHr(ctx: MutationCtx) {
@@ -562,7 +605,7 @@ async function syncTeamFromHr(ctx: MutationCtx) {
   let updated = 0;
   for (const employee of employees) {
     const site = employee.structure === "Recyclerie 76" ? "76" : "60";
-    const contractEndAt = await contractEndFor(ctx, employee._id);
+    const { contractEndAt, monthlyHours } = await contractDataFor(ctx, employee._id);
     const contractOver = contractEndAt !== undefined && contractEndAt < today;
     const activeInHr = employee.active && !contractOver;
 
@@ -578,6 +621,7 @@ async function syncTeamFromHr(ctx: MutationCtx) {
         active: activeInHr,
         hrEmployeeId: employee._id,
         contractEndAt,
+        monthlyHours,
         createdBy: "Synchronisation RH",
         createdAt: employee.createdAt,
       });
@@ -594,6 +638,7 @@ async function syncTeamFromHr(ctx: MutationCtx) {
     if (worker.lastName !== employee.lastName) patch.lastName = employee.lastName;
     if (!worker.sites?.includes(site)) patch.sites = [...(worker.sites ?? []), site];
     if (worker.contractEndAt !== contractEndAt) patch.contractEndAt = contractEndAt;
+    if (worker.monthlyHours !== monthlyHours) patch.monthlyHours = monthlyHours;
     if (worker.active !== active) patch.active = active;
     if (Object.keys(patch).length) {
       await ctx.db.patch(worker._id, patch);

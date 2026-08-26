@@ -2461,6 +2461,8 @@ export default defineSchema(
     contractEndAt: v.optional(v.string()),
     /** Réactivation manuelle : la synchro RH ne redésactive plus ce salarié. */
     reactivatedAt: v.optional(v.number()),
+    /** Durée mensuelle de travail du dernier contrat, en heures (source RH). */
+    monthlyHours: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
   }).index("by_hrEmployee", ["hrEmployeeId"]),
@@ -2479,6 +2481,10 @@ export default defineSchema(
     taskId: v.id("polyvalentTasks"),
     workerId: v.optional(v.id("polyvalentWorkers")),
     slots: v.array(v.object({ weekday: v.number(), start: v.string(), end: v.string() })),
+    /** Charge hebdomadaire annoncée ; à défaut, la durée des créneaux fait foi. */
+    plannedHours: v.optional(v.number()),
+    /** Recyclerie qui porte la charge (à défaut, celle du salarié affecté). */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     createdBy: v.string(),
     createdAt: v.number(),
   })
@@ -2492,6 +2498,10 @@ export default defineSchema(
     /** Début et fin du créneau, en millisecondes epoch (date + heure). */
     startAt: v.number(),
     endAt: v.number(),
+    /** Charge annoncée en heures ; à défaut, la durée du créneau fait foi. */
+    plannedHours: v.optional(v.number()),
+    /** Recyclerie qui porte la charge (à défaut, celle du salarié affecté). */
+    site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     createdBy: v.string(),
     createdAt: v.number(),
   })
