@@ -175,7 +175,7 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
       {canCreate ? (
         <section className="premium-panel rounded-2xl p-4">
           <div className="flex gap-3">
-            <Avatar name={"user"} src={user?.imageUrl} />
+            <Avatar name={user?.fullName ?? "Moi"} src={user?.imageUrl} />
             <div className="min-w-0 flex-1 space-y-2">
               <Input
                 value={title}
