@@ -2455,9 +2455,15 @@ export default defineSchema(
     employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
     /** Inactif = conservé pour l'historique mais plus attribuable. */
     active: v.optional(v.boolean()),
+    /** Salarié RH correspondant : la fiche RH fait foi pour l'identité. */
+    hrEmployeeId: v.optional(v.id("hrEmployees")),
+    /** Fin du dernier contrat (`YYYY-MM-DD`) ; absente pour un CDI. */
+    contractEndAt: v.optional(v.string()),
+    /** Réactivation manuelle : la synchro RH ne redésactive plus ce salarié. */
+    reactivatedAt: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
-  }),
+  }).index("by_hrEmployee", ["hrEmployeeId"]),
 
   polyvalentWorkerSchedules: defineTable({
     workerId: v.id("polyvalentWorkers"),

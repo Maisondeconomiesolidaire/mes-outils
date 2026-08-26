@@ -31,6 +31,14 @@ crons.daily(
   internal.hrContractNotices.sendContractEndNotices,
 );
 
+// Équipe Recyclerie : miroir quotidien des salariés RH des structures
+// Recyclerie 60 / 76 (une fin de contrat rend le salarié inactif).
+crons.daily(
+  "synchronisation equipe recyclerie rh",
+  { hourUTC: 4, minuteUTC: 45 },
+  internal.polyvalents.syncFromHrDaily,
+);
+
 // Rappel J-1 aux clients qui ont réservé un créneau de dépôt en recyclerie.
 crons.daily(
   "rappel depot recyclerie",

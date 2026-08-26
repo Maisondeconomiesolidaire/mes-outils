@@ -1,6 +1,6 @@
-import { mutation, query, type MutationCtx } from "./_generated/server";
+import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { formatUserName, requireCrmPermission, requireStaff, requireUser } from "./lib";
 
 /**
@@ -73,7 +73,10 @@ export const listWorkers = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
-    return await ctx.db.query("polyvalentWorkers").order("desc").collect();
+    const workers = await ctx.db.query("polyvalentWorkers").take(1000);
+    return workers.sort((a, b) =>
+      `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`, "fr"),
+    );
   },
 });
 
@@ -171,7 +174,12 @@ export const listPersonas = query({
       .map((worker) => ({
         _id: worker._id,
         name: `${worker.firstName} ${worker.lastName}`.trim(),
-        role: worker.employmentType === "permanent" ? "Agent permanent" : "Agent polyvalent",
+        role:
+          worker.employmentType === "permanent"
+            ? "Ouvrier permanent"
+            : worker.employmentType === "polyvalent"
+              ? "Ouvrier polyvalent"
+              : null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
@@ -475,5 +483,167 @@ export const deleteActivity = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "delete");
     await ctx.db.delete(args.id);
+  },
+});
+
+/* ─── Synchronisation avec les salariés RH ────────────────────────────────── */
+
+/**
+ * L'équipe de la Recyclerie est le miroir des salariés RH rattachés aux
+ * structures « Recyclerie 60 » et « Recyclerie 76 ».
+ *
+ * La fiche RH fait foi pour l'identité (nom, prénom, recyclerie) et pour le
+ * statut : un salarié dont le dernier contrat est arrivé à échéance passe
+ * inactif. Restent saisis à la main dans l'app, faute d'exister côté RH :
+ * l'adresse email et le type de contrat (ouvrier permanent / polyvalent).
+ */
+const RECYCLERIE_STRUCTURES = ["Recyclerie 60", "Recyclerie 76"] as const;
+
+/** Les CDI n'ont pas d'échéance : leur `date_fin_contrat` ne désactive personne. */
+const OPEN_ENDED_CONTRACT_TYPES = new Set(["CDI", "CDI-Inclusion"]);
+
+/** Date du jour (`YYYY-MM-DD`) en heure de Paris. */
+function parisToday(): string {
+  return new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(new Date());
+}
+
+/** Les contrats importés portent parfois du `JJ/MM/AAAA` au lieu de l'ISO. */
+function normalizeContractDate(value: string): string | null {
+  const raw = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const french = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return french ? `${french[3]}-${french[2]}-${french[1]}` : null;
+}
+
+function normalizeName(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** Fin du dernier contrat généré, ou `undefined` si CDI / aucun contrat. */
+async function contractEndFor(ctx: MutationCtx, employeeId: Id<"hrEmployees">) {
+  const lastContract = await ctx.db
+    .query("hrContracts")
+    .withIndex("by_employee_and_requestedAt", (q) => q.eq("employeeId", employeeId))
+    .order("desc")
+    .filter((q) => q.eq(q.field("webhookStatus"), "success"))
+    .first();
+  if (!lastContract) return undefined;
+  if (OPEN_ENDED_CONTRACT_TYPES.has(lastContract.payload.type_contrat)) return undefined;
+  return normalizeContractDate(lastContract.payload.date_fin_contrat) ?? undefined;
+}
+
+async function syncTeamFromHr(ctx: MutationCtx) {
+  const today = parisToday();
+  const employees = (
+    await Promise.all(
+      RECYCLERIE_STRUCTURES.map((structure) =>
+        ctx.db
+          .query("hrEmployees")
+          .withIndex("by_structure", (q) => q.eq("structure", structure))
+          .collect(),
+      ),
+    )
+  ).flat();
+  const workers = await ctx.db.query("polyvalentWorkers").take(1000);
+
+  const byHrId = new Map(
+    workers.filter((worker) => worker.hrEmployeeId).map((worker) => [String(worker.hrEmployeeId), worker]),
+  );
+  // Les salariés créés avant la bascule sont rattachés sur le nom, dans les
+  // deux ordres (« Jean Dupont » / « Dupont Jean »).
+  const byName = new Map<string, Doc<"polyvalentWorkers">>();
+  for (const worker of workers) {
+    if (worker.hrEmployeeId) continue;
+    byName.set(normalizeName(`${worker.firstName} ${worker.lastName}`), worker);
+    byName.set(normalizeName(`${worker.lastName} ${worker.firstName}`), worker);
+  }
+
+  let created = 0;
+  let updated = 0;
+  for (const employee of employees) {
+    const site = employee.structure === "Recyclerie 76" ? "76" : "60";
+    const contractEndAt = await contractEndFor(ctx, employee._id);
+    const contractOver = contractEndAt !== undefined && contractEndAt < today;
+    const activeInHr = employee.active && !contractOver;
+
+    const worker =
+      byHrId.get(String(employee._id)) ??
+      byName.get(normalizeName(`${employee.firstName} ${employee.lastName}`));
+
+    if (!worker) {
+      await ctx.db.insert("polyvalentWorkers", {
+        firstName: employee.firstName,
+        lastName: employee.lastName,
+        sites: [site],
+        active: activeInHr,
+        hrEmployeeId: employee._id,
+        contractEndAt,
+        createdBy: "Synchronisation RH",
+        createdAt: employee.createdAt,
+      });
+      created++;
+      continue;
+    }
+
+    // Une réactivation manuelle protège le salarié de la seule désactivation
+    // automatique (fin de contrat) — pas d'une sortie d'effectif côté RH.
+    const active = activeInHr || (employee.active && worker.reactivatedAt !== undefined);
+    const patch: Record<string, unknown> = {};
+    if (worker.hrEmployeeId !== employee._id) patch.hrEmployeeId = employee._id;
+    if (worker.firstName !== employee.firstName) patch.firstName = employee.firstName;
+    if (worker.lastName !== employee.lastName) patch.lastName = employee.lastName;
+    if (!worker.sites?.includes(site)) patch.sites = [...(worker.sites ?? []), site];
+    if (worker.contractEndAt !== contractEndAt) patch.contractEndAt = contractEndAt;
+    if (worker.active !== active) patch.active = active;
+    if (Object.keys(patch).length) {
+      await ctx.db.patch(worker._id, patch);
+      updated++;
+    }
+  }
+  return { created, updated };
+}
+
+/**
+ * Alignement sur l'annuaire RH, déclenché à l'ouverture de la page Tâches.
+ * Idempotent : sans écart avec les fiches RH, aucune écriture.
+ */
+export const syncFromHr = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    return await syncTeamFromHr(ctx);
+  },
+});
+
+/** Repasse quotidienne : c'est l'échéance des contrats qui bouge, pas les fiches. */
+export const syncFromHrDaily = internalMutation({
+  args: {},
+  handler: async (ctx) => await syncTeamFromHr(ctx),
+});
+
+/**
+ * Réactive (ou désactive) un salarié à la main. Une réactivation survit aux
+ * synchronisations RH suivantes tant que le salarié reste dans l'effectif.
+ */
+export const setWorkerActive = mutation({
+  args: { id: v.id("polyvalentWorkers"), active: v.boolean() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    await ctx.db.patch(args.id, {
+      active: args.active,
+      reactivatedAt: args.active ? Date.now() : undefined,
+    });
+  },
+});
+
+/** Type de contrat, saisi à la main : la donnée n'existe pas côté RH. */
+export const setWorkerEmploymentType = mutation({
+  args: {
+    id: v.id("polyvalentWorkers"),
+    employmentType: v.optional(workerEmploymentType),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    await ctx.db.patch(args.id, { employmentType: args.employmentType });
   },
 });
