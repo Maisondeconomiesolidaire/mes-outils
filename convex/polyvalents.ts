@@ -179,6 +179,36 @@ export const migrateLegacyAssignments = mutation({
 });
 
 /**
+ * Équipe attribuable, pour tout le staff.
+ *
+ * Attribuer une demande, filtrer par salarié ou désigner un chauffeur ne
+ * relève pas de la gestion de l'équipe : ces écrans doivent fonctionner sans
+ * le droit `agents-polyvalents`, sinon un salarié sans accès à Gestion perd
+ * aussi l'accès aux Demandes. On n'expose que l'identité, le rattachement et
+ * le statut — pas les horaires ni les affectations.
+ */
+export const listAssignable = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    const workers = await ctx.db.query("polyvalentWorkers").take(1000);
+    return workers
+      .map((worker) => ({
+        _id: worker._id,
+        firstName: worker.firstName,
+        lastName: worker.lastName,
+        email: worker.email,
+        sites: worker.sites,
+        employmentType: worker.employmentType,
+        active: worker.active,
+      }))
+      .sort((a, b) =>
+        `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`, "fr"),
+      );
+  },
+});
+
+/**
  * Personas (équipe active) pour la sélection sur le compte partagé accueil.
  * Accessible à tout staff, sans droit `agents-polyvalents`.
  */
