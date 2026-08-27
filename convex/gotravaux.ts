@@ -244,6 +244,13 @@ export const createVehicleTask = mutation({
     beforeNotes: v.optional(v.string()),
     afterPhotos: v.optional(v.array(v.id("_storage"))),
     afterNotes: v.optional(v.string()),
+    /**
+     * Statut à la création. Réservé à la reprise d'historique (import Excel),
+     * qui enregistre des interventions déjà faites : les garde-fous de clôture
+     * (temps passé, prix des pièces) ne s'appliquent pas, ces informations
+     * n'existant pas dans les fichiers repris.
+     */
+    status: v.optional(taskStatus),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, FLEET_PAGE_KEY, "create");
@@ -254,7 +261,7 @@ export const createVehicleTask = mutation({
       title: args.title.trim(),
       description: args.description?.trim() || undefined,
       priority: args.priority,
-      status: "todo",
+      status: args.status ?? "todo",
       dueDate: args.dueDate,
       endDate: args.endDate,
       odometerKm: args.odometerKm,

@@ -623,10 +623,7 @@ function VehicleMaintenanceTab({ vehicleId, canCreate, canEdit }: { vehicleId: I
       ) : tasks.length === 0 ? (
         <p className="py-6 text-center text-sm text-[var(--muted-foreground)]">Aucune maintenance pour ce véhicule.</p>
       ) : (
-        <TaskKanban
-          tasks={tasks}
-          onOpenTask={setSelectedTaskId}
-        />
+        <MaintenanceBoard tasks={tasks} onOpenTask={setSelectedTaskId} />
       )}
       </div>
       <MaintenanceDetailsModal
@@ -736,7 +733,7 @@ function maintenancePreview(spreadsheet: ImportedSpreadsheet | null, mapping: Im
     return { rows, skipped, error: "" };
 }
 
-function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: boolean; onClose: () => void; vehicleId: Id<"vehicles">; onImport: (args: { vehicleId: Id<"vehicles">; title: string; dueDate: number; odometerKm: number; priority: TaskPriority }) => Promise<unknown> }) {
+function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: boolean; onClose: () => void; vehicleId: Id<"vehicles">; onImport: (args: { vehicleId: Id<"vehicles">; title: string; dueDate: number; odometerKm: number; priority: TaskPriority; status: TaskStatus }) => Promise<unknown> }) {
   const [rows, setRows] = useState<ImportedMaintenance[]>([]);
   const [skipped, setSkipped] = useState(0);
   const [spreadsheet, setSpreadsheet] = useState<ImportedSpreadsheet | null>(null);
@@ -778,7 +775,9 @@ function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: 
     if (preview.error || !rows.length) return;
     setImporting(true); setError("");
     try {
-      for (const row of rows) await onImport({ vehicleId, title: row.title, dueDate: row.dueDate, odometerKm: row.odometerKm, priority: "medium" });
+      // Un import est une reprise d'historique : ces interventions ont déjà eu
+      // lieu, elles arrivent donc directement terminées.
+      for (const row of rows) await onImport({ vehicleId, title: row.title, dueDate: row.dueDate, odometerKm: row.odometerKm, priority: "medium", status: "done" });
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? `Import interrompu : ${cause.message}` : "Import interrompu.");
@@ -788,7 +787,7 @@ function MaintenanceImportModal({ open, onClose, vehicleId, onImport }: { open: 
   return (
     <Modal open={open} onClose={onClose} title="Importer des maintenances">
       <div className="grid gap-4">
-        <p className="text-sm text-[var(--muted-foreground)]">Importez un fichier Excel (.xlsx, .xls, .xlsm, .xlsb), XML Spreadsheet, CSV ou ODS. Vous choisirez ensuite les colonnes à importer.</p>
+        <p className="text-sm text-[var(--muted-foreground)]">Importez un fichier Excel (.xlsx, .xls, .xlsm, .xlsb), XML Spreadsheet, CSV ou ODS. Vous choisirez ensuite les colonnes à importer. Les maintenances importées sont enregistrées comme <strong>terminées</strong> : elles rejoignent l’historique du véhicule.</p>
         <input type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.xml,.csv,.ods,application/vnd.ms-excel,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.ms-excel.sheet.binary.macroenabled.12,application/vnd.oasis.opendocument.spreadsheet,text/csv,text/xml" onChange={selectFile} className="block w-full text-sm text-[var(--muted-foreground)] file:mr-4 file:rounded-lg file:border-0 file:bg-brand-500 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-brand-600" />
         {loading ? <p className="text-sm text-[var(--muted-foreground)]">Lecture du fichier…</p> : null}
         {error ? <p className="rounded-lg bg-rose-50 p-3 text-sm text-rose-700 dark:bg-rose-500/10 dark:text-rose-300">{error}</p> : null}
@@ -1073,6 +1072,11 @@ function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClos
   );
 }
 
+/**
+ * Colonnes du kanban : seules les maintenances vivantes. Les terminées se
+ * consultent en liste, via le sélecteur de la vue — un tableau se parcourt
+ * mieux qu'une colonne qui s'allonge à chaque intervention close.
+ */
 const TASK_STATUS_COLUMNS = [
   {
     key: "todo" as const,
@@ -1083,11 +1087,6 @@ const TASK_STATUS_COLUMNS = [
     key: "in_progress" as const,
     label: "En cours",
     tone: "border-sky-400 bg-sky-50/70 dark:bg-sky-500/10",
-  },
-  {
-    key: "done" as const,
-    label: "Terminée",
-    tone: "border-emerald-400 bg-emerald-50/70 dark:bg-emerald-500/10",
   },
 ] satisfies Array<{
   key: TaskStatus;
@@ -1240,10 +1239,7 @@ function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate
   const selectedTask = tasks.find((task) => task._id === selectedTaskId) ?? null;
   return (
     <>
-      <TaskKanban
-        tasks={tasks}
-        onOpenTask={setSelectedTaskId}
-      />
+      <MaintenanceBoard tasks={tasks} onOpenTask={setSelectedTaskId} showVehicle />
       <MaintenanceDetailsModal
         task={selectedTask}
         canEdit={canEdit}
@@ -1255,6 +1251,135 @@ function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate
         onUpdate={onUpdate}
       />
     </>
+  );
+}
+
+/**
+ * Vue des maintenances : kanban des maintenances en cours, ou liste des
+ * terminées. Le sélecteur remplace l'ancienne troisième colonne du kanban.
+ */
+function MaintenanceBoard({
+  tasks,
+  onOpenTask,
+  showVehicle = false,
+}: {
+  tasks: VehicleTask[];
+  onOpenTask: (taskId: Id<"vehicleMaintenanceTasks">) => void;
+  showVehicle?: boolean;
+}) {
+  const [view, setView] = useState<"open" | "done">("open");
+  const openTasks = tasks.filter((task) => task.status !== "done");
+  const doneTasks = tasks
+    .filter((task) => task.status === "done")
+    .sort((a, b) => (b.endDate ?? b.dueDate ?? b.updatedAt) - (a.endDate ?? a.dueDate ?? a.updatedAt));
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {(
+          [
+            ["open", "En cours", openTasks.length],
+            ["done", "Terminé", doneTasks.length],
+          ] as Array<["open" | "done", string, number]>
+        ).map(([key, label, count]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setView(key)}
+            className={cn(
+              "inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition",
+              view === key
+                ? "bg-brand-500 text-white"
+                : "bg-[var(--selected)] text-[var(--selected-foreground)] hover:opacity-90",
+            )}
+          >
+            {label}
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-bold",
+                view === key ? "bg-white/20" : "bg-[var(--card)] text-[var(--foreground)]",
+              )}
+            >
+              {count}
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {view === "open" ? (
+        <TaskKanban tasks={openTasks} onOpenTask={onOpenTask} />
+      ) : (
+        <DoneTaskList tasks={doneTasks} onOpenTask={onOpenTask} showVehicle={showVehicle} />
+      )}
+    </div>
+  );
+}
+
+/** Historique des maintenances terminées, en tableau. */
+function DoneTaskList({
+  tasks,
+  onOpenTask,
+  showVehicle,
+}: {
+  tasks: VehicleTask[];
+  onOpenTask: (taskId: Id<"vehicleMaintenanceTasks">) => void;
+  showVehicle: boolean;
+}) {
+  if (tasks.length === 0) {
+    return (
+      <EmptyState
+        icon={<Wrench className="h-8 w-8" />}
+        title="Aucune maintenance terminée"
+        description="Les maintenances clôturées et les historiques importés apparaîtront ici."
+      />
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-2xl border border-[var(--border)]">
+      <table className="min-w-[720px] w-full text-sm">
+        <thead className="bg-[var(--card)] text-[var(--muted-foreground)]">
+          <tr>
+            {showVehicle ? <th className="px-4 py-3 text-left font-medium">Véhicule</th> : null}
+            <th className="px-4 py-3 text-left font-medium">Maintenance</th>
+            <th className="px-4 py-3 text-left font-medium">Date</th>
+            <th className="px-4 py-3 text-left font-medium">Kilométrage</th>
+            <th className="px-4 py-3 text-left font-medium">Temps</th>
+            <th className="px-4 py-3 text-left font-medium">Pièces</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[var(--border)]">
+          {tasks.map((task) => (
+            <tr
+              key={task._id}
+              onClick={() => onOpenTask(task._id)}
+              className="cursor-pointer bg-[var(--background)] hover:bg-[var(--card)]"
+            >
+              {showVehicle ? (
+                <td className="px-4 py-3 text-[var(--muted-foreground)]">{task.vehicle?.name ?? "—"}</td>
+              ) : null}
+              <td className="px-4 py-3 font-medium text-[var(--foreground)]">{task.title}</td>
+              <td className="px-4 py-3 text-[var(--muted-foreground)]">
+                {task.endDate ?? task.dueDate ? formatDate((task.endDate ?? task.dueDate)!) : "—"}
+              </td>
+              <td className="px-4 py-3 text-[var(--muted-foreground)]">
+                {typeof task.odometerKm === "number"
+                  ? `${task.odometerKm.toLocaleString("fr-FR")} km`
+                  : "—"}
+              </td>
+              <td className="px-4 py-3 text-[var(--muted-foreground)]">
+                {task.laborMinutes ? formatLabor(task.laborMinutes) : "—"}
+              </td>
+              <td className="px-4 py-3 text-[var(--muted-foreground)]">
+                {typeof task.partsCost === "number"
+                  ? task.partsCost.toLocaleString("fr-FR", { style: "currency", currency: "EUR" })
+                  : "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1289,7 +1414,7 @@ function TaskKanban({
   }, [tasks]);
 
   return (
-    <section className="grid gap-4 xl:grid-cols-3">
+    <section className="grid gap-4 xl:grid-cols-2">
       {TASK_STATUS_COLUMNS.map((column) => {
         const columnTasks = tasksByStatus[column.key];
         return (
