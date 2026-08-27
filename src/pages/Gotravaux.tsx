@@ -1268,10 +1268,30 @@ function MaintenanceBoard({
   showVehicle?: boolean;
 }) {
   const [view, setView] = useState<"open" | "done">("open");
+  const [search, setSearch] = useState("");
   const openTasks = tasks.filter((task) => task.status !== "done");
   const doneTasks = tasks
     .filter((task) => task.status === "done")
     .sort((a, b) => (b.endDate ?? b.dueDate ?? b.updatedAt) - (a.endDate ?? a.dueDate ?? a.updatedAt));
+
+  // L'historique est le seul volet qui grossit sans fin : la recherche n'a de
+  // sens que là, le kanban tenant à l'écran.
+  const normalized = search.trim().toLocaleLowerCase("fr-FR");
+  const visibleDoneTasks = normalized
+    ? doneTasks.filter((task) =>
+        [
+          task.title,
+          task.description,
+          task.vehicle?.name,
+          task.vehicle?.plate,
+          typeof task.odometerKm === "number" ? String(task.odometerKm) : null,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLocaleLowerCase("fr-FR")
+          .includes(normalized),
+      )
+    : doneTasks;
 
   return (
     <div className="space-y-4">
@@ -1306,10 +1326,27 @@ function MaintenanceBoard({
         ))}
       </div>
 
+      {view === "done" ? (
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Rechercher une maintenance terminée…"
+            className="pl-9"
+          />
+        </div>
+      ) : null}
+
       {view === "open" ? (
         <TaskKanban tasks={openTasks} onOpenTask={onOpenTask} />
       ) : (
-        <DoneTaskList tasks={doneTasks} onOpenTask={onOpenTask} showVehicle={showVehicle} />
+        <DoneTaskList
+          tasks={visibleDoneTasks}
+          onOpenTask={onOpenTask}
+          showVehicle={showVehicle}
+          searching={normalized.length > 0}
+        />
       )}
     </div>
   );
@@ -1320,17 +1357,23 @@ function DoneTaskList({
   tasks,
   onOpenTask,
   showVehicle,
+  searching,
 }: {
   tasks: VehicleTask[];
   onOpenTask: (taskId: Id<"vehicleMaintenanceTasks">) => void;
   showVehicle: boolean;
+  searching: boolean;
 }) {
   if (tasks.length === 0) {
     return (
       <EmptyState
         icon={<Wrench className="h-8 w-8" />}
-        title="Aucune maintenance terminée"
-        description="Les maintenances clôturées et les historiques importés apparaîtront ici."
+        title={searching ? "Aucun résultat" : "Aucune maintenance terminée"}
+        description={
+          searching
+            ? "Aucune maintenance terminée ne correspond à cette recherche."
+            : "Les maintenances clôturées et les historiques importés apparaîtront ici."
+        }
       />
     );
   }
