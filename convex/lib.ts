@@ -70,9 +70,9 @@ export async function requireUser(ctx: QueryCtx | MutationCtx | ActionCtx) {
 }
 
 function allowedEmailsFromEnv(name: string) {
-  return (process.env[name] ?? "")
+  return String(process.env[name] ?? "")
     .split(",")
-    .map((entry) => entry.trim().toLowerCase())
+    .map((entry: string) => entry.trim().toLowerCase())
     .filter(Boolean);
 }
 

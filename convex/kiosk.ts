@@ -11,7 +11,7 @@
  * garantit qu'un compte correspond à un vrai client.
  */
 import { ConvexError, v } from "convex/values";
-import { action, internalQuery, query } from "./_generated/server";
+import { action, internalQuery, query, type QueryCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { normalizeEmail } from "./lib";
@@ -35,38 +35,49 @@ type KnownCustomer = {
  */
 export const knownCustomerByEmail = internalQuery({
   args: { email: v.string() },
-  handler: async (ctx, { email }): Promise<KnownCustomer | null> => {
-    const target = normalizeEmail(email);
-    if (!target) return null;
-
-    const requests = await ctx.db.query("requests").order("desc").take(2000);
-    const fromRequest = requests.find(
-      (request) => normalizeEmail(request.customer.email) === target,
-    );
-    if (fromRequest) {
-      return {
-        firstName: fromRequest.customer.firstName,
-        lastName: fromRequest.customer.lastName,
-        email: fromRequest.customer.email,
-        phone: fromRequest.customer.phone,
-      };
-    }
-
-    const imported = await ctx.db
-      .query("crmCustomers")
-      .withIndex("by_email", (q) => q.eq("email", target))
-      .first();
-    if (imported) {
-      return {
-        firstName: imported.firstName,
-        lastName: imported.lastName,
-        email: imported.email,
-        phone: imported.phone,
-      };
-    }
-    return null;
-  },
+  handler: async (ctx, { email }): Promise<KnownCustomer | null> =>
+    await findKnownCustomer(ctx, email),
 });
+
+/**
+ * Recherche partagée : la caisse au terminal en a besoin depuis une `query`,
+ * et une query ne peut pas appeler une autre query sans rendre le typage
+ * circulaire.
+ */
+export async function findKnownCustomer(
+  ctx: QueryCtx,
+  email: string,
+): Promise<KnownCustomer | null> {
+  const target = normalizeEmail(email);
+  if (!target) return null;
+
+  const requests = await ctx.db.query("requests").order("desc").take(2000);
+  const fromRequest = requests.find(
+    (request) => normalizeEmail(request.customer.email) === target,
+  );
+  if (fromRequest) {
+    return {
+      firstName: fromRequest.customer.firstName,
+      lastName: fromRequest.customer.lastName,
+      email: fromRequest.customer.email,
+      phone: fromRequest.customer.phone,
+    };
+  }
+
+  const imported = await ctx.db
+    .query("crmCustomers")
+    .withIndex("by_email", (q) => q.eq("email", target))
+    .first();
+  if (imported) {
+    return {
+      firstName: imported.firstName,
+      lastName: imported.lastName,
+      email: imported.email,
+      phone: imported.phone,
+    };
+  }
+  return null;
+}
 
 /**
  * L'adresse correspond-elle à un client connu ?

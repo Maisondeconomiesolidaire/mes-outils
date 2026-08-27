@@ -11,12 +11,27 @@
  *
  * Tant qu'aucun lecteur n'est enregistré sur le compte Stripe, la caisse
  * propose les autres moyens de paiement et explique ce qu'il manque.
+ *
+ * ─── Deux intégrations cohabitent ici ───────────────────────────────────────
+ *
+ * 1. CAISSE DU CRM (ci-dessous) : intégration « pilotée par serveur ». Elle ne
+ *    marche qu'avec un lecteur INTELLIGENT connecté à Internet (WisePOS E,
+ *    Stripe Reader S700/S710), poussé depuis le navigateur du CRM.
+ *
+ * 2. CAISSE MOBILE (fin de fichier) : l'app Android « Recyc Caisse » et son
+ *    lecteur BBPOS WisePad 3 en Bluetooth. Un lecteur mobile ne se pilote NI
+ *    depuis une page web NI par l'API : il exige un SDK Terminal iOS/Android/
+ *    React Native. Ce module ne lui fournit donc que le jeton de connexion, le
+ *    montant verrouillé et l'enregistrement de la commande.
  */
 import { ConvexError, v } from "convex/values";
-import { action } from "./_generated/server";
+import { action, internalQuery, query } from "./_generated/server";
 import type { ActionCtx } from "./_generated/server";
-import { api } from "./_generated/api";
-import { accessAllows } from "./lib";
+import { api, internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
+import { accessAllows, normalizeEmail, requireStaff } from "./lib";
+import { ensureClerkCustomer } from "./crmClients";
+import { findKnownCustomer } from "./kiosk";
 import { recycappSecretKey, stripeRequest } from "./stripe";
 
 type Reader = {
@@ -149,5 +164,249 @@ export const cancelOnReader = action({
       ).catch(() => null);
     }
     return null;
+  },
+});
+
+/* ─── Caisse mobile : app Android + BBPOS WisePad 3 ────────────────────────
+ *
+ * Le lecteur mobile se pilote depuis le SDK Terminal de l'app, jamais d'ici.
+ * Les fonctions suivantes lui servent de socle : jeton de connexion, article
+ * scanné, client, montant verrouillé, puis enregistrement de la vente.
+ */
+
+/**
+ * Jeton de connexion du SDK Terminal.
+ *
+ * Réservé au staff : ce secret permet de se connecter à n'importe quel lecteur
+ * du compte Stripe et d'encaisser avec.
+ */
+export const connectionToken = action({
+  args: {},
+  handler: async (ctx): Promise<{ secret: string }> => {
+    await ctx.runQuery(internal.terminal.assertStaff, {});
+    const token = await stripeRequest<{ secret: string }>(
+      "terminal/connection_tokens",
+      recycappSecretKey(),
+      {},
+    );
+    return { secret: token.secret };
+  },
+});
+
+/** Garde d'authentification des actions (une action n'accède pas à la base). */
+export const assertStaff = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    await requireStaff(ctx);
+    return null;
+  },
+});
+
+
+/**
+ * Emplacements Terminal du compte Stripe.
+ *
+ * Un lecteur Bluetooth se connecte toujours *à un emplacement* : c'est lui qui
+ * porte l'adresse déclarée à Stripe. La caisse retient le sien, mais doit
+ * pouvoir le choisir à la première mise en service.
+ */
+export const locations = action({
+  args: {},
+  handler: async (ctx): Promise<Array<{ id: string; displayName: string }>> => {
+    await ctx.runQuery(internal.terminal.assertStaff, {});
+    const response = await stripeRequest<{
+      data: Array<{ id: string; display_name?: string }>;
+    }>("terminal/locations?limit=100", recycappSecretKey());
+    return response.data.map((location) => ({
+      id: location.id,
+      displayName: location.display_name ?? location.id,
+    }));
+  },
+});
+
+/**
+ * Article scanné : ce que la caisse a besoin d'afficher avant d'encaisser.
+ *
+ * Le QR code de la vitrine encode l'URL `/acheter/<articleId>` : l'app en
+ * extrait l'identifiant et appelle cette requête.
+ */
+export const scannedArticle = query({
+  args: { articleId: v.id("articles") },
+  handler: async (ctx, { articleId }) => {
+    await requireStaff(ctx);
+    const article = await ctx.db.get(articleId);
+    if (!article) return null;
+    const imageUrl = article.images[0] ? await ctx.storage.getUrl(article.images[0]) : null;
+    return {
+      _id: article._id,
+      title: article.title,
+      price: article.price,
+      condition: article.condition,
+      category: article.category,
+      imageUrl,
+      available: article.status === "disponible",
+      status: article.status,
+    };
+  },
+});
+
+/**
+ * Client déjà connu, à son adresse email.
+ *
+ * Réservé au staff, contrairement au parcours vitrine : ici la réponse porte
+ * l'identité complète, pour que la caisse n'ait pas à la ressaisir.
+ */
+export const knownCustomer = query({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    await requireStaff(ctx);
+    return await findKnownCustomer(ctx, email);
+  },
+});
+
+/**
+ * Prépare l'encaissement : verrouille le montant et ouvre un PaymentIntent
+ * `card_present` que le SDK Terminal présentera au lecteur.
+ *
+ * Rien n'est débité ici : l'app appelle ensuite `collectPaymentMethod` puis
+ * `confirmPaymentIntent` sur le lecteur, et revient par `finalize`.
+ */
+export const startPayment = action({
+  args: {
+    articleId: v.id("articles"),
+    email: v.string(),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    phone: v.optional(v.string()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    draftId: Id<"publicStripeCheckoutDrafts">;
+    paymentIntentId: string;
+    clientSecret: string;
+    amount: number;
+  }> => {
+    await ctx.runQuery(internal.terminal.assertStaff, {});
+    const secretKey = recycappSecretKey();
+    const email = normalizeEmail(args.email);
+    if (!/^\S+@\S+\.\S+$/.test(email)) {
+      throw new ConvexError("Adresse email invalide.");
+    }
+
+    const known = await ctx.runQuery(internal.kiosk.knownCustomerByEmail, { email });
+    const firstName = (args.firstName ?? "").trim() || known?.firstName || "";
+    const lastName = (args.lastName ?? "").trim() || known?.lastName || "";
+    if (!firstName || !lastName) {
+      throw new ConvexError("Indiquez le prénom et le nom du client.");
+    }
+
+    const draft: { draftId: Id<"publicStripeCheckoutDrafts">; total: number } =
+      await ctx.runMutation(internal.requests.createPublicStripeCheckoutDraft, {
+        articleIds: [args.articleId],
+        customer: {
+          firstName,
+          lastName,
+          email,
+          phone: (args.phone ?? "").trim() || known?.phone || "",
+        },
+        comment: "Achat en boutique (terminal de paiement).",
+      });
+
+    if (draft.total <= 0) {
+      throw new ConvexError("Le montant de cet article doit être supérieur à 0 €.");
+    }
+
+    const amount = Math.round(draft.total * 100);
+    const intent = await stripeRequest<{ id: string; client_secret: string }>(
+      "payment_intents",
+      secretKey,
+      {
+        amount: String(amount),
+        currency: "eur",
+        "payment_method_types[0]": "card_present",
+        capture_method: "automatic",
+        receipt_email: email,
+        description: "Article de la recyclerie",
+        "metadata[draftId]": draft.draftId,
+        "metadata[source]": "recycapp-terminal",
+      },
+    );
+
+    await ctx.runMutation(internal.requests.attachStripeSessionToPublicDraft, {
+      draftId: draft.draftId,
+      stripeSessionId: intent.id,
+    });
+
+    return {
+      draftId: draft.draftId,
+      paymentIntentId: intent.id,
+      clientSecret: intent.client_secret,
+      amount,
+    };
+  },
+});
+
+/**
+ * Enregistre la commande une fois le paiement accepté par le lecteur.
+ *
+ * Le statut est relu chez Stripe : la tablette n'est jamais crue sur parole,
+ * pas plus que le navigateur du client dans le parcours vitrine.
+ */
+export const finalizePayment = action({
+  args: {
+    draftId: v.id("publicStripeCheckoutDrafts"),
+    paymentIntentId: v.string(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ requestId: Id<"requests">; accountCreated: boolean }> => {
+    await ctx.runQuery(internal.terminal.assertStaff, {});
+    const secretKey = recycappSecretKey();
+
+    const intent = await stripeRequest<{
+      id: string;
+      status?: string;
+      metadata?: { draftId?: string };
+    }>(`payment_intents/${args.paymentIntentId}`, secretKey);
+
+    if (intent.metadata?.draftId !== args.draftId) {
+      throw new ConvexError("Ce paiement ne correspond pas à l'article attendu.");
+    }
+    if (intent.status !== "succeeded") {
+      throw new ConvexError(
+        `Paiement non confirmé par Stripe (${intent.status ?? "statut inconnu"}). Aucune commande n'a été enregistrée.`,
+      );
+    }
+
+    const { requestId }: { requestId: Id<"requests"> } = await ctx.runMutation(
+      internal.requests.finalizePublicStripeCheckout,
+      {
+        draftId: args.draftId,
+        stripeSessionId: intent.id,
+        stripePaymentIntentId: intent.id,
+      },
+    );
+
+    // Le compte client est un plus : son échec ne remet pas en cause la vente.
+    let accountCreated = false;
+    const clerkSecret = process.env.CLERK_SECRET_KEY;
+    const buyer = await ctx.runQuery(internal.kiosk.customerOfRequest, { requestId });
+    if (clerkSecret && buyer?.email) {
+      const result = await ensureClerkCustomer(clerkSecret, {
+        email: buyer.email,
+        firstName: buyer.firstName,
+        lastName: buyer.lastName,
+        signupPath: "/acheter",
+      });
+      accountCreated = Boolean(result.clerkId) && !result.reused;
+      if (result.warning) {
+        console.error(`Compte client non créé (${buyer.email}) : ${result.warning}`);
+      }
+    }
+
+    return { requestId, accountCreated };
   },
 });
