@@ -233,8 +233,9 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
     app: "mesoutils",
     key: "mesoutils:gotravaux",
     label: "Gotravaux",
-    description: "Gestion des vehicules, informations de flotte et maintenance.",
-    actions: ["read", "create", "update"],
+    description:
+      "Gestion des vehicules, informations de flotte et maintenance. La suppression retire definitivement une maintenance de l'historique du vehicule.",
+    actions: ["read", "create", "update", "delete"],
   },
   {
     app: "mesoutils",
