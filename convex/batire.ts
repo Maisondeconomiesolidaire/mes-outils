@@ -1587,9 +1587,16 @@ function tokenWeight(token: string) {
   return Math.log(total / (1 + (tokenFrequency?.get(token) ?? 0))) + 0.5;
 }
 
-/** Feuilles les plus proches d'une description, par recouvrement pondéré. */
-function candidateLeaves(query: string, limit = 25) {
-  const leaves = buildLeafIndex();
+/**
+ * Feuilles les plus proches d'une description, par recouvrement pondéré.
+ *
+ * `onlyCategory` restreint la recherche au rayon déjà décidé : sans ce garde-
+ * fou, un mot commun ramènerait des feuilles d'un autre bout du catalogue.
+ */
+function candidateLeaves(query: string, limit = 25, onlyCategory?: string) {
+  const leaves = buildLeafIndex().filter(
+    (leaf) => !onlyCategory || leaf.category === onlyCategory,
+  );
   const queryTokens = [...tokenize(query)];
   if (queryTokens.length === 0) return [];
   const normalizedQuery = normalize(query);
@@ -1660,8 +1667,8 @@ Réponds UNIQUEMENT en JSON valide :
 {
   "title": "titre court et cherchable : matériau, dimension marquante, matière",
   "description": "3 à 6 phrases",
-  "productLabel": "ce qu'est l'objet, en 2 à 6 mots du vocabulaire du bâtiment : « plaque de plâtre BA13 hydrofuge », « tuile terre cuite mécanique », « radiateur électrique à inertie »",
-  "productKeywords": ["4 à 8 mots-clés métier décrivant la nature, la matière et l'usage"],
+  "productLabel": "LE NOM DE L'OBJET d'abord, puis ses précisions : « porte intérieure bois alvéolaire », « plaque de plâtre BA13 hydrofuge », « radiateur électrique à inertie ». Jamais une couleur, une finition ou une matière seule : une porte laquée blanche est une PORTE, pas de la peinture.",
+  "productKeywords": ["4 à 8 mots-clés métier : nature de l'objet, matière, format. Aucune couleur seule."],
   "condition": "une valeur EXACTE parmi ${JSON.stringify(CONDITIONS)}",
   "unit": "une valeur EXACTE parmi ${JSON.stringify(UNITS)}",
   "quantity": nombre dans cette unité ou null,
@@ -1705,29 +1712,61 @@ ${extraDetails?.trim() ? `\nPrécisions de l'équipe, fiables et prioritaires su
     // Le modèle reste un assistant : on ne laisse entrer que des valeurs du
     // référentiel, sans quoi la fiche serait invalide à l'enregistrement.
     // ── Classement dans l'arborescence ────────────────────────────────
+    //
+    // La catégorie se décide SÉPARÉMENT, sur une liste de quinze entrées : un
+    // modèle y est quasi infaillible, alors que noyée dans 578 feuilles la
+    // même décision dérape (une porte laquée finissait en « Peinture »). La
+    // recherche de la feuille se fait ensuite dans cette seule catégorie.
+    const label = (result.productLabel ?? result.title ?? "").trim();
     const description = [
-      result.productLabel,
+      // Le nom de l'objet compte double : les mots incidents — couleur,
+      // marque — ne doivent pas peser autant que sa nature.
+      label,
+      label,
       (result.productKeywords ?? []).join(" "),
-      result.title,
       result.material,
-      result.brand,
     ]
       .filter(Boolean)
       .join(" ");
 
-    const candidates = candidateLeaves(description);
+    let chosenCategory: string | null = null;
+    if (label) {
+      const categoryList = BT_CATEGORIES.map((name, index) => `${index + 1}. ${name}`).join("\n");
+      const categoryPick = await callChat<{ choice?: number }>(apiKey, {
+        model: "gpt-4o-mini",
+        temperature: 0,
+        max_tokens: 40,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "user",
+            content: `Dans quel rayon d'un négoce de matériaux ranger : « ${label} » ?
+
+${categoryList}
+
+Réponds {"choice": N}. Range l'objet selon CE QU'IL EST, jamais selon sa couleur ni sa finition.`,
+          },
+        ],
+      }).catch(() => ({ choice: 0 }));
+      const index = Number(categoryPick?.choice ?? 0);
+      if (Number.isInteger(index) && index >= 1 && index <= BT_CATEGORIES.length) {
+        chosenCategory = BT_CATEGORIES[index - 1];
+      }
+    }
+
+    const candidates = candidateLeaves(description, 25, chosenCategory ?? undefined);
     let chosen: Leaf | null = null;
 
     if (candidates.length > 0) {
       const list = candidates
         .map(
           (entry, index) =>
-            `${index + 1}. ${entry.leaf.category} › ${entry.leaf.family}${entry.leaf.subFamily ? ` › ${entry.leaf.subFamily}` : ""}`,
+            `${index + 1}. ${entry.leaf.family}${entry.leaf.subFamily ? ` › ${entry.leaf.subFamily}` : ""}`,
         )
         .join("\n");
 
-      // Seconde passe, sans image et sans texte libre : le modèle ne peut plus
-      // qu'indiquer un numéro, donc plus rien à mal orthographier.
+      // Seconde décision, sans image et sans texte libre : le modèle ne peut
+      // plus qu'indiquer un numéro, donc plus rien à mal orthographier.
       const pick = await callChat<{ choice?: number }>(apiKey, {
         model: "gpt-4o-mini",
         temperature: 0,
@@ -1736,44 +1775,40 @@ ${extraDetails?.trim() ? `\nPrécisions de l'équipe, fiables et prioritaires su
         messages: [
           {
             role: "user",
-            content: `Matériau de construction à classer : « ${description} ».
+            content: `Objet : « ${description} »${chosenCategory ? `, rangé dans « ${chosenCategory} »` : ""}.
 
-Voici les rangements possibles, du plus au moins probable :
+Rangements possibles :
 ${list}
 
-Réponds {"choice": N} avec le numéro du rangement le plus juste. Si vraiment aucun ne convient, réponds {"choice": 0}.`,
+Réponds {"choice": N} avec le numéro le plus juste, ou {"choice": 0} si aucun ne convient.`,
           },
         ],
       }).catch(() => ({ choice: 0 }));
 
       const index = Number(pick?.choice ?? 0);
-      if (Number.isInteger(index) && index >= 1 && index <= candidates.length) {
-        chosen = candidates[index - 1].leaf;
-      } else {
-        // Filet : la meilleure correspondance lexicale plutôt qu'un champ vide.
-        chosen = candidates[0].leaf;
-      }
+      chosen =
+        Number.isInteger(index) && index >= 1 && index <= candidates.length
+          ? candidates[index - 1].leaf
+          : // Filet : la meilleure correspondance lexicale plutôt qu'un vide.
+            candidates[0].leaf;
     }
 
     if (chosen) {
       result.category = chosen.category;
       result.family = chosen.family;
       result.subcategory = chosen.subFamily || null;
+    } else if (chosenCategory) {
+      // La catégorie est sûre même sans feuille : on la garde, elle vaut mieux
+      // que le premier rayon venu.
+      result.category = chosenCategory;
+      result.family = null;
+      result.subcategory = null;
     } else {
-      // Aucune piste : on retombe sur ce que la vision avait proposé, à
-      // condition qu'il existe vraiment dans le référentiel.
       if (!BT_CATEGORIES.includes(result.category)) result.category = BT_CATEGORIES[0];
-      if (result.family && !btFamilies(result.category).includes(result.family)) {
-        result.family = null;
-      }
-      if (
-        result.subcategory &&
-        (!result.family ||
-          !btSubFamilies(result.category, result.family).includes(result.subcategory))
-      ) {
-        result.subcategory = null;
-      }
+      result.family = null;
+      result.subcategory = null;
     }
+
     if (!CONDITIONS.includes(result.condition)) result.condition = "Bon état";
     if (!UNITS.includes(result.unit)) result.unit = "unité";
     const positive = (value: unknown) => {
