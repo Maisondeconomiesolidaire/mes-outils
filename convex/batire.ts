@@ -594,6 +594,8 @@ type MaterialAnalysis = {
   category: string;
   family?: string | null;
   subcategory?: string | null;
+  productLabel?: string | null;
+  productKeywords?: string[] | null;
   condition: string;
   unit: string;
   quantity?: number | null;
@@ -1468,6 +1470,152 @@ export function btSubFamilies(category: string, family: string) {
 const UNITS = ["unité", "m²", "m³", "ml", "kg", "tonne", "palette", "sac", "lot"];
 const CONDITIONS = ["Neuf", "Déstockage", "Très bon état", "Bon état", "À rénover"];
 
+
+/** Appel OpenAI en JSON strict, partagé par les deux passes du classement. */
+async function callChat<T>(apiKey: string, body: Record<string, unknown>): Promise<T> {
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    error?: { message?: string };
+  };
+  if (!response.ok) throw new ConvexError(payload.error?.message ?? "Erreur OpenAI.");
+  const content = payload.choices?.[0]?.message?.content;
+  if (!content) throw new ConvexError("Réponse vide du modèle.");
+  return JSON.parse(content) as T;
+}
+
+/* ─── Classement dans l'arborescence ───────────────────────────────────────
+ *
+ * Demander à un modèle de choisir parmi 578 sous-familles en une passe donne
+ * des résultats inégaux : il invente des libellés voisins, ou renonce et rend
+ * null. On procède donc en trois temps, du plus fiable au plus incertain :
+ *
+ * 1. la vision décrit le matériau (elle est bonne à ça) ;
+ * 2. un score lexical local retient les vingt-cinq feuilles les plus proches ;
+ * 3. le modèle n'a plus qu'à désigner un NUMÉRO dans cette courte liste.
+ *
+ * Comme la feuille détermine sa famille et sa catégorie, le chemin est
+ * cohérent par construction. Et si le modèle échoue, la meilleure
+ * correspondance locale sert de filet : les trois champs restent remplis.
+ */
+
+/** Feuille de l'arborescence, avec son chemin complet. */
+type Leaf = { category: string; family: string; subFamily: string };
+
+let leafIndex: Array<Leaf & { tokens: Set<string> }> | null = null;
+/** Fréquence de chaque mot dans l'arborescence, pour pondérer les rares. */
+let tokenFrequency: Map<string, number> | null = null;
+
+const STOPWORDS = new Set([
+  "de", "des", "du", "la", "le", "les", "et", "en", "pour", "aux", "au", "a",
+  "sur", "sous", "par", "avec", "autres", "autre", "produits", "produit",
+  "accessoires", "divers",
+]);
+
+function normalize(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function tokenize(value: string) {
+  return new Set(
+    normalize(value)
+      .split(" ")
+      .filter((token) => token.length > 2 && !STOPWORDS.has(token)),
+  );
+}
+
+function buildLeafIndex() {
+  if (leafIndex && tokenFrequency) return leafIndex;
+  const leaves: Array<Leaf & { tokens: Set<string> }> = [];
+  for (const [category, families] of Object.entries(BT_TAXONOMY)) {
+    for (const [family, subFamilies] of Object.entries(families)) {
+      if (subFamilies.length === 0) {
+        // Une famille sans sous-famille reste une destination valable.
+        leaves.push({
+          category,
+          family,
+          subFamily: "",
+          tokens: tokenize(`${category} ${family}`),
+        });
+        continue;
+      }
+      for (const subFamily of subFamilies) {
+        leaves.push({
+          category,
+          family,
+          subFamily,
+          // Le chemin entier nourrit le score : « tuiles » seul est ambigu,
+          // « toiture tuiles terre cuite » ne l'est plus.
+          tokens: tokenize(`${category} ${family} ${subFamily}`),
+        });
+      }
+    }
+  }
+  const frequency = new Map<string, number>();
+  for (const leaf of leaves) {
+    for (const token of leaf.tokens) frequency.set(token, (frequency.get(token) ?? 0) + 1);
+  }
+  leafIndex = leaves;
+  tokenFrequency = frequency;
+  return leaves;
+}
+
+/**
+ * Poids d'un mot : les rares décident, les banals départagent.
+ *
+ * Sans cela, « béton » — présent dans des dizaines de branches — pèserait
+ * autant que « parpaing », qui n'en désigne qu'une.
+ */
+function tokenWeight(token: string) {
+  const total = leafIndex?.length ?? 1;
+  return Math.log(total / (1 + (tokenFrequency?.get(token) ?? 0))) + 0.5;
+}
+
+/** Feuilles les plus proches d'une description, par recouvrement pondéré. */
+function candidateLeaves(query: string, limit = 25) {
+  const leaves = buildLeafIndex();
+  const queryTokens = [...tokenize(query)];
+  if (queryTokens.length === 0) return [];
+  const normalizedQuery = normalize(query);
+
+  return leaves
+    .map((leaf) => {
+      let score = 0;
+      for (const token of queryTokens) {
+        const weight = tokenWeight(token);
+        if (leaf.tokens.has(token)) {
+          score += 3 * weight;
+          continue;
+        }
+        // Pluriels et variantes proches : « parpaing » doit rejoindre
+        // « parpaings », sans pour autant rapprocher « bloc » de « blocage ».
+        const nearMatch = [...leaf.tokens].some(
+          (leafToken) =>
+            Math.abs(leafToken.length - token.length) <= 3 &&
+            Math.min(leafToken.length, token.length) >= 5 &&
+            (leafToken.startsWith(token) || token.startsWith(leafToken)),
+        );
+        if (nearMatch) score += 2.2 * weight;
+      }
+      // Le libellé de la feuille cité tel quel dans la description l'emporte.
+      const leafLabel = normalize(leaf.subFamily || leaf.family);
+      if (leafLabel.length > 4 && normalizedQuery.includes(leafLabel)) score += 8;
+      return { leaf, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
+}
+
 /**
  * Remplit la fiche d'un matériau à partir de ses photos.
  *
@@ -1499,16 +1647,12 @@ RÈGLES ABSOLUES
 - Le prix est un prix POUR UNE UNITÉ de vente, en euros, cohérent avec le marché du réemploi : nettement sous le neuf, ajusté à l'état.
 - La description fait 3 à 6 phrases : ce que c'est, ses dimensions et sa matière, son état réel avec ses défauts, ses usages possibles.
 
-Arborescence autorisée, sur trois niveaux (catégorie → famille → sous-familles). Descends aussi loin que les photos le permettent, et t'arrêtes dès que tu n'es plus sûr : mieux vaut une famille juste sans sous-famille qu'une branche inventée.
-${JSON.stringify(BT_TAXONOMY)}
-
 Réponds UNIQUEMENT en JSON valide :
 {
   "title": "titre court et cherchable : matériau, dimension marquante, matière",
   "description": "3 à 6 phrases",
-  "category": "niveau 1 : une valeur EXACTE parmi les clés de la taxonomie",
-  "family": "niveau 2 : une famille EXACTE de la catégorie choisie, ou null",
-  "subcategory": "niveau 3 : une sous-famille EXACTE de la famille choisie, ou null",
+  "productLabel": "ce qu'est l'objet, en 2 à 6 mots du vocabulaire du bâtiment : « plaque de plâtre BA13 hydrofuge », « tuile terre cuite mécanique », « radiateur électrique à inertie »",
+  "productKeywords": ["4 à 8 mots-clés métier décrivant la nature, la matière et l'usage"],
   "condition": "une valeur EXACTE parmi ${JSON.stringify(CONDITIONS)}",
   "unit": "une valeur EXACTE parmi ${JSON.stringify(UNITS)}",
   "quantity": nombre dans cette unité ou null,
@@ -1530,54 +1674,96 @@ Réponds UNIQUEMENT en JSON valide :
 }
 ${extraDetails?.trim() ? `\nPrécisions de l'équipe, fiables et prioritaires sur la photo : ${extraDetails.trim()}` : ""}`;
 
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        temperature: 0.2,
-        max_tokens: 1400,
+    const result = await callChat<MaterialAnalysis>(apiKey, {
+      model: "gpt-4o",
+      temperature: 0.2,
+      max_tokens: 1400,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "user",
+          content: [
+            ...imageUrls.map((url) => ({
+              type: "image_url",
+              image_url: { url, detail: "high" },
+            })),
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    });
+
+    // Le modèle reste un assistant : on ne laisse entrer que des valeurs du
+    // référentiel, sans quoi la fiche serait invalide à l'enregistrement.
+    // ── Classement dans l'arborescence ────────────────────────────────
+    const description = [
+      result.productLabel,
+      (result.productKeywords ?? []).join(" "),
+      result.title,
+      result.material,
+      result.brand,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    const candidates = candidateLeaves(description);
+    let chosen: Leaf | null = null;
+
+    if (candidates.length > 0) {
+      const list = candidates
+        .map(
+          (entry, index) =>
+            `${index + 1}. ${entry.leaf.category} › ${entry.leaf.family}${entry.leaf.subFamily ? ` › ${entry.leaf.subFamily}` : ""}`,
+        )
+        .join("\n");
+
+      // Seconde passe, sans image et sans texte libre : le modèle ne peut plus
+      // qu'indiquer un numéro, donc plus rien à mal orthographier.
+      const pick = await callChat<{ choice?: number }>(apiKey, {
+        model: "gpt-4o-mini",
+        temperature: 0,
+        max_tokens: 60,
         response_format: { type: "json_object" },
         messages: [
           {
             role: "user",
-            content: [
-              ...imageUrls.map((url) => ({
-                type: "image_url",
-                image_url: { url, detail: "high" },
-              })),
-              { type: "text", text: prompt },
-            ],
+            content: `Matériau de construction à classer : « ${description} ».
+
+Voici les rangements possibles, du plus au moins probable :
+${list}
+
+Réponds {"choice": N} avec le numéro du rangement le plus juste. Si vraiment aucun ne convient, réponds {"choice": 0}.`,
           },
         ],
-      }),
-    });
+      }).catch(() => ({ choice: 0 }));
 
-    const payload = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-      error?: { message?: string };
-    };
-    if (!response.ok) throw new ConvexError(payload.error?.message ?? "Erreur OpenAI.");
-    const content = payload.choices?.[0]?.message?.content;
-    if (!content) throw new ConvexError("Réponse vide du modèle.");
-
-    const result = JSON.parse(content) as MaterialAnalysis;
-
-    // Le modèle reste un assistant : on ne laisse entrer que des valeurs du
-    // référentiel, sans quoi la fiche serait invalide à l'enregistrement.
-    if (!BT_CATEGORIES.includes(result.category)) result.category = BT_CATEGORIES[0];
-    // Une branche incohérente ne vaut pas mieux qu'un champ vide : elle
-    // casserait la navigation par catégorie. On coupe au premier niveau faux,
-    // et les niveaux inférieurs tombent avec lui.
-    if (result.family && !btFamilies(result.category).includes(result.family)) {
-      result.family = null;
-      result.subcategory = null;
+      const index = Number(pick?.choice ?? 0);
+      if (Number.isInteger(index) && index >= 1 && index <= candidates.length) {
+        chosen = candidates[index - 1].leaf;
+      } else {
+        // Filet : la meilleure correspondance lexicale plutôt qu'un champ vide.
+        chosen = candidates[0].leaf;
+      }
     }
-    if (
-      result.subcategory &&
-      (!result.family || !btSubFamilies(result.category, result.family).includes(result.subcategory))
-    ) {
-      result.subcategory = null;
+
+    if (chosen) {
+      result.category = chosen.category;
+      result.family = chosen.family;
+      result.subcategory = chosen.subFamily || null;
+    } else {
+      // Aucune piste : on retombe sur ce que la vision avait proposé, à
+      // condition qu'il existe vraiment dans le référentiel.
+      if (!BT_CATEGORIES.includes(result.category)) result.category = BT_CATEGORIES[0];
+      if (result.family && !btFamilies(result.category).includes(result.family)) {
+        result.family = null;
+      }
+      if (
+        result.subcategory &&
+        (!result.family ||
+          !btSubFamilies(result.category, result.family).includes(result.subcategory))
+      ) {
+        result.subcategory = null;
+      }
     }
     if (!CONDITIONS.includes(result.condition)) result.condition = "Bon état";
     if (!UNITS.includes(result.unit)) result.unit = "unité";
