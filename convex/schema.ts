@@ -2584,7 +2584,11 @@ export default defineSchema(
   btMaterials: defineTable({
     title: v.string(),
     description: v.string(),
+    /** Niveau 1 de l'arborescence. */
     category: v.string(),
+    /** Niveau 2 : famille. */
+    family: v.optional(v.string()),
+    /** Niveau 3 : sous-famille. */
     subcategory: v.optional(v.string()),
     condition: btCondition,
     /** Unité de vente : c'est elle qui donne son sens au prix et au stock. */
