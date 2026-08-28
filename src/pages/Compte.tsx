@@ -135,7 +135,7 @@ export function Compte() {
             <p className="text-sm text-[var(--muted-foreground)]">Déconnectez-vous de cet appareil.</p>
           </div>
           <Button variant="outline" onClick={() => void signOut({ redirectUrl: "/" })}>
-            <LogOut className="h-4 w-4" /> Se déconnecter
+            <LogOut className="h-4 w-4" /> Me déconnecter
           </Button>
         </div>
       </section>
