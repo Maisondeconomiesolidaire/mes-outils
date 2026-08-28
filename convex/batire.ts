@@ -606,20 +606,24 @@ type MaterialAnalysis = {
   aiNotes?: string | null;
 };
 
-export const BT_CATEGORIES = [
-  "Gros œuvre et maçonnerie",
-  "Charpente et couverture",
-  "Menuiseries et fermetures",
-  "Isolation",
-  "Revêtements sols et murs",
-  "Plomberie et sanitaire",
-  "Électricité et éclairage",
-  "Chauffage et ventilation",
-  "Quincaillerie et fixations",
-  "Peinture et droguerie",
-  "Aménagement extérieur",
-  "Outillage et équipement",
-];
+
+/** Taxonomie du catalogue : catégories et sous-catégories autorisées. */
+export const BT_TAXONOMY: Record<string, string[]> = {
+  "Gros œuvre et maçonnerie": ["Parpaings et blocs béton", "Briques et terre cuite", "Ciments, mortiers et enduits", "Granulats, sable et gravats", "Aciers et treillis", "Coffrage et étaiement"],
+  "Charpente et couverture": ["Bois de charpente", "Fermettes et poutres", "Tuiles", "Ardoises", "Tôles et bacs acier", "Zinguerie et gouttières", "Écrans sous-toiture"],
+  "Menuiseries et fermetures": ["Portes intérieures", "Portes d'entrée", "Fenêtres et baies", "Volets et stores", "Portes de garage", "Vitrages", "Quincaillerie de menuiserie"],
+  Isolation: ["Laine de verre", "Laine de roche", "Isolants biosourcés", "Polystyrène et polyuréthane", "Isolants minces", "Pare-vapeur et membranes"],
+  "Revêtements sols et murs": ["Carrelage et faïence", "Parquet et stratifié", "Sols souples", "Plaques de plâtre", "Lambris et bardages", "Papiers peints et toiles"],
+  "Plomberie et sanitaire": ["Éviers et lavabos", "WC et abattants", "Douches et baignoires", "Robinetterie", "Tuyauterie et raccords", "Chauffe-eau"],
+  "Électricité et éclairage": ["Câbles et gaines", "Tableaux et disjoncteurs", "Appareillage mural", "Luminaires intérieurs", "Éclairage extérieur", "Domotique"],
+  "Chauffage et ventilation": ["Radiateurs", "Poêles et inserts", "Chaudières", "VMC et extracteurs", "Conduits et raccords", "Climatisation"],
+  "Quincaillerie et fixations": ["Visserie et boulonnerie", "Chevilles et ancrages", "Charnières et paumelles", "Serrures et cylindres", "Poignées et boutons", "Colles et mastics"],
+  "Peinture et droguerie": ["Peintures intérieures", "Peintures extérieures", "Lasures et vernis", "Sous-couches et primaires", "Outils d'application", "Solvants et nettoyants"],
+  "Aménagement extérieur": ["Dalles et pavés", "Clôtures et portails", "Bordures et margelles", "Terrasses bois et composite", "Mobilier et jardinières", "Récupération d'eau"],
+  "Outillage et équipement": ["Outillage à main", "Outillage électroportatif", "Échafaudages et échelles", "Brouettes et manutention", "Équipements de protection", "Consommables"],
+};
+
+export const BT_CATEGORIES = Object.keys(BT_TAXONOMY);
 
 const UNITS = ["unité", "m²", "m³", "ml", "kg", "tonne", "palette", "sac", "lot"];
 const CONDITIONS = ["Neuf", "Déstockage", "Très bon état", "Bon état", "À rénover"];
@@ -655,12 +659,15 @@ RÈGLES ABSOLUES
 - Le prix est un prix POUR UNE UNITÉ de vente, en euros, cohérent avec le marché du réemploi : nettement sous le neuf, ajusté à l'état.
 - La description fait 3 à 6 phrases : ce que c'est, ses dimensions et sa matière, son état réel avec ses défauts, ses usages possibles.
 
+Taxonomie autorisée (catégorie → sous-catégories) :
+${JSON.stringify(BT_TAXONOMY)}
+
 Réponds UNIQUEMENT en JSON valide :
 {
   "title": "titre court et cherchable : matériau, dimension marquante, matière",
   "description": "3 à 6 phrases",
-  "category": "une valeur EXACTE parmi ${JSON.stringify(BT_CATEGORIES)}",
-  "subcategory": "précision libre ou null",
+  "category": "une valeur EXACTE parmi les clés de la taxonomie",
+  "subcategory": "une valeur EXACTE de la liste de la catégorie choisie, ou null",
   "condition": "une valeur EXACTE parmi ${JSON.stringify(CONDITIONS)}",
   "unit": "une valeur EXACTE parmi ${JSON.stringify(UNITS)}",
   "quantity": nombre dans cette unité ou null,
@@ -717,7 +724,12 @@ ${extraDetails?.trim() ? `\nPrécisions de l'équipe, fiables et prioritaires su
 
     // Le modèle reste un assistant : on ne laisse entrer que des valeurs du
     // référentiel, sans quoi la fiche serait invalide à l'enregistrement.
-    if (!BT_CATEGORIES.includes(result.category)) result.category = "Gros œuvre et maçonnerie";
+    if (!BT_CATEGORIES.includes(result.category)) result.category = BT_CATEGORIES[0];
+    // Une sous-catégorie hors de la liste de sa catégorie ne vaut pas mieux
+    // qu'un champ vide : elle casserait le filtrage de la boutique.
+    if (result.subcategory && !BT_TAXONOMY[result.category]?.includes(result.subcategory)) {
+      result.subcategory = null;
+    }
     if (!CONDITIONS.includes(result.condition)) result.condition = "Bon état";
     if (!UNITS.includes(result.unit)) result.unit = "unité";
     const positive = (value: unknown) => {
@@ -732,5 +744,227 @@ ${extraDetails?.trim() ? `\nPrécisions de l'équipe, fiables et prioritaires su
     result.thicknessMm = positive(result.thicknessMm);
     result.weightKg = positive(result.weightKg);
     return result;
+  },
+});
+
+/* ─── Messagerie ───────────────────────────────────────────────────────────── */
+
+/** Un fil de discussion par client et par matériau. */
+function threadKey(clientId: string, materialId: string | undefined) {
+  return `${clientId}::${materialId ?? "general"}`;
+}
+
+export const sendMessage = mutation({
+  args: {
+    materialId: v.optional(v.id("btMaterials")),
+    body: v.string(),
+    /** Fil visé quand l'équipe répond : sans lui, on écrirait à soi-même. */
+    clientId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireUser(ctx);
+    const body = args.body.trim();
+    if (!body) throw new ConvexError("Le message est vide.");
+
+    const material = args.materialId ? await ctx.db.get(args.materialId) : null;
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    const fromStaff = accessAllows(access, PAGE_DEMANDES, "read");
+
+    if (fromStaff && !args.clientId) {
+      throw new ConvexError("Indiquez le fil auquel répondre.");
+    }
+
+    // Le fil appartient au client : quand l'équipe répond, on reprend ses
+    // coordonnées du fil existant plutôt que celles du salarié.
+    let clientId = args.clientId ?? identity.subject;
+    let clientName = formatUserName(identity);
+    let clientEmail = identity.email ?? "";
+    if (fromStaff && args.clientId) {
+      const previous = await ctx.db
+        .query("btMessages")
+        .withIndex("by_client", (q) => q.eq("clientId", args.clientId!))
+        .first();
+      clientId = args.clientId;
+      clientName = previous?.clientName ?? clientName;
+      clientEmail = previous?.clientEmail ?? "";
+    }
+
+    return await ctx.db.insert("btMessages", {
+      materialId: args.materialId,
+      materialTitle: material?.title ?? "Discussion générale",
+      clientId,
+      clientName,
+      clientEmail,
+      body,
+      fromStaff,
+      authorName: formatUserName(identity),
+      readByStaff: fromStaff,
+      readByClient: !fromStaff,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/** Messages du client connecté, groupés par fil. */
+export const myMessages = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    return await ctx.db
+      .query("btMessages")
+      .withIndex("by_client", (q) => q.eq("clientId", identity.subject))
+      .order("asc")
+      .collect();
+  },
+});
+
+/** Fils vus par l'équipe, le plus récemment actif en tête. */
+export const listThreads = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const messages = await ctx.db.query("btMessages").order("desc").take(1000);
+    const threads = new Map<
+      string,
+      {
+        key: string;
+        clientId: string;
+        clientName: string;
+        clientEmail: string;
+        materialId: Id<"btMaterials"> | undefined;
+        materialTitle: string;
+        lastMessage: string;
+        lastAt: number;
+        unread: number;
+        messages: typeof messages;
+      }
+    >();
+    for (const message of messages) {
+      const key = threadKey(message.clientId, message.materialId);
+      const thread = threads.get(key);
+      if (!thread) {
+        threads.set(key, {
+          key,
+          clientId: message.clientId,
+          clientName: message.clientName,
+          clientEmail: message.clientEmail,
+          materialId: message.materialId,
+          materialTitle: message.materialTitle,
+          lastMessage: message.body,
+          lastAt: message.createdAt,
+          unread: message.fromStaff || message.readByStaff ? 0 : 1,
+          messages: [message],
+        });
+      } else {
+        thread.messages.push(message);
+        if (!message.fromStaff && !message.readByStaff) thread.unread++;
+      }
+    }
+    return [...threads.values()].map((thread) => ({
+      ...thread,
+      messages: [...thread.messages].sort((a, b) => a.createdAt - b.createdAt),
+    }));
+  },
+});
+
+export const markThreadRead = mutation({
+  args: { clientId: v.string() },
+  handler: async (ctx, { clientId }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const messages = await ctx.db
+      .query("btMessages")
+      .withIndex("by_client", (q) => q.eq("clientId", clientId))
+      .collect();
+    for (const message of messages) {
+      if (!message.fromStaff && !message.readByStaff) {
+        await ctx.db.patch(message._id, { readByStaff: true });
+      }
+    }
+  },
+});
+
+/* ─── Import de masse ──────────────────────────────────────────────────────── */
+
+/**
+ * Création en lot depuis un tableur.
+ *
+ * Chaque ligne est validée séparément : un fichier de cent lignes dont trois
+ * sont mauvaises doit en importer quatre-vingt-dix-sept, et dire lesquelles
+ * ont été écartées — pas échouer en bloc.
+ */
+export const importMaterials = mutation({
+  args: {
+    rows: v.array(
+      v.object({
+        title: v.string(),
+        description: v.optional(v.string()),
+        category: v.optional(v.string()),
+        subcategory: v.optional(v.string()),
+        condition: v.optional(v.string()),
+        unit: v.optional(v.string()),
+        quantity: v.optional(v.number()),
+        price: v.optional(v.number()),
+        brand: v.optional(v.string()),
+        material: v.optional(v.string()),
+        depot: v.optional(v.string()),
+        location: v.optional(v.string()),
+        qrReference: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, { rows }) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "create");
+    const identity = await requireUser(ctx);
+    if (rows.length > 500) throw new ConvexError("500 lignes au maximum par import.");
+
+    const units = ["unité", "m²", "m³", "ml", "kg", "tonne", "palette", "sac", "lot"];
+    const conditions = ["Neuf", "Déstockage", "Très bon état", "Bon état", "À rénover"];
+    const now = Date.now();
+    const errors: Array<{ line: number; reason: string }> = [];
+    let imported = 0;
+
+    for (const [index, row] of rows.entries()) {
+      const title = row.title?.trim();
+      if (!title) {
+        errors.push({ line: index + 2, reason: "Titre manquant" });
+        continue;
+      }
+      const category = BT_CATEGORIES.includes(row.category ?? "")
+        ? row.category!
+        : BT_CATEGORIES[0];
+      const subcategory =
+        row.subcategory && BT_TAXONOMY[category]?.includes(row.subcategory)
+          ? row.subcategory
+          : undefined;
+      const unit = units.includes(row.unit ?? "") ? row.unit! : "unité";
+      const condition = conditions.includes(row.condition ?? "") ? row.condition! : "Bon état";
+
+      await ctx.db.insert("btMaterials", {
+        title,
+        description: row.description?.trim() || title,
+        category,
+        subcategory,
+        condition: condition as never,
+        unit: unit as never,
+        quantity: Math.max(0, Number(row.quantity) || 0),
+        price: Math.max(0, Number(row.price) || 0),
+        brand: row.brand?.trim() || undefined,
+        material: row.material?.trim() || undefined,
+        depot: row.depot?.trim() || undefined,
+        location: row.location?.trim() || undefined,
+        qrReference: row.qrReference?.trim().toUpperCase() || undefined,
+        photos: [],
+        // Un import arrive en brouillon : personne n'a encore vu ces fiches,
+        // les publier d'office mettrait en ligne des lignes non relues.
+        status: "brouillon",
+        published: false,
+        createdBy: formatUserName(identity),
+        createdAt: now,
+        updatedAt: now,
+      });
+      imported++;
+    }
+    return { imported, errors };
   },
 });

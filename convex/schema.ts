@@ -2701,6 +2701,32 @@ export default defineSchema(
     .index("by_material", ["materialId"])
     .index("by_stripeSession", ["stripeSessionId"]),
 
+  /**
+   * Messagerie Bâtire : un fil par client et par matériau.
+   *
+   * Négocier une reprise ou organiser un enlèvement se fait en quelques
+   * échanges ; les rattacher au matériau évite de chercher de quoi on parle.
+   */
+  btMessages: defineTable({
+    /** Fil = matériau + client. Un matériau retiré garde son historique. */
+    materialId: v.optional(v.id("btMaterials")),
+    materialTitle: v.string(),
+    /** Identifiant Clerk du client : c'est lui qui identifie le fil. */
+    clientId: v.string(),
+    clientName: v.string(),
+    clientEmail: v.string(),
+    body: v.string(),
+    /** Vrai si le message vient de l'équipe. */
+    fromStaff: v.boolean(),
+    authorName: v.string(),
+    readByStaff: v.optional(v.boolean()),
+    readByClient: v.optional(v.boolean()),
+    createdAt: v.number(),
+  })
+    .index("by_client", ["clientId"])
+    .index("by_material", ["materialId"])
+    .index("by_createdAt", ["createdAt"]),
+
   /** QR codes imprimés à l'avance, collés sur les matériaux à leur arrivée. */
   btQrCodes: defineTable({
     reference: v.string(),
