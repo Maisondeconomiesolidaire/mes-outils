@@ -2670,6 +2670,37 @@ export default defineSchema(
     .index("by_reference", ["reference"])
     .index("by_createdAt", ["createdAt"]),
 
+  /** Ventes Bâtire : paiement en ligne (boutique) ou au terminal (kiosque). */
+  btOrders: defineTable({
+    reference: v.string(),
+    materialId: v.id("btMaterials"),
+    materialTitle: v.string(),
+    quantity: v.number(),
+    unit: btUnit,
+    /** Prix unitaire au moment de la vente : le catalogue peut changer après. */
+    unitPrice: v.number(),
+    /** Montant total en centimes, tel qu'encaissé par Stripe. */
+    amountCents: v.number(),
+    customer: v.object({
+      firstName: v.string(),
+      lastName: v.string(),
+      email: v.string(),
+      phone: v.optional(v.string()),
+      company: v.optional(v.string()),
+    }),
+    channel: v.union(v.literal("boutique"), v.literal("terminal")),
+    status: v.union(v.literal("en_attente"), v.literal("payee"), v.literal("annulee")),
+    stripeSessionId: v.optional(v.string()),
+    stripePaymentIntentId: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+    userId: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_status", ["status"])
+    .index("by_reference", ["reference"])
+    .index("by_material", ["materialId"])
+    .index("by_stripeSession", ["stripeSessionId"]),
+
   /** QR codes imprimés à l'avance, collés sur les matériaux à leur arrivée. */
   btQrCodes: defineTable({
     reference: v.string(),

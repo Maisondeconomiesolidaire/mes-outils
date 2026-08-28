@@ -9,11 +9,12 @@
  * vente, ni le prix ni le stock ne veulent dire quoi que ce soit.
  */
 import { ConvexError, v } from "convex/values";
-import { action, mutation, query, internalQuery } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { accessAllows, requireCrmPermission, requireUser, formatUserName } from "./lib";
-import { btCondition, btMaterialStatus, btRequestOutcome, btRequestType, btUnit } from "./schema";
+import { recycappSecretKey, stripeRequest } from "./stripe";
+import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
 const PAGE_DEMANDES = "batire:demandes";
@@ -25,11 +26,6 @@ async function withPhotoUrls(
 ) {
   const photoUrls = await Promise.all(material.photos.map((id) => ctx.storage.getUrl(id)));
   return { ...material, photoUrls: photoUrls.filter((url): url is string => Boolean(url)) };
-}
-
-function cleanText(value: string | undefined | null) {
-  const trimmed = value?.trim();
-  return trimmed ? trimmed : undefined;
 }
 
 /* ─── Catalogue, côté équipe ───────────────────────────────────────────────── */
@@ -286,95 +282,214 @@ export const shopFacets = query({
   },
 });
 
-/* ─── Demandes clients ─────────────────────────────────────────────────────── */
+/* ─── Ventes ───────────────────────────────────────────────────────────────
+ *
+ * Deux chemins, un seul compte Stripe (celui de la Recyclerie pour l'instant) :
+ * en boutique, le client paie en ligne par Stripe Checkout ; au dépôt, il scanne
+ * le QR code de l'étiquette et l'équipe encaisse au terminal.
+ *
+ * Le montant n'est jamais calculé par le navigateur : il est recalculé ici, à
+ * partir du prix du catalogue et de la quantité demandée.
+ */
 
-async function nextRequestReference(ctx: { db: { query: (t: "btRequests") => any } }) {
-  const all = await ctx.db.query("btRequests").collect();
-  return String(all.length + 1).padStart(5, "0");
+const customerValidator = v.object({
+  firstName: v.string(),
+  lastName: v.string(),
+  email: v.string(),
+  phone: v.optional(v.string()),
+  company: v.optional(v.string()),
+});
+
+async function nextOrderReference(ctx: { db: { query: (t: "btOrders") => any } }) {
+  const all = await ctx.db.query("btOrders").collect();
+  return `BT${String(all.length + 1).padStart(5, "0")}`;
 }
 
-export const createRequest = mutation({
+/** Commande en attente de paiement : c'est elle qui fige prix et quantité. */
+export const createOrder = internalMutation({
   args: {
-    type: btRequestType,
-    customer: v.object({
-      firstName: v.string(),
-      lastName: v.string(),
-      email: v.string(),
-      phone: v.string(),
-      company: v.optional(v.string()),
-    }),
-    items: v.array(
-      v.object({
-        materialId: v.optional(v.id("btMaterials")),
-        title: v.string(),
-        quantity: v.number(),
-        unit: btUnit,
-      }),
-    ),
-    message: v.optional(v.string()),
-    photos: v.optional(v.array(v.id("_storage"))),
-    depot: v.optional(v.string()),
+    materialId: v.id("btMaterials"),
+    quantity: v.number(),
+    customer: customerValidator,
+    channel: v.union(v.literal("boutique"), v.literal("terminal")),
+    userId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const material = await ctx.db.get(args.materialId);
+    if (!material) throw new ConvexError("Matériau introuvable.");
+    if (material.status !== "disponible") {
+      throw new ConvexError(`« ${material.title} » n'est plus disponible.`);
+    }
+    if (material.price <= 0) throw new ConvexError("Ce matériau n'a pas de prix.");
+    const quantity = Math.max(0, Number(args.quantity) || 0);
+    if (quantity <= 0) throw new ConvexError("Indiquez une quantité.");
+    if (quantity > material.quantity) {
+      throw new ConvexError(
+        `Stock insuffisant : ${material.quantity} ${material.unit} disponible.`,
+      );
+    }
+
+    const amountCents = Math.round(material.price * quantity * 100);
+    if (amountCents <= 0) throw new ConvexError("Le montant doit être supérieur à 0 €.");
+
+    const orderId = await ctx.db.insert("btOrders", {
+      reference: await nextOrderReference(ctx),
+      materialId: args.materialId,
+      materialTitle: material.title,
+      quantity,
+      unit: material.unit,
+      unitPrice: material.price,
+      amountCents,
+      customer: { ...args.customer, email: args.customer.email.trim().toLowerCase() },
+      channel: args.channel,
+      status: "en_attente",
+      userId: args.userId,
+      createdAt: Date.now(),
+    });
+    return { orderId, amountCents, title: material.title, unit: material.unit };
+  },
+});
+
+export const attachStripeSession = internalMutation({
+  args: { orderId: v.id("btOrders"), stripeSessionId: v.string() },
+  handler: async (ctx, { orderId, stripeSessionId }) => {
+    await ctx.db.patch(orderId, { stripeSessionId });
+  },
+});
+
+/**
+ * Encaissement d'une commande : la vente est enregistrée et le stock diminue.
+ *
+ * Idempotent — Stripe peut rejouer un retour, et le client peut recharger la
+ * page de confirmation : une commande déjà payée ne décrémente pas deux fois.
+ */
+export const markOrderPaid = internalMutation({
+  args: { orderId: v.id("btOrders"), stripePaymentIntentId: v.optional(v.string()) },
+  handler: async (ctx, { orderId, stripePaymentIntentId }) => {
+    const order = await ctx.db.get(orderId);
+    if (!order) throw new ConvexError("Commande introuvable.");
+    if (order.status === "payee") return { alreadyPaid: true };
+
+    await ctx.db.patch(orderId, {
+      status: "payee",
+      stripePaymentIntentId,
+      paidAt: Date.now(),
+    });
+
+    const material = await ctx.db.get(order.materialId);
+    if (material) {
+      const remaining = Math.max(0, material.quantity - order.quantity);
+      await ctx.db.patch(order.materialId, {
+        quantity: remaining,
+        // Plus de stock : le matériau sort de la boutique de lui-même, sinon
+        // il continuerait d'attirer des acheteurs vers un lot déjà parti.
+        status: remaining === 0 ? "vendu" : material.status,
+        updatedAt: Date.now(),
+      });
+    }
+    return { alreadyPaid: false };
+  },
+});
+
+export const orderById = internalQuery({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => await ctx.db.get(orderId),
+});
+
+/** Ouvre le paiement en ligne d'un matériau (boutique). */
+export const startCheckout = action({
+  args: {
+    materialId: v.id("btMaterials"),
+    quantity: v.number(),
+    customer: customerValidator,
+    returnUrl: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ checkoutUrl: string; orderId: Id<"btOrders"> }> => {
+    const secretKey = recycappSecretKey();
     const email = args.customer.email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email)) throw new ConvexError("Adresse email invalide.");
     if (!args.customer.firstName.trim() || !args.customer.lastName.trim()) {
       throw new ConvexError("Indiquez votre prénom et votre nom.");
     }
+
     const identity = await ctx.auth.getUserIdentity();
-    const now = Date.now();
-    return await ctx.db.insert("btRequests", {
-      reference: await nextRequestReference(ctx),
-      type: args.type,
+    const order: {
+      orderId: Id<"btOrders">;
+      amountCents: number;
+      title: string;
+      unit: string;
+    } = await ctx.runMutation(internal.batire.createOrder, {
+      materialId: args.materialId,
+      quantity: args.quantity,
       customer: { ...args.customer, email },
-      items: args.items,
-      message: cleanText(args.message),
-      photos: args.photos?.length ? args.photos : undefined,
-      outcome: "nouveau",
-      depot: cleanText(args.depot),
+      channel: "boutique",
       userId: identity?.subject,
-      createdAt: now,
-      updatedAt: now,
     });
-  },
-});
 
-export const listRequests = query({
-  args: { outcome: v.optional(btRequestOutcome) },
-  handler: async (ctx, args) => {
-    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
-    const requests = args.outcome
-      ? await ctx.db
-          .query("btRequests")
-          .withIndex("by_outcome", (q) => q.eq("outcome", args.outcome!))
-          .order("desc")
-          .collect()
-      : await ctx.db.query("btRequests").order("desc").collect();
-
-    return await Promise.all(
-      requests.map(async (request) => ({
-        ...request,
-        photoUrls: (
-          await Promise.all((request.photos ?? []).map((id) => ctx.storage.getUrl(id)))
-        ).filter((url): url is string => Boolean(url)),
-      })),
+    const returnUrl = new URL(args.returnUrl);
+    returnUrl.searchParams.set("order_id", order.orderId);
+    const session = await stripeRequest<{ id: string; url: string }>(
+      "checkout/sessions",
+      secretKey,
+      {
+        mode: "payment",
+        success_url: `${returnUrl.toString()}&status=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${returnUrl.toString()}&status=cancelled`,
+        locale: "fr",
+        customer_email: email,
+        "line_items[0][quantity]": "1",
+        "line_items[0][price_data][currency]": "eur",
+        "line_items[0][price_data][unit_amount]": String(order.amountCents),
+        "line_items[0][price_data][product_data][name]": order.title,
+        "line_items[0][price_data][product_data][description]": `${args.quantity} ${order.unit}`,
+        "metadata[orderId]": order.orderId,
+        "metadata[source]": "batire-boutique",
+        "payment_intent_data[metadata][orderId]": order.orderId,
+        "payment_intent_data[metadata][source]": "batire-boutique",
+      },
     );
+
+    await ctx.runMutation(internal.batire.attachStripeSession, {
+      orderId: order.orderId,
+      stripeSessionId: session.id,
+    });
+    return { checkoutUrl: session.url, orderId: order.orderId };
   },
 });
 
-export const updateRequest = mutation({
-  args: {
-    id: v.id("btRequests"),
-    outcome: v.optional(btRequestOutcome),
-    internalNotes: v.optional(v.string()),
-  },
-  handler: async (ctx, { id, outcome, internalNotes }) => {
-    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
-    await ctx.db.patch(id, {
-      ...(outcome ? { outcome } : {}),
-      ...(internalNotes !== undefined ? { internalNotes: cleanText(internalNotes) } : {}),
-      updatedAt: Date.now(),
+/** Confirme la commande au retour de Stripe, statut relu chez eux. */
+export const confirmCheckout = action({
+  args: { orderId: v.id("btOrders"), sessionId: v.string() },
+  handler: async (ctx, args): Promise<{ reference: string }> => {
+    const secretKey = recycappSecretKey();
+    const session = await stripeRequest<{
+      payment_status?: string;
+      payment_intent?: string;
+      metadata?: { orderId?: string };
+    }>(`checkout/sessions/${args.sessionId}`, secretKey);
+
+    if (session.metadata?.orderId !== args.orderId) {
+      throw new ConvexError("Ce paiement ne correspond pas à la commande.");
+    }
+    if (session.payment_status !== "paid") {
+      throw new ConvexError("Paiement non confirmé par Stripe.");
+    }
+
+    await ctx.runMutation(internal.batire.markOrderPaid, {
+      orderId: args.orderId,
+      stripePaymentIntentId:
+        typeof session.payment_intent === "string" ? session.payment_intent : undefined,
     });
+    const order = await ctx.runQuery(internal.batire.orderById, { orderId: args.orderId });
+    return { reference: order?.reference ?? "" };
+  },
+});
+
+export const listOrders = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    return await ctx.db.query("btOrders").order("desc").take(300);
   },
 });
 
