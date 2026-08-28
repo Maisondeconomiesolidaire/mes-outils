@@ -1652,7 +1652,9 @@ RÈGLES ABSOLUES
 - L'unité de vente découle de la nature du matériau : isolant, carrelage, parquet, bardage → m² ; sable, gravats, terre → tonne ; bois de charpente, corniche, tube → ml ; béton, remblai → m³ ; porte, fenêtre, radiateur, sanitaire → unité ; ciment, enduit → sac ; lot hétérogène → lot ; conditionnement complet → palette.
 - La quantité s'exprime dans cette unité, d'après ce que montrent les photos (nombre de plaques, de palettes, longueur du tas). Dans le doute, null.
 - Le prix est un prix POUR UNE UNITÉ de vente, en euros, cohérent avec le marché du réemploi : nettement sous le neuf, ajusté à l'état.
-- La description fait 3 à 6 phrases : ce que c'est, ses dimensions et sa matière, son état réel avec ses défauts, ses usages possibles.
+- La description fait 3 à 6 phrases : ce que c'est, ses dimensions et sa matière, son état réel avec ses défauts. RIEN D'AUTRE.
+- INTERDIT d'évoquer les usages, les projets ou les destinataires : pas de « idéal pour », « parfait pour », « convient à », « permet de », « s'utilise en », ni aucune suggestion de chantier. L'acheteur est un professionnel, il sait à quoi sert le matériau — le lui expliquer sonne faux et allonge la fiche pour rien.
+- Décris ce que tu vois, pas ce qu'on pourrait en faire.
 
 Réponds UNIQUEMENT en JSON valide :
 {
