@@ -71,7 +71,7 @@ export type AppDefinition = {
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse" | "feedback";
+  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse" | "feedback" | "batire";
   key: string;
   label: string;
   description: string;
@@ -471,7 +471,32 @@ export const FEEDBACK_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES, ...FEEDBACK_PAGES];
+export const BATIRE_PAGES: PermissionPage[] = [
+  {
+    app: "batire",
+    key: "batire:materiaux",
+    label: "Matériaux",
+    description:
+      "Catalogue des matériaux : fiches, photos, génération de l'annonce par l'IA, QR codes et mise en ligne.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "batire",
+    key: "batire:demandes",
+    label: "Demandes",
+    description: "Devis, réservations et propositions de reprise envoyés par les clients.",
+    actions: ["read", "update"],
+  },
+  {
+    app: "batire",
+    key: "batire:admin",
+    label: "Admin Bâtire",
+    description: "Configuration et droits de l'application Bâtire.",
+    actions: ["read", "manage"],
+  },
+];
+
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES, ...FEEDBACK_PAGES, ...BATIRE_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
@@ -638,5 +663,6 @@ export function groupPagesByApp() {
     { key: "bennespro", label: "Bennes & Pro", pages: BENNESPRO_PAGES },
     { key: "pointeuse", label: "Pointeuse", pages: POINTEUSE_PAGES },
     { key: "feedback", label: "Feedback", pages: FEEDBACK_PAGES },
+    { key: "batire", label: "Bâtire", pages: BATIRE_PAGES },
   ] as const;
 }
