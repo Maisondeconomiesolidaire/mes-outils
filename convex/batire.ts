@@ -19,13 +19,17 @@ import { btCondition, btMaterialStatus, btUnit } from "./schema";
 const PAGE_MATERIAUX = "batire:materiaux";
 const PAGE_DEMANDES = "batire:demandes";
 
-/** Photos signées : un identifiant de stockage seul ne s'affiche pas. */
+/** Photos et fiche technique signées : un identifiant de stockage ne s'ouvre pas. */
 async function withPhotoUrls(
   ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
   material: Doc<"btMaterials">,
 ) {
   const photoUrls = await Promise.all(material.photos.map((id) => ctx.storage.getUrl(id)));
-  return { ...material, photoUrls: photoUrls.filter((url): url is string => Boolean(url)) };
+  return {
+    ...material,
+    photoUrls: photoUrls.filter((url): url is string => Boolean(url)),
+    datasheetUrl: material.datasheet ? await ctx.storage.getUrl(material.datasheet) : null,
+  };
 }
 
 /* ─── Catalogue, côté équipe ───────────────────────────────────────────────── */
@@ -55,6 +59,7 @@ export const listMaterials = query({
             material.modelReference,
             material.material,
             material.qrReference,
+            material.reference,
             material.location,
           ]
             .filter(Boolean)
@@ -103,15 +108,69 @@ const materialFields = {
   location: v.optional(v.string()),
   photos: v.array(v.id("_storage")),
   qrReference: v.optional(v.string()),
+
+  /* Fiche réemploi : tout est facultatif, la fiche reste publiable sans. */
+  reference: v.optional(v.string()),
+  origin: v.optional(v.string()),
+  profiles: v.optional(v.array(v.string())),
+  materials: v.optional(v.array(v.string())),
+  diameterCm: v.optional(v.number()),
+  dimensionUnit: v.optional(v.string()),
+  availableFrom: v.optional(v.number()),
+  availableUntil: v.optional(v.number()),
+  reusePotential: v.optional(v.number()),
+  repurposePotential: v.optional(v.number()),
+  recyclingPotential: v.optional(v.number()),
+  recoveryPotential: v.optional(v.number()),
+  disposalPotential: v.optional(v.number()),
+  assemblyMode: v.optional(v.string()),
+  transportTerms: v.optional(v.string()),
+  packagingTerms: v.optional(v.string()),
+  storageTerms: v.optional(v.string()),
+  accessTerms: v.optional(v.string()),
+  hazardousSubstances: v.optional(v.string()),
+  typology: v.optional(v.string()),
+  wasteCode: v.optional(v.string()),
+  carbonFootprintKg: v.optional(v.number()),
+  landfillCost: v.optional(v.number()),
+  datasheet: v.optional(v.id("_storage")),
+  datasheetName: v.optional(v.string()),
+  internalNote: v.optional(v.string()),
+
   aiConfidence: v.optional(v.number()),
   aiNotes: v.optional(v.string()),
 };
+
+/** Une note d'étoiles vaut 1 à 5, ou rien du tout. */
+function stars(value: unknown) {
+  const parsed = Math.round(Number(value));
+  if (!Number.isFinite(parsed) || parsed < 1) return undefined;
+  return Math.min(5, parsed);
+}
 
 /** Champs normalisés : un prix ou un stock négatif n'a pas de sens. */
 function normalizeMaterial(args: Record<string, unknown>) {
   const price = Math.max(0, Number(args.price) || 0);
   const quantity = Math.max(0, Number(args.quantity) || 0);
-  return { ...args, price, quantity };
+  // Les matières viennent d'une liste à choix multiple ; `material` reste
+  // alimenté en texte, car la recherche, la boutique et l'import Excel le
+  // lisent encore. Deux champs, une seule saisie.
+  const list = Array.isArray(args.materials)
+    ? [...new Set((args.materials as string[]).map((value) => value.trim()).filter(Boolean))]
+    : undefined;
+  const material = list?.length ? list.join(", ") : (args.material as string | undefined);
+  return {
+    ...args,
+    price,
+    quantity,
+    materials: list,
+    material,
+    reusePotential: stars(args.reusePotential),
+    repurposePotential: stars(args.repurposePotential),
+    recyclingPotential: stars(args.recyclingPotential),
+    recoveryPotential: stars(args.recoveryPotential),
+    disposalPotential: stars(args.disposalPotential),
+  };
 }
 
 export const createMaterial = mutation({
@@ -207,6 +266,29 @@ export const removeMaterial = mutation({
 /* ─── Boutique publique et kiosque ─────────────────────────────────────────── */
 
 /**
+ * Fiche telle qu'elle sort côté public.
+ *
+ * Les requêtes de la vitrine ne sont pas authentifiées : elles renvoient le
+ * document à n'importe quel visiteur. Les champs de travail de l'équipe — note
+ * interne, brouillon de l'IA, auteur de la fiche — n'ont donc rien à y faire,
+ * et doivent être retirés explicitement plutôt que par omission.
+ */
+async function publicMaterial(
+  ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
+  material: Doc<"btMaterials">,
+) {
+  const { internalNote, aiNotes, aiConfidence, createdBy, ...rest } = await withPhotoUrls(
+    ctx,
+    material,
+  );
+  void internalNote;
+  void aiNotes;
+  void aiConfidence;
+  void createdBy;
+  return rest;
+}
+
+/**
  * Catalogue public : ce qui est publié, disponible et chiffré.
  *
  * Aucune authentification — c'est la vitrine. Un matériau réservé ou vendu en
@@ -254,7 +336,7 @@ export const listPublicMaterials = query({
         .includes(search);
     });
 
-    return await Promise.all(filtered.map((material) => withPhotoUrls(ctx, material)));
+    return await Promise.all(filtered.map((material) => publicMaterial(ctx, material)));
   },
 });
 
@@ -263,7 +345,7 @@ export const getPublicMaterial = query({
   handler: async (ctx, { id }) => {
     const material = await ctx.db.get(id);
     if (!material || !material.published || material.price <= 0) return null;
-    return await withPhotoUrls(ctx, material);
+    return await publicMaterial(ctx, material);
   },
 });
 
@@ -571,11 +653,61 @@ export const materialByQr = query({
     if (!code?.materialId) return null;
     const material = await ctx.db.get(code.materialId);
     if (!material) return null;
-    return await withPhotoUrls(ctx, material);
+    // Page publique : n'importe qui peut scanner l'étiquette collée sur le lot.
+    return await publicMaterial(ctx, material);
   },
 });
 
 /* ─── Génération de l'annonce par l'IA ─────────────────────────────────────── */
+
+/**
+ * Matières proposées : le référentiel d'origine, complété de ce que l'équipe a
+ * ajouté. Une seule liste pour tout le monde, triée, sans doublon.
+ */
+export const materialOptions = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "read");
+    const added = await ctx.db
+      .query("btOptions")
+      .withIndex("by_kind", (q) => q.eq("kind", "material"))
+      .collect();
+    const all = new Map<string, string>();
+    for (const value of [...BT_MATERIALS, ...added.map((option) => option.value)]) {
+      const trimmed = value.trim();
+      // Clé insensible à la casse : « inox » saisi à la main ne doit pas
+      // doubler « Inox » du référentiel.
+      if (trimmed) all.set(trimmed.toLocaleLowerCase("fr-FR"), trimmed);
+    }
+    return [...all.values()].sort((a, b) => a.localeCompare(b, "fr"));
+  },
+});
+
+/** Ajoute une matière au référentiel commun. Sans effet si elle existe déjà. */
+export const addMaterialOption = mutation({
+  args: { value: v.string() },
+  handler: async (ctx, { value }) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
+    const identity = await requireUser(ctx);
+    const trimmed = value.trim();
+    if (!trimmed) throw new ConvexError("Indiquez une matière.");
+    if (trimmed.length > 60) throw new ConvexError("Matière trop longue (60 caractères).");
+    const key = trimmed.toLocaleLowerCase("fr-FR");
+    if (BT_MATERIALS.some((known) => known.toLocaleLowerCase("fr-FR") === key)) return trimmed;
+    const existing = await ctx.db
+      .query("btOptions")
+      .withIndex("by_kind", (q) => q.eq("kind", "material"))
+      .collect();
+    if (existing.some((option) => option.value.toLocaleLowerCase("fr-FR") === key)) return trimmed;
+    await ctx.db.insert("btOptions", {
+      kind: "material",
+      value: trimmed,
+      createdBy: formatUserName(identity),
+      createdAt: Date.now(),
+    });
+    return trimmed;
+  },
+});
 
 export const assertCanAnalyze = internalQuery({
   args: {},
@@ -609,6 +741,8 @@ type MaterialAnalysis = {
   brand?: string | null;
   modelReference?: string | null;
   material?: string | null;
+  /** Matières retenues dans le référentiel fermé. */
+  materials?: string[] | null;
   color?: string | null;
   standards?: string | null;
   technicalNotes?: string | null;
@@ -1468,6 +1602,54 @@ export function btSubFamilies(category: string, family: string) {
 }
 
 const UNITS = ["unité", "m²", "m³", "ml", "kg", "tonne", "palette", "sac", "lot"];
+
+/** Provenance du matériau, telle qu'elle se déclare dans un diagnostic PEMD. */
+export const BT_ORIGINS = [
+  "Reconditionné",
+  "Occasion réemploi",
+  "Déstockage neuf",
+  "Recyclé upcyclé",
+  "Surplus de chantier",
+];
+
+/** Types de structures d'où vient le matériau, ou qu'il vise. */
+export const BT_PROFILES = [
+  "Artisans, professionnels du BTP, organisations PRO",
+  "Déchèteries publiques",
+  "Distributeurs de matériaux",
+  "Maîtres d'ouvrage, architectes, maîtres d'œuvre",
+  "Entreprises de recyclage",
+  "Recycleries et ressourceries généralistes",
+];
+
+/** Matières proposées d'origine. L'équipe en ajoute d'autres via `btOptions`. */
+export const BT_MATERIALS = [
+  "Bois massif",
+  "Grès cérame",
+  "Céramique",
+  "Métal",
+  "PVC",
+  "Liège",
+  "Acier",
+  "Plastique PEHD",
+  "Plastique",
+  "Aluminium",
+  "Verre",
+  "Inox",
+  "Laine de verre",
+  "Stratifié",
+  "Porcelaine",
+  "Verre trempé",
+  "Bois aggloméré",
+  "Plastique recyclé",
+  "Béton",
+  "Tissu",
+  "Miroir",
+  "Pierre",
+];
+
+/** Unité dans laquelle sont saisies les dimensions. */
+export const BT_DIMENSION_UNITS = ["mm", "cm", "m"];
 const CONDITIONS = [
   "Neuf",
   "Déstockage",
@@ -1732,7 +1914,8 @@ Réponds UNIQUEMENT en JSON valide :
   "weightKg": nombre ou null,
   "brand": "marque lue sur l'étiquette ou null",
   "modelReference": "référence fabricant lue ou null",
-  "material": "bois, béton, acier, PVC, aluminium, plâtre, terre cuite… ou null",
+  "materials": ["les matières constitutives, valeurs EXACTES prises dans cette liste, [] si aucune ne correspond : ${JSON.stringify(BT_MATERIALS)}"],
+  "material": "la matière en toutes lettres si aucune de la liste ne convient, sinon null",
   "color": "couleur dominante ou null",
   "standards": "normes visibles (CE, NF, classe d'emploi…) ou null",
   "technicalNotes": "caractéristiques techniques lues (lambda, section, résistance…) ou null",
@@ -1885,6 +2068,21 @@ La liste est classée par proximité de vocabulaire, pas par justesse : lis-la e
       result.family = null;
       result.subcategory = null;
     }
+
+    // Les matières ne sont retenues que si elles existent au référentiel : la
+    // liste du formulaire est fermée, une valeur inventée n'y serait pas
+    // sélectionnable et disparaîtrait au premier enregistrement.
+    const knownMaterials = new Map(
+      BT_MATERIALS.map((value) => [value.toLocaleLowerCase("fr-FR"), value]),
+    );
+    result.materials = [
+      ...new Set(
+        (result.materials ?? [])
+          .map((value) => knownMaterials.get(String(value).trim().toLocaleLowerCase("fr-FR")))
+          .filter((value): value is string => Boolean(value)),
+      ),
+    ];
+    if (result.materials.length > 0) result.material = result.materials.join(", ");
 
     if (!CONDITIONS.includes(result.condition)) result.condition = "Bon état";
     if (!UNITS.includes(result.unit)) result.unit = "unité";

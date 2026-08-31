@@ -2631,6 +2631,64 @@ export default defineSchema(
     featured: v.optional(v.boolean()),
     /** Référence du QR code collé sur le matériau. */
     qrReference: v.optional(v.string()),
+
+    /* ── Fiche réemploi ───────────────────────────────────────────────────
+     *
+     * Champs du diagnostic PEMD attendus par les maîtres d'ouvrage et les
+     * plateformes de réemploi. Tous facultatifs : une fiche reste publiable
+     * sans eux, ils se complètent au fil du diagnostic.
+     */
+
+    /** Référence interne du matériau, propre au dépôt. */
+    reference: v.optional(v.string()),
+    /** Provenance : reconditionné, occasion réemploi, surplus de chantier… */
+    origin: v.optional(v.string()),
+    /** Types de structures d'où vient le matériau, ou qu'il vise. */
+    profiles: v.optional(v.array(v.string())),
+    /**
+     * Matières constitutives. `material` garde la version texte : elle est lue
+     * par la recherche, la boutique et l'import Excel existants.
+     */
+    materials: v.optional(v.array(v.string())),
+    diameterCm: v.optional(v.number()),
+    /**
+     * Unité dans laquelle sont exprimées longueur, largeur, hauteur et
+     * diamètre. Absente = centimètres, ce qu'ont toujours voulu dire les
+     * champs `…Cm` des fiches déjà saisies.
+     */
+    dimensionUnit: v.optional(v.string()),
+    /** Fenêtre de disponibilité du lot. */
+    availableFrom: v.optional(v.number()),
+    availableUntil: v.optional(v.number()),
+
+    /* Potentiels du diagnostic, notés de 1 à 5 étoiles. */
+    reusePotential: v.optional(v.number()),
+    repurposePotential: v.optional(v.number()),
+    recyclingPotential: v.optional(v.number()),
+    recoveryPotential: v.optional(v.number()),
+    disposalPotential: v.optional(v.number()),
+
+    /** Comment le matériau est assemblé, et donc démontable. */
+    assemblyMode: v.optional(v.string()),
+    transportTerms: v.optional(v.string()),
+    packagingTerms: v.optional(v.string()),
+    storageTerms: v.optional(v.string()),
+    accessTerms: v.optional(v.string()),
+    /** Amiante, plomb, HAP… ce qui conditionne la reprise. */
+    hazardousSubstances: v.optional(v.string()),
+    typology: v.optional(v.string()),
+    /** Code déchet européen à 6 chiffres. */
+    wasteCode: v.optional(v.string()),
+    /** Bilan carbone en kg CO₂ équivalent. */
+    carbonFootprintKg: v.optional(v.number()),
+    /** Coût de mise en décharge évité, en euros. */
+    landfillCost: v.optional(v.number()),
+    /** Fiche technique jointe (PDF ou document). */
+    datasheet: v.optional(v.id("_storage")),
+    datasheetName: v.optional(v.string()),
+    /** Commentaire d'équipe, jamais publié. */
+    internalNote: v.optional(v.string()),
+
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
     createdBy: v.optional(v.string()),
@@ -2642,6 +2700,20 @@ export default defineSchema(
     .index("by_category", ["category"])
     .index("by_qrReference", ["qrReference"])
     .index("by_createdAt", ["createdAt"]),
+
+  /**
+   * Valeurs ajoutées par l'équipe aux listes fermées de Bâtire (matières, pour
+   * l'instant). Une table plutôt qu'un champ libre : une matière saisie par
+   * l'un doit être proposée à tous, sinon la liste diverge d'un poste à
+   * l'autre et le filtrage de la boutique ne veut plus rien dire.
+   */
+  btOptions: defineTable({
+    /** Liste visée : « material » aujourd'hui, d'autres si le besoin vient. */
+    kind: v.string(),
+    value: v.string(),
+    createdBy: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_kind", ["kind"]),
 
   btRequests: defineTable({
     reference: v.string(),
