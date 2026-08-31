@@ -1631,6 +1631,33 @@ function candidateLeaves(query: string, limit = 25, onlyCategory?: string) {
 }
 
 /**
+ * Toutes les feuilles d'une catégorie, les plus proches de la description en
+ * tête.
+ *
+ * Une fois le rayon décidé, il ne reste au pire que 77 sous-familles : le
+ * modèle peut les voir TOUTES. La présélection lexicale ne servait qu'à tenir
+ * dans une liste courte sur les 582 feuilles du catalogue — appliquée à une
+ * seule catégorie, elle ne faisait plus qu'une chose, cacher la bonne réponse
+ * quand la description n'employait pas les mots du référentiel (« placo » pour
+ * « plaque de plâtre »). On garde son classement, on jette sa coupe.
+ */
+function leavesOfCategory(category: string, query: string) {
+  const scored = new Map(
+    candidateLeaves(query, Number.MAX_SAFE_INTEGER, category).map((entry) => [
+      `${entry.leaf.family}›${entry.leaf.subFamily}`,
+      entry.score,
+    ]),
+  );
+  return buildLeafIndex()
+    .filter((leaf) => leaf.category === category)
+    .map((leaf) => ({
+      leaf: { category: leaf.category, family: leaf.family, subFamily: leaf.subFamily },
+      score: scored.get(`${leaf.family}›${leaf.subFamily}`) ?? 0,
+    }))
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
  * Remplit la fiche d'un matériau à partir de ses photos.
  *
  * L'unité de vente est la décision la plus lourde : elle commande le prix et le
@@ -1650,9 +1677,33 @@ export const analyzeMaterialPhotos = action({
     const imageUrls = urls.filter((url): url is string => Boolean(url));
     if (imageUrls.length === 0) throw new ConvexError("Photos introuvables en stockage.");
 
-    const prompt = `Tu es responsable du dépôt de matériaux de construction de seconde main « Bâtire ».
+    // Les précisions de l'équipe sont une observation de terrain : quelqu'un a
+    // eu l'objet en main. Elles priment sur tout ce que le modèle croit voir,
+    // et elles servent aussi bien à décrire qu'à ranger — d'où leur reprise
+    // dans les deux passes de classement plus bas.
+    const notes = extraDetails?.trim() ?? "";
+    const notesBlock = notes
+      ? `PRÉCISIONS DE L'ÉQUIPE — PRIORITÉ ABSOLUE
+« ${notes} »
+Ces mots ont été saisis par la personne qui a l'objet sous les yeux. Ils sont
+vrais. S'ils nomment l'objet, sa matière, ses dimensions ou son état, reprends-
+les tels quels : ils l'emportent sur ta lecture des photos, y compris quand la
+photo semble dire autre chose. Ne les contredis jamais, ne les ignore jamais.
+Ils peuvent être écrits en style télégraphique (mots-clés, abréviations de
+chantier) : c'est normal, interprète-les dans le vocabulaire du bâtiment.
+
+`
+      : "";
+
+    const prompt = `${notesBlock}Tu es responsable du dépôt de matériaux de construction de seconde main « Bâtire ».
 Analyse toutes les photos ensemble : étiquettes, marquages, sections, état, quantité visible, palettes.
 Rédige la fiche d'un professionnel du bâtiment qui vend à d'autres professionnels et à des particuliers avertis : précis, concret, sans emphase commerciale.
+
+MÉTHODE
+- Commence par identifier CE QU'EST l'objet, avant tout autre détail. Un vantail posé contre un mur reste une porte ; un tas de plaques reste des plaques.
+- Ne renseigne un champ que sur une trace réelle : un texte lu sur une étiquette, une graduation, un marquage, une référence, ou une précision de l'équipe.
+- Un doute se solde par null, jamais par une valeur plausible. Une fiche incomplète se complète en dix secondes ; une fiche fausse part en ligne et se vend mal.
+- Signale dans « aiNotes » tout ce que tu as déduit sans le lire, pour qu'un humain le vérifie.
 
 RÈGLES ABSOLUES
 - N'invente JAMAIS une dimension, une norme, une marque, une matière ou une performance : si ce n'est pas lisible sur la photo ou fourni, mets null.
@@ -1687,11 +1738,15 @@ Réponds UNIQUEMENT en JSON valide :
   "technicalNotes": "caractéristiques techniques lues (lambda, section, résistance…) ou null",
   "aiConfidence": nombre entre 0 et 1,
   "aiNotes": "ce qu'un humain doit vérifier avant publication"
-}
-${extraDetails?.trim() ? `\nPrécisions de l'équipe, fiables et prioritaires sur la photo : ${extraDetails.trim()}` : ""}`;
+}${notes ? `\n\nRappel : les précisions de l'équipe ci-dessus priment sur les photos.` : ""}`;
+
+    // Modèle réglable par variable d'environnement : la qualité des fiches en
+    // dépend plus que de tout le reste, et le réglage doit pouvoir suivre les
+    // sorties d'OpenAI sans redéployer les 7 apps.
+    const model = process.env.BATIRE_ANALYSIS_MODEL?.trim() || "gpt-4o";
 
     const result = await callChat<MaterialAnalysis>(apiKey, {
-      model: "gpt-4o",
+      model,
       temperature: 0.2,
       max_tokens: 1400,
       response_format: { type: "json_object" },
@@ -1718,33 +1773,46 @@ ${extraDetails?.trim() ? `\nPrécisions de l'équipe, fiables et prioritaires su
     // même décision dérape (une porte laquée finissait en « Peinture »). La
     // recherche de la feuille se fait ensuite dans cette seule catégorie.
     const label = (result.productLabel ?? result.title ?? "").trim();
+    // Les notes de l'équipe entrent aussi dans le classement : elles nomment
+    // souvent l'objet mieux que la photo (« placo hydro 13mm »), et sans elles
+    // le rangement repartait de la seule lecture du modèle — c'est-à-dire de
+    // l'erreur qu'elles étaient justement censées corriger.
     const description = [
       // Le nom de l'objet compte double : les mots incidents — couleur,
       // marque — ne doivent pas peser autant que sa nature.
       label,
       label,
+      notes,
       (result.productKeywords ?? []).join(" "),
       result.material,
     ]
       .filter(Boolean)
       .join(" ");
+    /** Ce qu'on montre au modèle pour ranger : le nom, puis les mots de l'équipe. */
+    const subject = [label, notes ? `précisions de l'équipe : « ${notes} »` : ""]
+      .filter(Boolean)
+      .join(", ");
 
     let chosenCategory: string | null = null;
-    if (label) {
+    if (subject) {
       const categoryList = BT_CATEGORIES.map((name, index) => `${index + 1}. ${name}`).join("\n");
       const categoryPick = await callChat<{ choice?: number }>(apiKey, {
-        model: "gpt-4o-mini",
+        // Même modèle que l'analyse : le rayon commande tout le rangement qui
+        // suit, une erreur ici ne se rattrape plus en aval.
+        model,
         temperature: 0,
         max_tokens: 40,
         response_format: { type: "json_object" },
         messages: [
           {
             role: "user",
-            content: `Dans quel rayon d'un négoce de matériaux ranger : « ${label} » ?
+            content: `Dans quel rayon d'un négoce de matériaux ranger : ${subject} ?
 
 ${categoryList}
 
-Réponds {"choice": N}. Range l'objet selon CE QU'IL EST, jamais selon sa couleur ni sa finition.`,
+Réponds {"choice": N}. Range l'objet selon CE QU'IL EST, jamais selon sa couleur ni sa finition.${
+              notes ? " Les précisions de l'équipe font foi." : ""
+            }`,
           },
         ],
       }).catch(() => ({ choice: 0 }));
@@ -1754,7 +1822,12 @@ Réponds {"choice": N}. Range l'objet selon CE QU'IL EST, jamais selon sa couleu
       }
     }
 
-    const candidates = candidateLeaves(description, 25, chosenCategory ?? undefined);
+    // Rayon connu : le modèle voit toutes les sous-familles de ce rayon.
+    // Rayon inconnu : on retombe sur une présélection lexicale, seule façon de
+    // ne pas lui présenter les 582 feuilles du catalogue.
+    const candidates = chosenCategory
+      ? leavesOfCategory(chosenCategory, description)
+      : candidateLeaves(description, 25);
     let chosen: Leaf | null = null;
 
     if (candidates.length > 0) {
@@ -1768,29 +1841,33 @@ Réponds {"choice": N}. Range l'objet selon CE QU'IL EST, jamais selon sa couleu
       // Seconde décision, sans image et sans texte libre : le modèle ne peut
       // plus qu'indiquer un numéro, donc plus rien à mal orthographier.
       const pick = await callChat<{ choice?: number }>(apiKey, {
-        model: "gpt-4o-mini",
+        model,
         temperature: 0,
         max_tokens: 60,
         response_format: { type: "json_object" },
         messages: [
           {
             role: "user",
-            content: `Objet : « ${description} »${chosenCategory ? `, rangé dans « ${chosenCategory} »` : ""}.
+            content: `Objet : ${subject || description}${chosenCategory ? `, rangé dans « ${chosenCategory} »` : ""}.
 
 Rangements possibles :
 ${list}
 
-Réponds {"choice": N} avec le numéro le plus juste, ou {"choice": 0} si aucun ne convient.`,
+Réponds {"choice": N} avec le numéro le plus juste, ou {"choice": 0} si aucun ne convient.
+La liste est classée par proximité de vocabulaire, pas par justesse : lis-la en entier avant de choisir.`,
           },
         ],
       }).catch(() => ({ choice: 0 }));
 
       const index = Number(pick?.choice ?? 0);
-      chosen =
-        Number.isInteger(index) && index >= 1 && index <= candidates.length
-          ? candidates[index - 1].leaf
-          : // Filet : la meilleure correspondance lexicale plutôt qu'un vide.
-            candidates[0].leaf;
+      if (Number.isInteger(index) && index >= 1 && index <= candidates.length) {
+        chosen = candidates[index - 1].leaf;
+      } else if (candidates[0].score > 0) {
+        // Filet : la meilleure correspondance lexicale, mais seulement si elle
+        // partage vraiment du vocabulaire avec l'objet. Sinon on s'arrête à la
+        // catégorie — un rangement au hasard coûte plus qu'un champ vide.
+        chosen = candidates[0].leaf;
+      }
     }
 
     if (chosen) {
