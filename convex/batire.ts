@@ -268,24 +268,54 @@ export const removeMaterial = mutation({
 /**
  * Fiche telle qu'elle sort côté public.
  *
- * Les requêtes de la vitrine ne sont pas authentifiées : elles renvoient le
- * document à n'importe quel visiteur. Les champs de travail de l'équipe — note
- * interne, brouillon de l'IA, auteur de la fiche — n'ont donc rien à y faire,
- * et doivent être retirés explicitement plutôt que par omission.
+ * Les requêtes de la vitrine ne sont pas authentifiées : ce qu'elles renvoient
+ * est lisible par n'importe qui, affiché ou non par la page. La liste est donc
+ * une liste de ce qu'on EXPOSE, jamais de ce qu'on cache : un champ ajouté
+ * plus tard à la table reste privé tant que personne ne l'inscrit ici.
+ *
+ * Restent en interne tout ce qui sert la traçabilité et le diagnostic —
+ * provenance, profil du donateur, référence interne, potentiels, modalités,
+ * code déchet, coûts, fiche technique, notes. Ces informations disent d'où
+ * vient un lot et par qui il est passé : elles regardent l'équipe, pas
+ * l'acheteur.
  */
 async function publicMaterial(
   ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
   material: Doc<"btMaterials">,
 ) {
-  const { internalNote, aiNotes, aiConfidence, createdBy, ...rest } = await withPhotoUrls(
-    ctx,
-    material,
-  );
-  void internalNote;
-  void aiNotes;
-  void aiConfidence;
-  void createdBy;
-  return rest;
+  const photoUrls = await Promise.all(material.photos.map((id) => ctx.storage.getUrl(id)));
+  return {
+    _id: material._id,
+    title: material.title,
+    description: material.description,
+    category: material.category,
+    family: material.family,
+    subcategory: material.subcategory,
+    condition: material.condition,
+    unit: material.unit,
+    quantity: material.quantity,
+    price: material.price,
+    packaging: material.packaging,
+    lengthCm: material.lengthCm,
+    widthCm: material.widthCm,
+    heightCm: material.heightCm,
+    diameterCm: material.diameterCm,
+    dimensionUnit: material.dimensionUnit,
+    thicknessMm: material.thicknessMm,
+    weightKg: material.weightKg,
+    brand: material.brand,
+    modelReference: material.modelReference,
+    material: material.material,
+    materials: material.materials,
+    color: material.color,
+    standards: material.standards,
+    technicalNotes: material.technicalNotes,
+    depot: material.depot,
+    location: material.location,
+    qrReference: material.qrReference,
+    status: material.status,
+    photoUrls: photoUrls.filter((url): url is string => Boolean(url)),
+  };
 }
 
 /**
