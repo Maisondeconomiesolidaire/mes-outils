@@ -320,6 +320,11 @@ async function publicMaterial(
     location: material.location,
     qrReference: material.qrReference,
     status: material.status,
+    /** Date d'ouverture à la vente : la boutique en fait ses « bientôt disponible ». */
+    availableFrom: material.availableFrom,
+    availableUntil: material.availableUntil,
+    /** Mise en ligne, pour classer les nouveautés. À défaut, la création. */
+    publishedAt: material.publishedAt ?? material.createdAt,
     photoUrls: photoUrls.filter((url): url is string => Boolean(url)),
   };
 }
