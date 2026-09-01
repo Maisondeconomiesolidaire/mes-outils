@@ -1010,6 +1010,10 @@ function MyReservations() {
                   </Field>
                   {minMileageError ? (
                     <p className="mt-1 text-sm text-red-500">{minMileageError}</p>
+                  ) : typeof feedbackTarget.lastRecordedMileage === "number" ? (
+                    <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+                      Dernier relevé connu : {feedbackTarget.lastRecordedMileage.toLocaleString("fr-FR")} km
+                    </p>
                   ) : null}
                 </div>
                 {feedbackTarget.usageType === "personal" ? (
