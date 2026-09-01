@@ -35,6 +35,12 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { MediaUpload } from "../components/ui/MediaUpload";
+import {
+  AttachmentUpload,
+  attachmentLabel,
+  isImageAttachment,
+  type Attachment,
+} from "../components/ui/AttachmentUpload";
 import { SinglePhotoUpload } from "../components/ui/SinglePhotoUpload";
 import { VehicleSearchSelect } from "../components/ui/VehicleSearchSelect";
 import { DatePicker } from "../components/ui/DatePicker";
@@ -98,6 +104,7 @@ type VehicleTask = {
   laborMinutes?: number;
   partsCost?: number;
   attachments?: Id<"_storage">[];
+  attachmentMeta?: Array<{ storageId: Id<"_storage">; name?: string; contentType?: string }>;
   /** URLs signées, résolues par `listVehicleTasks` (les storageId seuls ne s'affichent pas). */
   attachmentUrls?: string[];
   beforePhotos?: Id<"_storage">[];
@@ -962,7 +969,7 @@ function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClos
   const [laborHours, setLaborHours] = useState("");
   const [laborMins, setLaborMins] = useState("");
   const [partsCost, setPartsCost] = useState("");
-  const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [beforePhotos, setBeforePhotos] = useState<Id<"_storage">[]>([]);
   const [beforeNotes, setBeforeNotes] = useState("");
   const [afterPhotos, setAfterPhotos] = useState<Id<"_storage">[]>([]);
@@ -995,7 +1002,7 @@ function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClos
         odometerKm: odometerKm ? Number(odometerKm) : undefined,
         laborMinutes: laborMinutesValue,
         partsCost: partsCost.trim() ? Number(partsCost) : undefined,
-        attachments: attachments.length ? attachments : undefined,
+        ...(attachments.length ? attachmentPayload(attachments) : {}),
         beforePhotos: beforePhotos.length ? beforePhotos : undefined,
         beforeNotes: beforeNotes.trim() || undefined,
         afterPhotos: afterPhotos.length ? afterPhotos : undefined,
@@ -1060,8 +1067,8 @@ function TaskModal({ open, onClose, vehicles, prefill }: { open: boolean; onClos
             <MediaUpload images={afterPhotos} onChange={setAfterPhotos} />
           </Field>
         </div>
-        <Field label="Autres pièces jointes (factures, devis...)">
-          <MediaUpload images={attachments} onChange={setAttachments} />
+        <Field label="Autres pièces jointes" hint="photos et fichiers : factures, devis, rapports...">
+          <AttachmentUpload items={attachments} onChange={setAttachments} />
         </Field>
         <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
           <Button variant="ghost" onClick={onClose}>Annuler</Button>
@@ -1230,6 +1237,36 @@ function MaintenanceSteps({
         : null}
     </div>
   );
+}
+
+/**
+ * Pièces jointes d'une maintenance : `attachments` porte l'ordre,
+ * `attachmentMeta` le nom et le type, `attachmentUrls` l'URL signée résolue à
+ * la lecture. Les fiches d'avant les documents n'ont pas de méta : sans type,
+ * elles s'affichent en photo, ce qu'elles étaient.
+ */
+function taskAttachments(task: VehicleTask): Attachment[] {
+  const metaById = new Map(
+    (task.attachmentMeta ?? []).map((item) => [String(item.storageId), item]),
+  );
+  return (task.attachments ?? []).map((storageId, index) => ({
+    storageId,
+    name: metaById.get(String(storageId))?.name,
+    contentType: metaById.get(String(storageId))?.contentType,
+    url: task.attachmentUrls?.[index],
+  }));
+}
+
+/** Les deux champs enregistrés, dans le même ordre : ils se lisent par index. */
+function attachmentPayload(items: Attachment[]) {
+  return {
+    attachments: items.map((item) => item.storageId),
+    attachmentMeta: items.map(({ storageId, name, contentType }) => ({
+      storageId,
+      name,
+      contentType,
+    })),
+  };
 }
 
 function TaskList({ tasks, onUpdate, canEdit }: { tasks: VehicleTask[]; onUpdate: ReturnType<typeof useMutation>; canEdit: boolean }) {
@@ -2083,7 +2120,7 @@ function MaintenanceDetailsModal({
   const [laborHours, setLaborHours] = useState("");
   const [laborMins, setLaborMins] = useState("");
   const [partsCost, setPartsCost] = useState("");
-  const [attachments, setAttachments] = useState<Id<"_storage">[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [beforePhotos, setBeforePhotos] = useState<Id<"_storage">[]>([]);
   const [beforeNotes, setBeforeNotes] = useState("");
   const [afterPhotos, setAfterPhotos] = useState<Id<"_storage">[]>([]);
@@ -2103,7 +2140,7 @@ function MaintenanceDetailsModal({
     setLaborHours(task.laborMinutes ? String(Math.floor(task.laborMinutes / 60)) : "");
     setLaborMins(task.laborMinutes ? String(task.laborMinutes % 60) : "");
     setPartsCost(typeof task.partsCost === "number" ? String(task.partsCost) : "");
-    setAttachments(task.attachments ?? []);
+    setAttachments(taskAttachments(task));
     setBeforePhotos(task.beforePhotos ?? []);
     setBeforeNotes(task.beforeNotes ?? "");
     setAfterPhotos(task.afterPhotos ?? []);
@@ -2117,6 +2154,7 @@ function MaintenanceDetailsModal({
 
   if (!task) return null;
   const currentTask = task;
+  const savedAttachments = taskAttachments(currentTask);
   const displayTitle = title.trim() || currentTask.title;
   const displayDescription = description.trim() || "Aucune précision renseignée.";
   const displayVehicleName = currentTask.vehicle?.name ?? "Véhicule";
@@ -2170,7 +2208,7 @@ function MaintenanceDetailsModal({
         odometerKm: odometerKm ? Number(odometerKm) : null,
         laborMinutes: laborMinutesValue,
         partsCost: partsCostValue,
-        attachments,
+        ...attachmentPayload(attachments),
         beforePhotos,
         beforeNotes,
         afterPhotos,
@@ -2341,21 +2379,39 @@ function MaintenanceDetailsModal({
             </div>
           ) : null}
 
-          {!editing && (currentTask.attachmentUrls?.length ?? 0) > 0 ? (
+          {!editing && savedAttachments.length > 0 ? (
             <div className="rounded-xl border border-[var(--border)] p-3">
               <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
-                Autres pièces jointes ({currentTask.attachmentUrls?.length})
+                Autres pièces jointes ({savedAttachments.length})
               </p>
               <div className="mt-2 grid grid-cols-3 gap-2">
-                {currentTask.attachmentUrls?.map((url) => (
-                  <a key={url} href={url} target="_blank" rel="noreferrer" title="Ouvrir en grand">
-                    <img
-                      src={url}
-                      alt=""
-                      className="h-24 w-full rounded-lg object-cover transition hover:opacity-90"
-                    />
-                  </a>
-                ))}
+                {savedAttachments.map((item, index) =>
+                  item.url ? (
+                    <a
+                      key={item.storageId}
+                      href={item.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      title={isImageAttachment(item) ? "Ouvrir en grand" : attachmentLabel(item, index)}
+                      className="block"
+                    >
+                      {isImageAttachment(item) ? (
+                        <img
+                          src={item.url}
+                          alt=""
+                          className="h-24 w-full rounded-lg object-cover transition hover:opacity-90"
+                        />
+                      ) : (
+                        <span className="flex h-24 w-full flex-col items-center justify-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--card)] px-2 text-center text-[var(--muted-foreground)] transition hover:bg-[var(--muted)]">
+                          <FileText className="h-5 w-5" />
+                          <span className="line-clamp-2 break-all text-[11px] font-medium leading-tight">
+                            {attachmentLabel(item, index)}
+                          </span>
+                        </span>
+                      )}
+                    </a>
+                  ) : null,
+                )}
               </div>
             </div>
           ) : null}
@@ -2427,15 +2483,8 @@ function MaintenanceDetailsModal({
                   />
                 </Field>
               </div>
-              <Field label="Autres pièces jointes (factures, devis...)">
-                <MediaUpload
-                  images={attachments}
-                  initialMedia={(currentTask.attachments ?? []).map((storageId, index) => ({
-                    storageId,
-                    previewUrl: currentTask.attachmentUrls?.[index] ?? "",
-                  }))}
-                  onChange={setAttachments}
-                />
+              <Field label="Autres pièces jointes" hint="photos et fichiers : factures, devis, rapports...">
+                <AttachmentUpload items={attachments} onChange={setAttachments} />
               </Field>
             </div>
           ) : null}

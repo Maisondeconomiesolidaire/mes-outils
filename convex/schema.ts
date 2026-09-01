@@ -1507,6 +1507,18 @@ export default defineSchema(
     partsCost: v.optional(v.number()),
     /** Pièces jointes : photos de la panne, de la réparation, factures… */
     attachments: v.optional(v.array(v.id("_storage"))),
+    /** Nom et type des pièces jointes, dans l'ordre d'`attachments`. Sans eux,
+     *  un PDF ne se distingue pas d'une photo et finit dans une balise `img` ;
+     *  les fiches d'avant les documents n'en ont pas, elles sont des photos. */
+    attachmentMeta: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          name: v.optional(v.string()),
+          contentType: v.optional(v.string()),
+        }),
+      ),
+    ),
     /** Photos de l'état AVANT intervention (constat, panne). */
     beforePhotos: v.optional(v.array(v.id("_storage"))),
     /** Descriptif AVANT intervention : constat, symptômes, état relevé. */
