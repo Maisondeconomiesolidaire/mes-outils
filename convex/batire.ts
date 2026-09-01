@@ -12,7 +12,13 @@ import { ConvexError, v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
-import { accessAllows, requireCrmPermission, requireUser, formatUserName } from "./lib";
+import {
+  accessAllows,
+  hasCrmPermission,
+  requireCrmPermission,
+  requireUser,
+  formatUserName,
+} from "./lib";
 import { recycappSecretKey, stripeRequest } from "./stripe";
 import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
@@ -2144,24 +2150,29 @@ export const sendMessage = mutation({
     if (!body) throw new ConvexError("Le message est vide.");
 
     const material = args.materialId ? await ctx.db.get(args.materialId) : null;
-    const access = await ctx.runQuery(api.permissions.myAccess, {});
-    const fromStaff = accessAllows(access, PAGE_DEMANDES, "read");
-
-    if (fromStaff && !args.clientId) {
-      throw new ConvexError("Indiquez le fil auquel répondre.");
-    }
+    // C'est le fil visé qui fait la réponse de l'équipe, pas le rôle de celui
+    // qui écrit : un salarié qui pose une question depuis la boutique écrit sur
+    // SON fil, comme n'importe quel client. Exiger un `clientId` de tout membre
+    // de l'équipe fermait la messagerie publique à tout le personnel.
+    // La permission se lit avec `hasCrmPermission` : passer par la query
+    // publique `permissions.myAccess` fait référencer `api` depuis sa propre
+    // définition, et TypeScript abandonne l'inférence de cette mutation.
+    const fromStaff =
+      Boolean(args.clientId) && (await hasCrmPermission(ctx, PAGE_DEMANDES, "read"));
 
     // Le fil appartient au client : quand l'équipe répond, on reprend ses
-    // coordonnées du fil existant plutôt que celles du salarié.
-    let clientId = args.clientId ?? identity.subject;
+    // coordonnées du fil existant plutôt que celles du salarié. Hors réponse de
+    // l'équipe, on écrit sur son propre fil quoi qu'annonce l'appelant : un
+    // `clientId` reçu d'ailleurs écrirait dans la messagerie d'un tiers.
+    let clientId = identity.subject;
     let clientName = formatUserName(identity);
     let clientEmail = identity.email ?? "";
-    if (fromStaff && args.clientId) {
+    if (fromStaff) {
       const previous = await ctx.db
         .query("btMessages")
         .withIndex("by_client", (q) => q.eq("clientId", args.clientId!))
         .first();
-      clientId = args.clientId;
+      clientId = args.clientId!;
       clientName = previous?.clientName ?? clientName;
       clientEmail = previous?.clientEmail ?? "";
     }
