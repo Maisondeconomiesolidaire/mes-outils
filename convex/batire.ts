@@ -2249,8 +2249,57 @@ export const listThreads = query({
         if (!message.fromStaff && !message.readByStaff) thread.unread++;
       }
     }
+    // Fiche du matériau discuté, résolue une fois par matériau : la colonne
+    // récapitulative du CRM montre l'objet dont il est question, sans que
+    // l'équipe ait à ouvrir la fiche dans un autre onglet.
+    const materialIds = [
+      ...new Set(
+        [...threads.values()]
+          .map((thread) => thread.materialId)
+          .filter((id): id is Id<"btMaterials"> => Boolean(id))
+          .map((id) => String(id)),
+      ),
+    ] as Array<Id<"btMaterials">>;
+    const materialById = new Map(
+      await Promise.all(
+        materialIds.map(async (id) => {
+          const material = await ctx.db.get(id);
+          if (!material) return [String(id), null] as const;
+          return [
+            String(id),
+            {
+              _id: material._id,
+              title: material.title,
+              reference: material.reference,
+              category: material.category,
+              family: material.family,
+              subcategory: material.subcategory,
+              condition: material.condition,
+              unit: material.unit,
+              price: material.price,
+              quantity: material.quantity,
+              status: material.status,
+              published: material.published ?? false,
+              depot: material.depot,
+              location: material.location,
+              qrReference: material.qrReference,
+              // Une seule photo : la vignette suffit au récapitulatif, et
+              // chaque URL signée de plus est de l'egress payé pour rien.
+              photoUrl: material.photos[0] ? await ctx.storage.getUrl(material.photos[0]) : null,
+            },
+          ] as const;
+        }),
+      ),
+    );
+
     return [...threads.values()].map((thread) => ({
       ...thread,
+      material: thread.materialId ? materialById.get(String(thread.materialId)) ?? null : null,
+      firstAt: thread.messages.reduce(
+        (oldest, message) => Math.min(oldest, message.createdAt),
+        thread.lastAt,
+      ),
+      messageCount: thread.messages.length,
       messages: [...thread.messages].sort((a, b) => a.createdAt - b.createdAt),
     }));
   },
