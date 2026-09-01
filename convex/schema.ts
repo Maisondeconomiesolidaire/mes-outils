@@ -764,6 +764,20 @@ export default defineSchema(
     // formulaire d'origine (/collecte, /boutique/panier…). Fixé à la création.
     signupApp: v.optional(v.string()),
     signupPath: v.optional(v.string()),
+    /**
+     * Origine détaillée, capturée AVANT la redirection vers Clerk : `signupPath`
+     * seul est relevé au retour de connexion, souvent sur l'accueil, ce qui
+     * perdait l'écran réellement à l'origine de l'inscription.
+     */
+    // Dernier écran vu en étant déconnecté : le formulaire ou la fiche d'où
+    // part l'inscription.
+    signupEntryPath: v.optional(v.string()),
+    // Première page de la visite : la porte d'entrée sur le site.
+    signupLandingPath: v.optional(v.string()),
+    // Site qui a amené la visite (hors navigation interne).
+    signupReferrer: v.optional(v.string()),
+    // Paramètres de campagne (utm_*) présents à l'arrivée, tels quels.
+    signupUtm: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })

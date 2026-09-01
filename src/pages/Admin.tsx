@@ -141,13 +141,29 @@ const SIGNUP_APP_LABELS: Record<string, string> = {
   klyde: "Klyd",
   cycleenbray: "Cycle en Bray",
   bennespro: "Bennes & Pro",
+  batire: "Bâtire",
+  pointeuse: "Pointeuse",
+  feedback: "Feedback",
 };
 
-/** Libellé lisible de l'origine d'inscription (app · formulaire). */
-function signupSourceLabel(source?: { app?: string; path?: string }): string | null {
+type SignupSource = {
+  app?: string;
+  path?: string;
+  entryPath?: string;
+  landingPath?: string;
+  referrer?: string;
+  utm?: string;
+};
+
+/**
+ * Libellé lisible de l'origine d'inscription (app · écran). On préfère
+ * `entryPath` — le dernier écran vu avant la connexion — à `path`, relevé au
+ * retour de Clerk et donc presque toujours l'accueil.
+ */
+function signupSourceLabel(source?: SignupSource): string | null {
   if (!source?.app) return null;
   const appLabel = SIGNUP_APP_LABELS[source.app] ?? source.app;
-  const path = (source.path ?? "").split("?")[0];
+  const path = (source.entryPath ?? source.path ?? "").split("?")[0];
   const form = path.startsWith("/collecte")
     ? "Formulaire collecte"
     : path.startsWith("/aerogommage")
@@ -728,7 +744,7 @@ function PersonInfo({
   groups,
 }: {
   person: ManagedPerson | null;
-  signupSource?: { app?: string; path?: string; at?: number };
+  signupSource?: SignupSource & { at?: number };
   groups: ReturnType<typeof groupPagesByApp>;
 }) {
   if (!person) {
@@ -774,6 +790,26 @@ function PersonInfo({
           label="Origine d'inscription"
           value={originLabel ?? "Origine inconnue"}
         />
+        {signupSource?.entryPath ? (
+          <InfoRow
+            icon={<MapPin className="h-4 w-4" />}
+            label="Écran d'inscription"
+            value={signupSource.entryPath}
+            hint={
+              signupSource.landingPath && signupSource.landingPath !== signupSource.entryPath
+                ? `Arrivé par ${signupSource.landingPath}`
+                : undefined
+            }
+          />
+        ) : null}
+        {signupSource?.referrer ? (
+          <InfoRow
+            icon={<MapPin className="h-4 w-4" />}
+            label="Provenance"
+            value={signupSource.referrer}
+            hint={signupSource.utm ?? undefined}
+          />
+        ) : null}
         <InfoRow
           icon={<CalendarDays className="h-4 w-4" />}
           label="Première inscription"

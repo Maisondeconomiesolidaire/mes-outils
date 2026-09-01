@@ -15,10 +15,14 @@ import { Salles } from "./pages/Salles";
 import { Equipements } from "./pages/Equipements";
 import { ConfirmRoot } from "./lib/confirm";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
+import { ProfileSync } from "./components/ProfileSync";
 
 export default function App() {
   return (
     <>
+    {/* Hors de toute garde d'authentification : l'origine de l'inscription se
+        constitue pendant la visite déconnectée. */}
+    <ProfileSync app="mesoutils" />
     <UpdateAvailableBanner appName="Mes Outils" />
     <Routes>
       <Route element={<AppLayout />}>

@@ -232,23 +232,7 @@ function ConvexAuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"
     );
   }
 
-  return (
-    <>
-      <ProfileSync />
-      <AuthenticatedShell theme={theme} setTheme={setTheme} />
-    </>
-  );
-}
-
-/** Enregistre le profil Convex (et sa source d'inscription) à la connexion. */
-function ProfileSync() {
-  const syncProfile = useMutation(api.users.syncProfile);
-  useEffect(() => {
-    void syncProfile({
-      source: { app: "mesoutils", path: window.location.pathname + window.location.search },
-    });
-  }, [syncProfile]);
-  return null;
+  return <AuthenticatedShell theme={theme} setTheme={setTheme} />;
 }
 
 function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {
