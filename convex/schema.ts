@@ -225,13 +225,17 @@ export const btUnit = v.union(
 
 export const btCondition = v.union(
   v.literal("Neuf"),
+  v.literal("Très bon"),
+  v.literal("Bon"),
+  v.literal("Usagé"),
+  /** @deprecated Référentiel d'états d'avant la simplification en quatre
+   *  valeurs. Conservé pour les fiches créées avant le changement : retirer
+   *  ces valeurs les rendrait invalides. */
   v.literal("Déstockage"),
   v.literal("Reconditionné"),
   v.literal("Très bon état"),
   v.literal("Bon état"),
   v.literal("À reconditionner"),
-  /** @deprecated Remplacé par « À reconditionner ». Conservé pour les fiches
-   *  créées avant le changement : retirer la valeur les rendrait invalides. */
   v.literal("À rénover"),
 );
 

@@ -1642,7 +1642,7 @@ export const BT_ORIGINS = [
   "Surplus de chantier",
 ];
 
-/** Types de structures d'où vient le matériau, ou qu'il vise. */
+/** Type de demandeur : la structure d'où vient le flux de matériaux. */
 export const BT_PROFILES = [
   "Artisans, professionnels du BTP, organisations PRO",
   "Déchèteries publiques",
@@ -1680,14 +1680,7 @@ export const BT_MATERIALS = [
 
 /** Unité dans laquelle sont saisies les dimensions. */
 export const BT_DIMENSION_UNITS = ["mm", "cm", "m"];
-const CONDITIONS = [
-  "Neuf",
-  "Déstockage",
-  "Reconditionné",
-  "Très bon état",
-  "Bon état",
-  "À reconditionner",
-];
+const CONDITIONS = ["Neuf", "Très bon", "Bon", "Usagé"];
 
 
 /** Appel OpenAI en JSON strict, partagé par les deux passes du classement. */
@@ -2114,7 +2107,7 @@ La liste est classée par proximité de vocabulaire, pas par justesse : lis-la e
     ];
     if (result.materials.length > 0) result.material = result.materials.join(", ");
 
-    if (!CONDITIONS.includes(result.condition)) result.condition = "Bon état";
+    if (!CONDITIONS.includes(result.condition)) result.condition = "Bon";
     if (!UNITS.includes(result.unit)) result.unit = "unité";
     const positive = (value: unknown) => {
       const parsed = Number(value);
@@ -2325,7 +2318,7 @@ export const importMaterials = mutation({
           ? row.subcategory
           : undefined;
       const unit = units.includes(row.unit ?? "") ? row.unit! : "unité";
-      const condition = conditions.includes(row.condition ?? "") ? row.condition! : "Bon état";
+      const condition = conditions.includes(row.condition ?? "") ? row.condition! : "Bon";
 
       await ctx.db.insert("btMaterials", {
         title,
