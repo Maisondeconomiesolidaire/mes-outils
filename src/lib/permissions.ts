@@ -489,6 +489,14 @@ export const BATIRE_PAGES: PermissionPage[] = [
   },
   {
     app: "batire",
+    key: "batire:dons",
+    label: "Dons",
+    description:
+      "Dons proposés par les entreprises depuis la boutique : fiches, photos, acceptation ou refus motivé.",
+    actions: ["read", "update"],
+  },
+  {
+    app: "batire",
     key: "batire:admin",
     label: "Admin Bâtire",
     description: "Configuration et droits de l'application Bâtire.",

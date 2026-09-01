@@ -253,6 +253,12 @@ export const btRequestType = v.union(
   v.literal("question"),
 );
 
+export const btDonationStatus = v.union(
+  v.literal("nouveau"),
+  v.literal("accepte"),
+  v.literal("refuse"),
+);
+
 export const btRequestOutcome = v.union(
   v.literal("nouveau"),
   v.literal("en_cours"),
@@ -2861,6 +2867,80 @@ export default defineSchema(
   })
     .index("by_reference", ["reference"])
     .index("by_material", ["materialId"]),
+
+  /**
+   * Espace client Bâtire : la fiche donateur d'une entreprise.
+   *
+   * Les mêmes coordonnées repartaient à chaque achat et à chaque proposition
+   * de don. Elles vivent ici une fois pour toutes, rattachées au compte Clerk,
+   * et alimentent le formulaire d'achat comme celui de don.
+   */
+  btDonorProfiles: defineTable({
+    clerkId: v.string(),
+    /** Raison sociale. Une personne seule peut laisser le champ vide. */
+    company: v.optional(v.string()),
+    siret: v.optional(v.string()),
+    /** Type de donateur : mêmes valeurs que l'« Origine » d'une fiche matériau. */
+    profiles: v.optional(v.array(v.string())),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_clerkId", ["clerkId"]),
+
+  /**
+   * Dons proposés depuis la boutique par les entreprises.
+   *
+   * Un don est un lot : ce que le donateur décrit et photographie en une fois.
+   * L'équipe l'accepte — le donateur reçoit les conditions de dépôt — ou le
+   * refuse avec un motif, qui part tel quel dans l'email.
+   */
+  btDonations: defineTable({
+    reference: v.string(),
+    /** Compte Clerk du donateur : c'est lui qui suit son don. */
+    clerkId: v.string(),
+    /** Coordonnées figées au moment du dépôt : la fiche donateur peut changer. */
+    donor: v.object({
+      company: v.optional(v.string()),
+      firstName: v.string(),
+      lastName: v.string(),
+      email: v.string(),
+      phone: v.optional(v.string()),
+      profiles: v.optional(v.array(v.string())),
+      address: v.optional(v.string()),
+      postalCode: v.optional(v.string()),
+      city: v.optional(v.string()),
+    }),
+    title: v.string(),
+    description: v.optional(v.string()),
+    category: v.string(),
+    family: v.optional(v.string()),
+    subcategory: v.optional(v.string()),
+    condition: v.optional(btCondition),
+    quantity: v.optional(v.number()),
+    unit: v.optional(btUnit),
+    /** Date à partir de laquelle le lot est disponible chez le donateur. */
+    availableFrom: v.optional(v.number()),
+    photos: v.array(v.id("_storage")),
+    status: btDonationStatus,
+    /** Motif du refus, ou consignes de dépôt jointes à l'acceptation. */
+    decisionMessage: v.optional(v.string()),
+    decidedAt: v.optional(v.number()),
+    decidedBy: v.optional(v.string()),
+    /** Suivi interne, jamais montré au donateur. */
+    internalNote: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_status", ["status"])
+    .index("by_clerkId", ["clerkId"])
+    .index("by_reference", ["reference"])
+    .index("by_createdAt", ["createdAt"]),
   },
   { schemaValidation: false },
 );
