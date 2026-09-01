@@ -381,6 +381,220 @@ export const listPublicMaterials = query({
   },
 });
 
+/**
+ * Ce qui va avec un matériau, sur un chantier.
+ *
+ * Un client qui regarde un lot de carrelage a besoin de colle et de joints,
+ * pas d'une autre référence de carrelage ; celui qui prend des plaques de
+ * plâtre cherche des rails et de l'enduit. La proximité de catalogue
+ * (sous-famille, famille, catégorie) ne suffit donc pas : on y ajoute des
+ * couples de métier, dans l'ordre où l'artisan les associe.
+ */
+const BT_COMPLEMENTS: Record<string, string[]> = {
+  "Carrelage intérieur": [
+    "Peinture, mastic, droguerie",
+    "Autres revêtements sol et mur",
+    "Plâtre, isolation, plafonds",
+    "Salle de bain, WC, sanitaires",
+  ],
+  "Autres revêtements sol et mur": [
+    "Peinture, mastic, droguerie",
+    "Bois et panneaux",
+    "Carrelage intérieur",
+    "Plâtre, isolation, plafonds",
+  ],
+  "Plâtre, isolation, plafonds": [
+    "Quincaillerie générale de bâtiment",
+    "Peinture, mastic, droguerie",
+    "Bois et panneaux",
+    "Électricité, ventilation",
+  ],
+  "Portes, fenêtres, menuiserie": [
+    "Quincaillerie générale de bâtiment",
+    "Bois et panneaux",
+    "Peinture, mastic, droguerie",
+    "Plâtre, isolation, plafonds",
+  ],
+  "Bois et panneaux": [
+    "Quincaillerie générale de bâtiment",
+    "Portes, fenêtres, menuiserie",
+    "Terrasses et extérieurs",
+    "Peinture, mastic, droguerie",
+  ],
+  Toiture: [
+    "Bois et panneaux",
+    "Plâtre, isolation, plafonds",
+    "Quincaillerie générale de bâtiment",
+    "Matériaux, gros oeuvre",
+  ],
+  "Salle de bain, WC, sanitaires": [
+    "Plomberie",
+    "Carrelage intérieur",
+    "Peinture, mastic, droguerie",
+    "Électricité, ventilation",
+  ],
+  Plomberie: [
+    "Salle de bain, WC, sanitaires",
+    "Quincaillerie générale de bâtiment",
+    "Peinture, mastic, droguerie",
+    "Électricité, ventilation",
+  ],
+  "Électricité, ventilation": [
+    "Plâtre, isolation, plafonds",
+    "Quincaillerie générale de bâtiment",
+    "Matériel de chantier",
+    "Salle de bain, WC, sanitaires",
+  ],
+  "Matériaux, gros oeuvre": [
+    "Matériel de chantier",
+    "Bois et panneaux",
+    "Terrasses et extérieurs",
+    "Toiture",
+  ],
+  "Terrasses et extérieurs": [
+    "Bois et panneaux",
+    "Matériaux, gros oeuvre",
+    "Carrelage intérieur",
+    "Quincaillerie générale de bâtiment",
+  ],
+  "Quincaillerie générale de bâtiment": [
+    "Bois et panneaux",
+    "Portes, fenêtres, menuiserie",
+    "Plâtre, isolation, plafonds",
+    "Toiture",
+  ],
+  "Peinture, mastic, droguerie": [
+    "Plâtre, isolation, plafonds",
+    "Autres revêtements sol et mur",
+    "Carrelage intérieur",
+    "Matériel de chantier",
+  ],
+  "Matériel de chantier": [
+    "Équipement de protection, sécurité",
+    "Matériaux, gros oeuvre",
+    "Peinture, mastic, droguerie",
+    "Bois et panneaux",
+  ],
+  "Équipement de protection, sécurité": [
+    "Matériel de chantier",
+    "Toiture",
+    "Matériaux, gros oeuvre",
+    "Peinture, mastic, droguerie",
+  ],
+};
+
+/** Mots du titre qui ne disent rien de ce qu'est le produit. */
+const TITLE_STOPWORDS = new Set([
+  "de", "du", "des", "le", "la", "les", "un", "une", "et", "en", "au", "aux",
+  "pour", "avec", "sur", "par", "lot", "palette", "sac", "mm", "cm", "ml",
+]);
+
+function titleTokens(value: string): Set<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .split(/[^a-z0-9]+/)
+      .filter((token) => token.length > 2 && !TITLE_STOPWORDS.has(token)),
+  );
+}
+
+/**
+ * Note d'affinité entre deux matériaux. Le classement compte plus que la
+ * valeur : ce qui importe est qu'une sous-famille identique passe devant une
+ * catégorie complémentaire, elle-même devant un simple voisin de rayon.
+ */
+function affinityScore(
+  base: Doc<"btMaterials">,
+  other: Doc<"btMaterials">,
+  baseTokens: Set<string>,
+): number {
+  let score = 0;
+  if (base.subcategory && other.subcategory === base.subcategory) score += 6;
+  else if (base.family && other.family === base.family) score += 4;
+  else if (other.category === base.category) score += 3;
+
+  const complements = BT_COMPLEMENTS[base.category] ?? [];
+  const rank = complements.indexOf(other.category);
+  // Les premiers de la liste sont les associations les plus évidentes.
+  if (rank >= 0) score += 3.5 - rank * 0.5;
+
+  const baseMaterials = new Set(
+    [base.material, ...(base.materials ?? [])].filter(Boolean) as string[],
+  );
+  const otherMaterials = [other.material, ...(other.materials ?? [])].filter(Boolean) as string[];
+  if (otherMaterials.some((value) => baseMaterials.has(value))) score += 1.5;
+
+  if (base.brand && other.brand === base.brand) score += 1;
+  if (base.depot && other.depot === base.depot) score += 1;
+  if (base.condition === other.condition) score += 0.25;
+
+  let common = 0;
+  for (const token of titleTokens(other.title)) if (baseTokens.has(token)) common += 1;
+  score += Math.min(common, 3) * 0.5;
+
+  return score;
+}
+
+/**
+ * Suggestions de la fiche produit : ce qui va avec, puis le reste du stock.
+ *
+ * Les deux listes sont calculées ensemble pour ne lire le catalogue qu'une
+ * fois, et « le reste » exclut ce qui est déjà proposé au-dessus — sinon la
+ * page afficherait deux fois les mêmes lots.
+ */
+export const relatedMaterials = query({
+  args: {
+    id: v.id("btMaterials"),
+    relatedLimit: v.optional(v.number()),
+    othersLimit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const base = await ctx.db.get(args.id);
+    if (!base) return { related: [], others: [], remaining: 0 };
+
+    const relatedLimit = Math.min(Math.max(args.relatedLimit ?? 12, 1), 24);
+    const othersLimit = Math.min(Math.max(args.othersLimit ?? 12, 1), 24);
+
+    const published = await ctx.db
+      .query("btMaterials")
+      .withIndex("by_published", (q) => q.eq("published", true))
+      .order("desc")
+      .collect();
+    const candidates = published.filter(
+      (material) =>
+        material._id !== base._id && material.status === "disponible" && material.price > 0,
+    );
+
+    const baseTokens = titleTokens(base.title);
+    const scored = candidates
+      .map((material) => ({ material, score: affinityScore(base, material, baseTokens) }))
+      // En dessous de deux points il ne reste que des coïncidences (même dépôt,
+      // même état) : mieux vaut une section courte qu'une suggestion absurde.
+      .filter((entry) => entry.score >= 2)
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          (b.material.publishedAt ?? b.material.createdAt) -
+            (a.material.publishedAt ?? a.material.createdAt),
+      );
+
+    const related = scored.slice(0, relatedLimit).map((entry) => entry.material);
+    const relatedIds = new Set(related.map((material) => String(material._id)));
+    const rest = candidates.filter((material) => !relatedIds.has(String(material._id)));
+
+    return {
+      related: await Promise.all(related.map((material) => publicMaterial(ctx, material))),
+      others: await Promise.all(
+        rest.slice(0, othersLimit).map((material) => publicMaterial(ctx, material)),
+      ),
+      /** Ce que « voir plus » ne montrera pas : renvoie alors au catalogue. */
+      remaining: Math.max(0, rest.length - othersLimit),
+    };
+  },
+});
+
 export const getPublicMaterial = query({
   args: { id: v.id("btMaterials") },
   handler: async (ctx, { id }) => {
