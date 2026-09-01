@@ -8,6 +8,7 @@ import {
   Boxes,
   ClipboardList,
   DoorOpen,
+  Hammer,
   Home,
   MessageCircle,
   MessageSquareText,
@@ -57,6 +58,7 @@ export type AppDefinition = {
     | "cycleenbray"
     | "bennespro"
     | "pointeuse"
+    | "batire"
     | "pointage"
     | "collecte";
   label: string;
@@ -552,6 +554,17 @@ export const APPS: AppDefinition[] = [
     cardBg: "#a4cebe",
   },
   {
+    key: "batire",
+    label: "Bâtire",
+    description: "Matériaux de construction de seconde main : catalogue, dons et ventes.",
+    icon: Hammer,
+    logoSrc: "/batire-logo.jpg",
+    href: "https://batire.groupemes.fr",
+    external: true,
+    accent: "from-sky-600 to-lime-500",
+    cardBg: "#ffffff",
+  },
+  {
     key: "pointeuse",
     label: "Pointeuse",
     description: "Suivi des salariés, pointages, projets, dépenses et factures.",
@@ -658,6 +671,9 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
   }
   if (appKey === "pointeuse") {
     return access.grants.some((grant) => grant.pageKey.startsWith("pointeuse:"));
+  }
+  if (appKey === "batire") {
+    return access.grants.some((grant) => grant.pageKey.startsWith("batire:"));
   }
   return access.grants.some((grant) => !grant.pageKey.includes(":"));
 }

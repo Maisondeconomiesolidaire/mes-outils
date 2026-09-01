@@ -44,6 +44,7 @@ export const feedbackApp = v.union(
   v.literal("bennespro"),
   v.literal("pointeuse"),
   v.literal("feedback"),
+  v.literal("batire"),
 );
 
 /**

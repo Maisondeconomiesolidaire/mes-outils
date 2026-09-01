@@ -16,7 +16,14 @@ import { api } from "../../convex/_generated/api";
  * locale) pour pouvoir être copié tel quel dans chaque dépôt.
  */
 
-export type AppKey = "mesoutils" | "recycapp" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse";
+export type AppKey =
+  | "mesoutils"
+  | "recycapp"
+  | "klyde"
+  | "cycleenbray"
+  | "bennespro"
+  | "pointeuse"
+  | "batire";
 
 type Access = {
   role: string;
@@ -88,6 +95,14 @@ const APPS: PortalApp[] = [
     cardBg: "#a4cebe",
   },
   {
+    key: "batire",
+    label: "Bâtire",
+    description: "Matériaux de construction de seconde main : catalogue, dons et ventes.",
+    logoSrc: "/batire-logo.jpg",
+    href: appUrl("VITE_BATIRE_URL", "https://batire.groupemes.fr/crm"),
+    cardBg: "#ffffff",
+  },
+  {
     key: "pointeuse",
     label: "Pointeuse",
     description: "Suivi des salariés et des chantiers : pointages, projets, dépenses et factures.",
@@ -106,6 +121,7 @@ function appCanAccess(access: Access, key: AppKey): boolean {
   if (key === "cycleenbray") return access.grants.some((g) => g.pageKey.startsWith("cycle:"));
   if (key === "bennespro") return access.grants.some((g) => g.pageKey.startsWith("bennespro:"));
   if (key === "pointeuse") return access.grants.some((g) => g.pageKey.startsWith("pointeuse:"));
+  if (key === "batire") return access.grants.some((g) => g.pageKey.startsWith("batire:"));
   // recycapp : pages sans préfixe d'application (flotte, demandes, tournees…).
   return access.grants.some((g) => !g.pageKey.includes(":"));
 }
