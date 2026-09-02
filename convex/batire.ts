@@ -156,6 +156,19 @@ function stars(value: unknown) {
   return Math.min(5, parsed);
 }
 
+/**
+ * Une fiche en ligne sans prix ne s'affiche nulle part : la boutique l'écarte,
+ * sa page publique répond « introuvable » et l'équipe la croit publiée. On le
+ * dit au moment de l'enregistrement plutôt que de laisser la fiche disparaître.
+ */
+function assertPublishable(published: boolean, price: number) {
+  if (published && price <= 0) {
+    throw new ConvexError(
+      "Indiquez un prix avant de mettre la fiche en ligne : sans prix, elle reste invisible en boutique.",
+    );
+  }
+}
+
 /** Champs normalisés : un prix ou un stock négatif n'a pas de sens. */
 function normalizeMaterial(args: Record<string, unknown>) {
   const price = Math.max(0, Number(args.price) || 0);
@@ -197,7 +210,12 @@ function normalizeMaterial(args: Record<string, unknown>) {
 async function notifySearchAlerts(ctx: MutationCtx, materialId: Id<"btMaterials">) {
   const material = await ctx.db.get(materialId);
   if (!material) return;
-  if (material.published !== true || material.status !== "disponible") return;
+  // La règle est celle de `listPublicMaterials`, prix compris : une fiche sans
+  // prix n'existe pas en boutique, et prévenir quelqu'un d'un lot qu'il ne peut
+  // pas ouvrir lui envoie un lien mort. Tant qu'elle n'est pas visible, on ne
+  // pose pas non plus le drapeau — l'alerte partira quand elle le deviendra.
+  if (material.published !== true) return;
+  if (material.status !== "disponible" || material.price <= 0) return;
   if (material.searchAlertsSentAt) return;
 
   const now = Date.now();
@@ -325,6 +343,7 @@ export const createMaterial = mutation({
     if (!title) throw new ConvexError("Le titre du matériau est requis.");
     const now = Date.now();
     const { status, published, ...rest } = args;
+    assertPublishable(published ?? false, Math.max(0, Number(args.price) || 0));
 
     const materialId = await ctx.db.insert("btMaterials", {
       ...(normalizeMaterial(rest) as typeof rest),
@@ -356,6 +375,7 @@ export const updateMaterial = mutation({
     const title = args.title.trim();
     if (!title) throw new ConvexError("Le titre du matériau est requis.");
     const published = args.published ?? existing.published ?? false;
+    assertPublishable(published, Math.max(0, Number(args.price) || 0));
     await ctx.db.patch(id, {
       ...(normalizeMaterial(args) as typeof args),
       title,
@@ -389,6 +409,7 @@ export const setMaterialPublished = mutation({
     await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
     const material = await ctx.db.get(id);
     if (!material) throw new ConvexError("Matériau introuvable.");
+    assertPublishable(published, material.price);
     await ctx.db.patch(id, {
       published,
       publishedAt: published ? material.publishedAt ?? Date.now() : undefined,
