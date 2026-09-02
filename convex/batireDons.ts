@@ -345,6 +345,26 @@ export const decideDonation = mutation({
   },
 });
 
+/**
+ * Rattache la fiche matériau créée depuis un don.
+ *
+ * Le don garde ainsi la trace de ce qu'il est devenu, et l'équipe voit d'un
+ * coup d'œil ce qui reste à mettre en stock.
+ */
+export const markDonationConverted = mutation({
+  args: { id: v.id("btDonations"), materialId: v.id("btMaterials") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DONS, "update");
+    const donation = await ctx.db.get(args.id);
+    if (!donation) throw new ConvexError("Don introuvable.");
+    await ctx.db.patch(args.id, {
+      materialId: args.materialId,
+      convertedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 export const donationById = internalQuery({
   args: { id: v.id("btDonations") },
   handler: async (ctx, { id }) => await ctx.db.get(id),

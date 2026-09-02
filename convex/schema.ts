@@ -2974,6 +2974,9 @@ export default defineSchema(
     decidedBy: v.optional(v.string()),
     /** Suivi interne, jamais montré au donateur. */
     internalNote: v.optional(v.string()),
+    /** Fiche matériau née de ce don, une fois le lot entré en stock. */
+    materialId: v.optional(v.id("btMaterials")),
+    convertedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
