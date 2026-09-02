@@ -233,6 +233,7 @@ async function notifySearchAlerts(ctx: MutationCtx, materialId: Id<"btMaterials"
     subcategory: material.subcategory,
     price: material.price,
     unit: material.unit,
+    imageStorageId: material.photos[0] ? String(material.photos[0]) : undefined,
     recipients: matching.map((alert) => ({
       email: alert.email,
       name: alert.name,

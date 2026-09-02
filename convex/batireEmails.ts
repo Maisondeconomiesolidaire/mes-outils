@@ -6,7 +6,7 @@
  */
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import { esc, resendSend } from "./emails";
+import { esc, resendSend, storageImageUrl } from "./emails";
 
 const FROM = "Bâtire <no-reply@mesoutils.eco-solidaire.fr>";
 
@@ -22,6 +22,20 @@ function button(href: string, label: string) {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:separate;margin:4px 0 22px;">
     <tr><td style="border-radius:12px;background:${BRAND_DARK};">
       <a href="${href}" target="_blank" style="display:inline-block;padding:13px 24px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:700;line-height:1;color:#ffffff;text-decoration:none;border-radius:12px;">${esc(label)}</a>
+    </td></tr>
+  </table>`;
+}
+
+/**
+ * Visuel d'un produit, servi par l'action HTTP de Convex : une URL signée
+ * expire, et un client qui rouvre son email six mois plus tard n'aurait plus
+ * qu'un cadre vide.
+ */
+function productImage(storageId: string | undefined) {
+  if (!storageId) return "";
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;">
+    <tr><td align="center" style="background:#faf7f2;border:1px solid #efe6d9;border-radius:14px;padding:12px;">
+      <img src="${storageImageUrl(storageId)}" alt="" width="480" style="display:block;width:100%;max-width:480px;height:auto;border:0;border-radius:8px;outline:none;text-decoration:none;" />
     </td></tr>
   </table>`;
 }
@@ -52,7 +66,7 @@ function shell(opts: { preheader: string; heading: string; intro: string; conten
         <table role="presentation" cellpadding="0" cellspacing="0" width="600" class="container" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #ece4d8;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
           <tr>
             <td class="px" style="padding:22px 32px;border-bottom:1px solid #f1e9dd;border-top:4px solid ${BRAND};">
-              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;letter-spacing:-.02em;color:#18181b;">Bâtire<span style="color:${BRAND};">.</span></p>
+              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;letter-spacing:-.02em;color:#18181b;">BâtiRe<span style="color:${BRAND};">.</span></p>
               <p style="margin:2px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#a1a1aa;">Matériaux de réemploi</p>
             </td>
           </tr>
@@ -140,6 +154,8 @@ export const sendSearchAlert = internalAction({
     subcategory: v.optional(v.string()),
     price: v.number(),
     unit: v.string(),
+    /** Première photo du lot : un matériau se reconnaît à l'œil. */
+    imageStorageId: v.optional(v.string()),
     recipients: v.array(
       v.object({
         email: v.string(),
@@ -166,9 +182,10 @@ export const sendSearchAlert = internalAction({
           `${recipient.name ? `Bonjour ${esc(recipient.name)},<br/><br/>` : ""}` +
           `<strong>${esc(args.title)}</strong> est en ligne dans la boutique.`,
         contentHtml:
+          productImage(args.imageStorageId) +
           note("Votre recherche", recipient.wanted) +
           `<p style="margin:0 0 20px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.65;color:#3f3f46;">${esc(path)}<br/><strong>${esc(price)}</strong></p>` +
-          button(`${appUrl()}/materiau/${args.materialId}`, "Voir le matériau") +
+          button(`${appUrl()}/materiau/${args.materialId}`, "Voir le produit") +
           `<p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">Les lots de réemploi partent vite et ne reviennent pas : premier arrivé, premier servi.</p>`,
       });
       await resendSend(recipient.email, `Trouvé pour vous — ${args.title}`, html, FROM);
