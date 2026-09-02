@@ -2009,13 +2009,14 @@ export function btSubFamilies(category: string, family: string) {
 const UNITS = ["unité", "m²", "m³", "ml", "kg", "tonne", "palette", "sac", "lot"];
 
 /** Provenance du matériau, telle qu'elle se déclare dans un diagnostic PEMD. */
+/** Les trois provenances les plus courantes du dépôt viennent en tête. */
 export const BT_ORIGINS = [
-  "Reconditionné",
-  "Occasion réemploi",
-  "Déstockage neuf",
-  "Recyclé upcyclé",
   "Surplus de chantier",
   "Dépose préservante",
+  "Déstockage neuf",
+  "Reconditionné",
+  "Occasion réemploi",
+  "Recyclé upcyclé",
 ];
 
 /** Type de donateur : qui nous donne les matériaux. */
