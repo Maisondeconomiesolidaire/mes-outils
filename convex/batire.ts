@@ -233,6 +233,9 @@ async function notifySearchAlerts(ctx: MutationCtx, materialId: Id<"btMaterials"
     subcategory: material.subcategory,
     price: material.price,
     unit: material.unit,
+    // Un lot annoncé pour plus tard mérite le même email, à condition d'y lire
+    // la date : le client saura quand venir plutôt que de se déplacer pour rien.
+    availableFrom: material.availableFrom,
     imageStorageId: material.photos[0] ? String(material.photos[0]) : undefined,
     recipients: matching.map((alert) => ({
       email: alert.email,
@@ -374,6 +377,9 @@ export const setMaterialStatus = mutation({
   handler: async (ctx, { id, status }) => {
     await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
     await ctx.db.patch(id, { status, updatedAt: Date.now() });
+    // Un lot publié en brouillon n'entre en boutique qu'ici : c'est donc aussi
+    // un moment où une recherche peut trouver preneur.
+    await notifySearchAlerts(ctx, id);
   },
 });
 

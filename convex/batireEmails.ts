@@ -154,6 +154,8 @@ export const sendSearchAlert = internalAction({
     subcategory: v.optional(v.string()),
     price: v.number(),
     unit: v.string(),
+    /** Ouverture à la vente, si le lot n'est pas encore disponible. */
+    availableFrom: v.optional(v.number()),
     /** Première photo du lot : un matériau se reconnaît à l'œil. */
     imageStorageId: v.optional(v.string()),
     recipients: v.array(
@@ -171,24 +173,57 @@ export const sendSearchAlert = internalAction({
       style: "currency",
       currency: "EUR",
     })} / ${args.unit}`;
+    // Deux situations, deux lettres : le lot est là, ou il arrive à une date
+    // connue. Annoncer « c'est en ligne » pour un lot pas encore ouvert à la
+    // vente ferait venir le client devant une étagère vide.
+    const upcoming =
+      typeof args.availableFrom === "number" && args.availableFrom > Date.now();
+    const availableOn = args.availableFrom
+      ? new Date(args.availableFrom).toLocaleDateString("fr-FR", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        })
+      : null;
 
     // Un email par destinataire : la recherche rappelée est la sienne, et
     // personne ne découvre l'adresse des autres.
     for (const recipient of args.recipients) {
       const html = shell({
-        preheader: `${args.title} vient d'arriver au dépôt.`,
-        heading: "Ce que vous cherchez vient d'arriver",
+        preheader: upcoming
+          ? `${args.title} arrive au dépôt${availableOn ? ` le ${availableOn}` : ""}.`
+          : `${args.title} vient d'arriver au dépôt.`,
+        heading: upcoming ? "Bientôt disponible" : "Ce que vous cherchez vient d'arriver",
         intro:
           `${recipient.name ? `Bonjour ${esc(recipient.name)},<br/><br/>` : ""}` +
-          `<strong>${esc(args.title)}</strong> est en ligne dans la boutique.`,
+          (upcoming
+            ? `Nous aurons bientôt <strong>${esc(args.title)}</strong>, qui correspond à votre recherche.`
+            : `<strong>${esc(args.title)}</strong> est en ligne dans la boutique.`),
         contentHtml:
           productImage(args.imageStorageId) +
+          (upcoming && availableOn
+            ? note("Disponible à partir du", availableOn)
+            : "") +
           note("Votre recherche", recipient.wanted) +
           `<p style="margin:0 0 20px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.65;color:#3f3f46;">${esc(path)}<br/><strong>${esc(price)}</strong></p>` +
-          button(`${appUrl()}/materiau/${args.materialId}`, "Voir le produit") +
-          `<p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">Les lots de réemploi partent vite et ne reviennent pas : premier arrivé, premier servi.</p>`,
+          button(
+            `${appUrl()}/materiau/${args.materialId}`,
+            upcoming ? "Voir la fiche du produit" : "Voir le produit",
+          ) +
+          `<p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">${
+            upcoming
+              ? "La fiche est déjà en ligne : vous pouvez la consulter dès maintenant et venir à partir de cette date."
+              : "Les lots de réemploi partent vite et ne reviennent pas : premier arrivé, premier servi."
+          }</p>`,
       });
-      await resendSend(recipient.email, `Trouvé pour vous — ${args.title}`, html, FROM);
+      await resendSend(
+        recipient.email,
+        upcoming
+          ? `Bientôt disponible — ${args.title}`
+          : `Trouvé pour vous — ${args.title}`,
+        html,
+        FROM,
+      );
     }
   },
 });
