@@ -216,6 +216,15 @@ export const submitDonation = mutation({
       createdAt: now,
       updatedAt: now,
     });
+
+    const donation = await ctx.db.get(donationId);
+    await ctx.scheduler.runAfter(0, internal.batireEmails.sendDonationReceived, {
+      to: donor.email,
+      firstName: donor.firstName,
+      reference: donation?.reference ?? "",
+      title,
+      pickup: args.handover === "recuperer",
+    });
     return donationId;
   },
 });

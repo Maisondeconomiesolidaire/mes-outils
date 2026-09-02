@@ -175,3 +175,97 @@ export const sendSearchAlert = internalAction({
     }
   },
 });
+
+/** Reçu d'une commande payée en ligne. */
+export const sendOrderReceipt = internalAction({
+  args: {
+    to: v.string(),
+    firstName: v.string(),
+    reference: v.string(),
+    title: v.string(),
+    quantity: v.number(),
+    unit: v.string(),
+    amountCents: v.number(),
+    depot: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const total = (args.amountCents / 100).toLocaleString("fr-FR", {
+      style: "currency",
+      currency: "EUR",
+    });
+    const html = shell({
+      preheader: `Commande ${args.reference} confirmée.`,
+      heading: "Merci pour votre commande",
+      intro:
+        `Bonjour ${esc(args.firstName)},<br/><br/>` +
+        `Votre paiement est confirmé. Votre commande <strong>${esc(args.reference)}</strong> vous attend au dépôt.`,
+      contentHtml:
+        `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">
+          <tr><td style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(args.title)}</td>
+              <td align="right" style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(`${args.quantity} ${args.unit}`)}</td></tr>
+          <tr><td style="padding:10px 0;font-weight:700;color:#18181b;">Total payé</td>
+              <td align="right" style="padding:10px 0;font-weight:700;color:#18181b;">${esc(total)}</td></tr>
+        </table>` +
+        note(
+          "Retrait",
+          args.depot
+            ? `Dépôt : ${args.depot}. Présentez la référence ${args.reference} à l'équipe, aux horaires d'ouverture.`
+            : `Présentez la référence ${args.reference} à l'équipe, aux horaires d'ouverture du dépôt.`,
+        ) +
+        button(`${appUrl()}/mon-compte`, "Mon espace client"),
+    });
+    await resendSend(args.to, `Commande ${args.reference} confirmée`, html, FROM);
+  },
+});
+
+/** L'équipe a répondu dans la messagerie : le client n'a pas à surveiller l'app. */
+export const sendNewMessage = internalAction({
+  args: {
+    to: v.string(),
+    name: v.optional(v.string()),
+    materialTitle: v.string(),
+    body: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const html = shell({
+      preheader: `Réponse de l'équipe à propos de ${args.materialTitle}.`,
+      heading: "L'équipe vous a répondu",
+      intro:
+        `${args.name ? `Bonjour ${esc(args.name)},<br/><br/>` : ""}` +
+        `À propos de <strong>${esc(args.materialTitle)}</strong> :`,
+      contentHtml:
+        note("Message de l'équipe", args.body) +
+        button(`${appUrl()}/messagerie`, "Répondre dans ma messagerie"),
+    });
+    await resendSend(args.to, `Réponse de Bâtire — ${args.materialTitle}`, html, FROM);
+  },
+});
+
+/** Accusé de réception d'une proposition de don. */
+export const sendDonationReceived = internalAction({
+  args: {
+    to: v.string(),
+    firstName: v.string(),
+    reference: v.string(),
+    title: v.string(),
+    pickup: v.boolean(),
+  },
+  handler: async (_ctx, args) => {
+    const html = shell({
+      preheader: `Proposition ${args.reference} bien reçue.`,
+      heading: "Votre proposition est bien arrivée",
+      intro:
+        `Bonjour ${esc(args.firstName)},<br/><br/>` +
+        `Nous avons bien reçu <strong>${esc(args.title)}</strong> (${esc(args.reference)}). ` +
+        `L'équipe l'étudie et vous répond par email.`,
+      contentHtml:
+        note(
+          "Ce qui se passe ensuite",
+          args.pickup
+            ? "Si le don est accepté, nous vous recontactons pour convenir de l'enlèvement à l'adresse indiquée."
+            : "Si le don est accepté, vous pourrez le déposer au dépôt pendant les horaires d'ouverture.",
+        ) + button(`${appUrl()}/mon-compte?onglet=dons`, "Suivre mon don"),
+    });
+    await resendSend(args.to, `Proposition de don reçue — ${args.title}`, html, FROM);
+  },
+});

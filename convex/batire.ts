@@ -858,6 +858,18 @@ export const markOrderPaid = internalMutation({
     });
 
     const material = await ctx.db.get(order.materialId);
+    // Le reçu part de la mutation qui encaisse : c'est le seul endroit par
+    // lequel passent le paiement en ligne comme l'encaissement au terminal.
+    await ctx.scheduler.runAfter(0, internal.batireEmails.sendOrderReceipt, {
+      to: order.customer.email,
+      firstName: order.customer.firstName,
+      reference: order.reference,
+      title: order.materialTitle,
+      quantity: order.quantity,
+      unit: order.unit,
+      amountCents: order.amountCents,
+      depot: material?.depot,
+    });
     if (material) {
       const remaining = Math.max(0, material.quantity - order.quantity);
       await ctx.db.patch(order.materialId, {
@@ -2537,7 +2549,7 @@ export const sendMessage = mutation({
       clientEmail = previous?.clientEmail ?? "";
     }
 
-    return await ctx.db.insert("btMessages", {
+    const messageId = await ctx.db.insert("btMessages", {
       materialId: args.materialId,
       materialTitle: material?.title ?? "Discussion générale",
       clientId,
@@ -2550,6 +2562,17 @@ export const sendMessage = mutation({
       readByClient: !fromStaff,
       createdAt: Date.now(),
     });
+    // Le client ne surveille pas la messagerie : une réponse de l'équipe le
+    // rejoint par email. Dans l'autre sens, l'équipe voit le fil dans le CRM.
+    if (fromStaff && clientEmail) {
+      await ctx.scheduler.runAfter(0, internal.batireEmails.sendNewMessage, {
+        to: clientEmail,
+        name: clientName,
+        materialTitle: material?.title ?? "votre demande",
+        body,
+      });
+    }
+    return messageId;
   },
 });
 
