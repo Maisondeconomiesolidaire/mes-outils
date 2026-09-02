@@ -11,6 +11,7 @@
 import { ConvexError, v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import {
   accessAllows,
@@ -98,6 +99,7 @@ const materialFields = {
   unit: btUnit,
   quantity: v.number(),
   price: v.number(),
+  originalPrice: v.optional(v.number()),
   packaging: v.optional(v.string()),
   lengthCm: v.optional(v.number()),
   widthCm: v.optional(v.number()),
@@ -158,6 +160,10 @@ function stars(value: unknown) {
 function normalizeMaterial(args: Record<string, unknown>) {
   const price = Math.max(0, Number(args.price) || 0);
   const quantity = Math.max(0, Number(args.quantity) || 0);
+  // Un prix barré inférieur ou égal au prix de vente n'affiche aucune remise :
+  // on le laisse tomber plutôt que de barrer un chiffre plus bas.
+  const rawOriginal = Math.max(0, Number(args.originalPrice) || 0);
+  const originalPrice = rawOriginal > price ? rawOriginal : undefined;
   // Les matières viennent d'une liste à choix multiple ; `material` reste
   // alimenté en texte, car la recherche, la boutique et l'import Excel le
   // lisent encore. Deux champs, une seule saisie.
@@ -168,6 +174,7 @@ function normalizeMaterial(args: Record<string, unknown>) {
   return {
     ...args,
     price,
+    originalPrice,
     quantity,
     materials: list,
     material,
@@ -178,6 +185,132 @@ function normalizeMaterial(args: Record<string, unknown>) {
     disposalPotential: stars(args.disposalPotential),
   };
 }
+
+/**
+ * Prévient les clients dont la recherche vise ce matériau.
+ *
+ * Trois garde-fous : le lot doit être visible en boutique, l'envoi n'a lieu
+ * qu'une fois par lot (`searchAlertsSentAt`), et la recherche doit être
+ * ANTÉRIEURE au matériau — le stock déjà en ligne au moment de la demande,
+ * le client vient de le parcourir, il n'a pas à recevoir un email pour lui.
+ */
+async function notifySearchAlerts(ctx: MutationCtx, materialId: Id<"btMaterials">) {
+  const material = await ctx.db.get(materialId);
+  if (!material) return;
+  if (material.published !== true || material.status !== "disponible") return;
+  if (material.searchAlertsSentAt) return;
+
+  const now = Date.now();
+  const alerts = await ctx.db
+    .query("btSearchAlerts")
+    .withIndex("by_category", (q) => q.eq("category", material.category))
+    .collect();
+  const matching = alerts.filter(
+    (alert) =>
+      (!alert.until || alert.until >= now) &&
+      alert.createdAt < material.createdAt &&
+      (!alert.family || alert.family === material.family) &&
+      (!alert.subcategory || alert.subcategory === material.subcategory),
+  );
+
+  // Le drapeau se pose même sans destinataire : republier un lot ne doit pas
+  // relancer la recherche des clients inscrits entre-temps.
+  await ctx.db.patch(materialId, { searchAlertsSentAt: now });
+  if (matching.length === 0) return;
+
+  for (const alert of matching) {
+    await ctx.db.patch(alert._id, {
+      lastNotifiedAt: now,
+      matchCount: (alert.matchCount ?? 0) + 1,
+    });
+  }
+
+  await ctx.scheduler.runAfter(0, internal.batireEmails.sendSearchAlert, {
+    materialId: String(materialId),
+    title: material.title,
+    category: material.category,
+    family: material.family,
+    subcategory: material.subcategory,
+    price: material.price,
+    unit: material.unit,
+    recipients: matching.map((alert) => ({
+      email: alert.email,
+      name: alert.name,
+      wanted: [alert.category, alert.family, alert.subcategory].filter(Boolean).join(" › "),
+    })),
+  });
+}
+
+/* ─── « Je recherche » : les demandes des clients ──────────────────────────── */
+
+export const createSearchAlert = mutation({
+  args: {
+    category: v.string(),
+    family: v.optional(v.string()),
+    subcategory: v.optional(v.string()),
+    until: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await requireUser(ctx);
+    const category = args.category.trim();
+    if (!category) throw new ConvexError("Choisissez au moins une catégorie.");
+    const email = (identity.email ?? "").toLowerCase();
+    if (!email) throw new ConvexError("Votre compte n'a pas d'adresse email.");
+
+    // Deux fois la même branche ne sert à rien : on prolonge la recherche
+    // existante plutôt que d'envoyer deux emails pour un seul lot.
+    const existing = await ctx.db
+      .query("btSearchAlerts")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .collect();
+    const twin = existing.find(
+      (alert) =>
+        alert.category === category &&
+        (alert.family ?? "") === (args.family?.trim() ?? "") &&
+        (alert.subcategory ?? "") === (args.subcategory?.trim() ?? ""),
+    );
+    if (twin) {
+      await ctx.db.patch(twin._id, { until: args.until });
+      return twin._id;
+    }
+
+    return await ctx.db.insert("btSearchAlerts", {
+      clerkId: identity.subject,
+      email,
+      name: formatUserName(identity),
+      category,
+      family: args.family?.trim() || undefined,
+      subcategory: args.subcategory?.trim() || undefined,
+      until: args.until,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/** Les recherches du client connecté, la plus récente en tête. */
+export const mySearchAlerts = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return [];
+    return await ctx.db
+      .query("btSearchAlerts")
+      .withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject))
+      .order("desc")
+      .collect();
+  },
+});
+
+export const removeSearchAlert = mutation({
+  args: { id: v.id("btSearchAlerts") },
+  handler: async (ctx, { id }) => {
+    const identity = await requireUser(ctx);
+    const alert = await ctx.db.get(id);
+    if (!alert) return;
+    if (alert.clerkId !== identity.subject) throw new ConvexError("Recherche non autorisée.");
+    await ctx.db.delete(id);
+  },
+});
 
 export const createMaterial = mutation({
   args: { ...materialFields, status: v.optional(btMaterialStatus), published: v.optional(v.boolean()) },
@@ -200,6 +333,7 @@ export const createMaterial = mutation({
       updatedAt: now,
     });
     if (args.qrReference) await claimQr(ctx, args.qrReference, materialId);
+    await notifySearchAlerts(ctx, materialId);
     return materialId;
   },
 });
@@ -230,6 +364,7 @@ export const updateMaterial = mutation({
     if (args.qrReference && args.qrReference !== existing.qrReference) {
       await claimQr(ctx, args.qrReference, id);
     }
+    await notifySearchAlerts(ctx, id);
   },
 });
 
@@ -252,6 +387,7 @@ export const setMaterialPublished = mutation({
       publishedAt: published ? material.publishedAt ?? Date.now() : undefined,
       updatedAt: Date.now(),
     });
+    await notifySearchAlerts(ctx, id);
   },
 });
 
@@ -301,6 +437,7 @@ async function publicMaterial(
     unit: material.unit,
     quantity: material.quantity,
     price: material.price,
+    originalPrice: material.originalPrice,
     packaging: material.packaging,
     lengthCm: material.lengthCm,
     widthCm: material.widthCm,
@@ -1865,9 +2002,10 @@ export const BT_ORIGINS = [
   "Déstockage neuf",
   "Recyclé upcyclé",
   "Surplus de chantier",
+  "Dépose préservante",
 ];
 
-/** Type de demandeur : la structure d'où vient le flux de matériaux. */
+/** Type de donateur : qui nous donne les matériaux. */
 export const BT_PROFILES = [
   "Artisans, professionnels du BTP, organisations PRO",
   "Déchèteries publiques",
@@ -1875,6 +2013,7 @@ export const BT_PROFILES = [
   "Maîtres d'ouvrage, architectes, maîtres d'œuvre",
   "Entreprises de recyclage",
   "Recycleries et ressourceries généralistes",
+  "Particulier",
 ];
 
 /** Matières proposées d'origine. L'équipe en ajoute d'autres via `btOptions`. */
@@ -1901,6 +2040,8 @@ export const BT_MATERIALS = [
   "Tissu",
   "Miroir",
   "Pierre",
+  "Terre cuite",
+  "Résine plastique",
 ];
 
 /** Unité dans laquelle sont saisies les dimensions. */

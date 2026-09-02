@@ -2638,6 +2638,8 @@ export default defineSchema(
     quantity: v.number(),
     /** Prix pour UNE unité de vente (un m³, une tonne, une palette…). */
     price: v.number(),
+    /** Prix barré : le neuf équivalent, pour situer l'économie du réemploi. */
+    originalPrice: v.optional(v.number()),
     /** Conditionnement : « palette de 60 sacs », « botte de 10 ». */
     packaging: v.optional(v.string()),
     /** Dimensions en centimètres, quand elles ont un sens pour le matériau. */
@@ -2728,6 +2730,8 @@ export default defineSchema(
 
     aiConfidence: v.optional(v.number()),
     aiNotes: v.optional(v.string()),
+    /** Date d'envoi des alertes « je recherche » : elles ne partent qu'une fois. */
+    searchAlertsSentAt: v.optional(v.number()),
     createdBy: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -2859,6 +2863,31 @@ export default defineSchema(
     updatedAt: v.number(),
   }).index("by_article", ["articleId"]),
 
+  /**
+   * « Je recherche » : ce qu'un client attend et que le dépôt n'a pas encore.
+   *
+   * Une recherche vise une branche du catalogue (catégorie, éventuellement
+   * affinée) et s'éteint d'elle-même à sa date de fin. Un matériau mis en ligne
+   * APRÈS la recherche déclenche un email ; le stock déjà présent, non — le
+   * client vient de le parcourir.
+   */
+  btSearchAlerts: defineTable({
+    clerkId: v.string(),
+    email: v.string(),
+    name: v.optional(v.string()),
+    category: v.string(),
+    family: v.optional(v.string()),
+    subcategory: v.optional(v.string()),
+    /** Fin de la recherche. Absente = tant que le client ne l'arrête pas. */
+    until: v.optional(v.number()),
+    /** Dernière notification envoyée, pour l'afficher au client. */
+    lastNotifiedAt: v.optional(v.number()),
+    matchCount: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_clerkId", ["clerkId"])
+    .index("by_category", ["category"]),
+
   /** QR codes imprimés à l'avance, collés sur les matériaux à leur arrivée. */
   btQrCodes: defineTable({
     reference: v.string(),
@@ -2881,6 +2910,8 @@ export default defineSchema(
     /** Raison sociale. Une personne seule peut laisser le champ vide. */
     company: v.optional(v.string()),
     siret: v.optional(v.string()),
+    /** Code APE (NAF) de l'entreprise : « 4399C », « 4120A »… */
+    apeCode: v.optional(v.string()),
     /** Type de donateur : mêmes valeurs que l'« Origine » d'une fiche matériau. */
     profiles: v.optional(v.array(v.string())),
     firstName: v.optional(v.string()),
@@ -2928,6 +2959,14 @@ export default defineSchema(
     /** Date à partir de laquelle le lot est disponible chez le donateur. */
     availableFrom: v.optional(v.number()),
     photos: v.array(v.id("_storage")),
+    /**
+     * Qui déplace le lot : « depot » = le donateur l'apporte, « recuperer » =
+     * l'équipe vient le chercher, et l'adresse d'enlèvement devient nécessaire.
+     */
+    handover: v.optional(v.union(v.literal("depot"), v.literal("recuperer"))),
+    pickupAddress: v.optional(v.string()),
+    pickupPostalCode: v.optional(v.string()),
+    pickupCity: v.optional(v.string()),
     status: btDonationStatus,
     /** Motif du refus, ou consignes de dépôt jointes à l'acceptation. */
     decisionMessage: v.optional(v.string()),

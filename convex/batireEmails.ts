@@ -85,6 +85,8 @@ export const sendDonationDecision = internalAction({
     reference: v.string(),
     title: v.string(),
     accepted: v.boolean(),
+    /** Le donateur a demandé un enlèvement : on ne lui parle pas de dépôt. */
+    pickup: v.optional(v.boolean()),
     /** Consignes de dépôt si accepté, motif si refusé. */
     message: v.optional(v.string()),
   },
@@ -96,11 +98,15 @@ export const sendDonationDecision = internalAction({
           heading: "Don accepté",
           intro:
             `Bonjour ${esc(args.firstName)},<br/><br/>` +
-            `Votre don ${lot} est accepté. Vous pouvez le déposer au dépôt pendant les horaires d'ouverture.`,
+            (args.pickup
+              ? `Votre don ${lot} est accepté. Nous vous recontactons pour convenir de l'enlèvement à l'adresse indiquée.`
+              : `Votre don ${lot} est accepté. Vous pouvez le déposer au dépôt pendant les horaires d'ouverture.`),
           contentHtml:
-            (args.message ? note("Conditions de dépôt", args.message) : "") +
+            (args.message
+              ? note(args.pickup ? "Conditions d'enlèvement" : "Conditions de dépôt", args.message)
+              : "") +
             button(`${appUrl()}/mon-compte`, "Suivre mon don") +
-            `<p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">Merci de garder la référence ${esc(args.reference)} à portée de main lors du dépôt.</p>`,
+            `<p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">Gardez la référence ${esc(args.reference)} sous la main : elle nous sert à retrouver votre don.</p>`,
         })
       : shell({
           preheader: `Votre don ${args.reference} n'a pas été retenu.`,
@@ -121,5 +127,51 @@ export const sendDonationDecision = internalAction({
       html,
       FROM,
     );
+  },
+});
+
+/** Un lot recherché vient d'arriver en boutique. */
+export const sendSearchAlert = internalAction({
+  args: {
+    materialId: v.string(),
+    title: v.string(),
+    category: v.string(),
+    family: v.optional(v.string()),
+    subcategory: v.optional(v.string()),
+    price: v.number(),
+    unit: v.string(),
+    recipients: v.array(
+      v.object({
+        email: v.string(),
+        name: v.optional(v.string()),
+        /** La branche demandée, rappelée au client : il a pu en poser plusieurs. */
+        wanted: v.string(),
+      }),
+    ),
+  },
+  handler: async (_ctx, args) => {
+    const path = [args.category, args.family, args.subcategory].filter(Boolean).join(" › ");
+    const price = `${args.price.toLocaleString("fr-FR", {
+      style: "currency",
+      currency: "EUR",
+    })} / ${args.unit}`;
+
+    // Un email par destinataire : la recherche rappelée est la sienne, et
+    // personne ne découvre l'adresse des autres.
+    for (const recipient of args.recipients) {
+      const html = shell({
+        preheader: `${args.title} vient d'arriver au dépôt.`,
+        heading: "Ce que vous cherchez vient d'arriver",
+        intro:
+          `${recipient.name ? `Bonjour ${esc(recipient.name)},<br/><br/>` : ""}` +
+          `<strong>${esc(args.title)}</strong> est en ligne dans la boutique.`,
+        contentHtml:
+          note("Votre recherche", recipient.wanted) +
+          `<p style="margin:0 0 20px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.65;color:#3f3f46;">${esc(path)}<br/><strong>${esc(price)}</strong></p>` +
+          button(`${appUrl()}/materiau/${args.materialId}`, "Voir le matériau") +
+          `<p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">Les lots de réemploi partent vite et ne reviennent pas : premier arrivé, premier servi.</p>`,
+      });
+      await resendSend(recipient.email, `Trouvé pour vous — ${args.title}`, html, FROM);
+    }
   },
 });
