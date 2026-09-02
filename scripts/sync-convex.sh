@@ -12,6 +12,9 @@
 #
 # ⚠️ Toute NOUVELLE app de l'écosystème doit être ajoutée à SIBLINGS ci-dessous,
 #    sinon sa copie `convex/` dérive en silence du canonique.
+#    Exception assumée : `~/portailreemploi` (portail public) n'utilise NI Convex
+#    NI Clerk — c'est une page statique de liens. L'y ajouter y déposerait un
+#    backend dont ce dépôt n'a aucun usage.
 #
 # 👉 À lancer AVANT et APRÈS toute intervention sur N'IMPORTE QUELLE app, pour
 #    garder les dossiers `convex/` et les instructions identiques au canonique.
