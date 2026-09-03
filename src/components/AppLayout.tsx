@@ -1,5 +1,5 @@
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
-import { SignedIn, SignedOut, SignIn, SignUp, UserButton, useClerk, useUser } from "@clerk/clerk-react";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { SignedIn, SignedOut, UserButton, useClerk, useUser } from "@clerk/clerk-react";
 import { useConvexAuth, useMutation, useQuery } from "convex/react";
 import { LogOut, Menu, Moon, Sun, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
@@ -12,16 +12,10 @@ import { HelpButton } from "./HelpButton";
 import { Button } from "./ui/Button";
 import { Field, Input } from "./ui/Field";
 import { FullSpinner } from "./ui/Spinner";
+import { AuthSwitch } from "./ui/auth-switch";
 
 /** Style "bouton primaire" appliqué à l'élément de navigation actif. */
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
-const CLERK_APPEARANCE = {
-  variables: { colorPrimary: "#47c667" },
-  // L'instance utilise la connexion par code : ce lien Clerk ne mène pas à un
-  // parcours utile dans notre écran local.
-  elements: { formFieldAction__forgotPassword: "hidden" },
-};
-
 type ClerkUser = NonNullable<ReturnType<typeof useUser>["user"]>;
 
 export function AppLayout() {
@@ -67,49 +61,7 @@ export function AppLayout() {
  */
 function AuthPanel() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const isSignIn = location.pathname.startsWith("/sign-in");
-  const isSignUp = location.pathname.startsWith("/sign-up");
-
-  if (!isSignIn && !isSignUp) {
-    return (
-      <div className="grid gap-3">
-        <button
-          type="button"
-          onClick={() => navigate("/sign-in")}
-          className="rounded-2xl bg-brand-500 px-5 py-4 text-base font-bold text-white shadow-sm transition hover:-translate-y-0.5 hover:bg-brand-600"
-        >
-          J'ai déjà un compte, me connecter
-        </button>
-        <button
-          type="button"
-          onClick={() => navigate("/sign-up")}
-          className="rounded-2xl border border-[var(--border)] bg-[var(--card)] px-5 py-4 text-base font-bold text-[var(--foreground)] shadow-sm transition hover:-translate-y-0.5 hover:border-brand-500/60 hover:bg-[var(--accent)]"
-        >
-          Je m'inscris
-        </button>
-      </div>
-    );
-  }
-
-  // On passe aussi l'apparence directement aux composants Clerk :
-  // certaines transitions SignIn -> SignUp ne réappliquent pas toujours
-  // l'héritage du provider avant le premier rendu du nouveau composant.
-  return isSignUp ? (
-    <SignUp
-      routing="hash"
-      fallbackRedirectUrl="/"
-      signInUrl="/sign-in"
-      appearance={CLERK_APPEARANCE}
-    />
-  ) : (
-    <SignIn
-      routing="hash"
-      fallbackRedirectUrl="/"
-      signUpUrl="/sign-up"
-      appearance={CLERK_APPEARANCE}
-    />
-  );
+  return <AuthSwitch initialMode={location.pathname.startsWith("/sign-up") ? "signup" : "signin"} />;
 }
 
 function RequiredNameGate({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {
