@@ -176,7 +176,7 @@ textarea {
   height: 700px;
   overflow: hidden;
   border-radius: 1.5rem;
-  background: #fff;
+  background: var(--auth-card-bg, #fff);
   box-shadow: 0 25px 50px var(--auth-shadow, rgb(15 23 20 / 22%));
 }
 .auth-switch-container::before {
