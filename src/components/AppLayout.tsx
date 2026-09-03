@@ -20,22 +20,11 @@ type ClerkUser = NonNullable<ReturnType<typeof useUser>["user"]>;
 
 export function AppLayout() {
   const [theme, setTheme] = useTheme();
-  const logoSrc = theme === "dark" ? "/mesoutils-dark.png" : "/mesoutils-light.png";
 
   return (
     <>
       <SignedOut>
-        <div className="flex min-h-screen items-center justify-center px-4 py-10">
-          <div className="w-full max-w-md">
-            <div className="mb-6 flex items-center justify-between">
-              <img src={logoSrc} alt="Mes Outils" className="h-20 w-auto" />
-              <ThemeToggle theme={theme} onToggle={() => setTheme(theme === "dark" ? "light" : "dark")} />
-            </div>
-            <div className="glass-card rounded-xl border border-[var(--border)] p-4 sm:p-6">
-              <AuthPanel />
-            </div>
-          </div>
-        </div>
+        <AuthPanel />
       </SignedOut>
 
       <SignedIn>
