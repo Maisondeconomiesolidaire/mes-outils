@@ -144,10 +144,10 @@ textarea {
  * particulier (BâtiRe, Klyde) redéfinit ces variables dans son propre `:root`,
  * en dehors de ce bloc.
  *
- * Desktop (> 900px) : le formulaire glisse d'un bord à l'autre pendant que le
+ * Large (conteneur > 900px) : le formulaire glisse d'un bord à l'autre pendant que le
  * grand cercle traverse la carte et que les deux panneaux se croisent.
  *
- * Mobile (≤ 900px) : la carte passe en colonne — bandeau de panneaux en haut,
+ * Étroit (conteneur ≤ 900px) : la carte passe en colonne — bandeau de panneaux en haut,
  * formulaire dessous, hauteur libre. Le cercle y est remplacé par un bandeau
  * arrondi solidaire des panneaux. Avant, il gardait sa position absolue et le
  * mode inscription le translatait de `100%` vers le bas : il recouvrait alors
@@ -157,10 +157,14 @@ textarea {
  * aucun bouton ne permettait de revenir à la connexion.
  */
 .auth-switch-page {
+  /* Requête de conteneur, pas de media query : le portail est parfois monté
+     dans une colonne étroite (la boutique Recycapp le met dans une carte de
+     600px) où la largeur du viewport ne dit rien de la place disponible. */
+  container-type: inline-size;
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 2rem 1rem;
+  padding: clamp(1rem, 3vw, 2rem) clamp(.75rem, 2vw, 1rem);
   background: var(--auth-page-bg, linear-gradient(135deg, var(--color-brand-50), var(--color-brand-100)));
   /* `overflow-x` seulement : `overflow: hidden` empêchait de faire défiler la
      carte sur les écrans moins hauts qu'elle. */
@@ -258,8 +262,7 @@ textarea {
 .sign-up-mode .left-panel { pointer-events: none; }
 .sign-up-mode .right-panel { pointer-events: all; }
 
-@media (max-width: 900px) {
-  .auth-switch-page { padding: 1rem; }
+@container (max-width: 900px) {
   /* Colonne, hauteur libre : le formulaire d'inscription ne peut plus être
      coupé par une carte figée. */
   .auth-switch-container { display: flex; flex-direction: column; height: auto; }

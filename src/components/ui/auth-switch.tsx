@@ -9,6 +9,12 @@ type AuthSwitchProps = {
   /** Nom affiché dans les titres ("Bienvenue sur …"). */
   appName?: string;
   logoSrc?: string;
+  /**
+   * Page à rejoindre une fois connecté. À défaut, le `redirect_url` de l'URL,
+   * puis l'accueil. À renseigner quand le portail garde une page précise
+   * (`RequirePublicAccount`), sinon l'utilisateur est renvoyé à l'accueil.
+   */
+  redirectUrl?: string;
   /** Lien de retour affiché sous les panneaux ; absent = pas de lien. */
   homeHref?: string;
   homeLabel?: string;
@@ -40,6 +46,7 @@ export function AuthSwitch({
   initialMode = "signin",
   appName = "Votre espace",
   logoSrc = "/logo-lsdb.png",
+  redirectUrl,
   homeHref,
   homeLabel = "Retour à l'accueil",
   termsHref,
@@ -74,7 +81,7 @@ export function AuthSwitch({
   const go = async (sessionId: string | null, setActive: (args: { session: string | null }) => Promise<void>) => {
     if (!sessionId) throw new Error("Session de connexion introuvable.");
     await setActive({ session: sessionId });
-    const returnTo = new URLSearchParams(window.location.search).get("redirect_url") || "/";
+    const returnTo = redirectUrl || new URLSearchParams(window.location.search).get("redirect_url") || "/";
     if (returnTo !== window.location.pathname + window.location.search) window.location.replace(returnTo);
   };
   const run = (action: () => Promise<void>) => async (event?: FormEvent) => {
