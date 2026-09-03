@@ -809,6 +809,23 @@ const customerValidator = v.object({
   company: v.optional(v.string()),
 });
 
+const pickupLocationValidator = v.union(
+  v.literal("usine_agile"),
+  v.literal("comptoir_c"),
+  v.literal("recyclerie_pays_de_bray"),
+  v.literal("esspace_150"),
+);
+
+const pickupLocations = {
+  usine_agile: { name: "Usine Agile", address: "31 Rue de l'Industrie, 60000 Beauvais" },
+  comptoir_c: { name: "Comptoir C", address: "13 Av. Pierre Bérégovoy, 60000 Beauvais" },
+  recyclerie_pays_de_bray: {
+    name: "Recyclerie du Pays de Bray",
+    address: "4 Rue de la Prairie, 60650 Lachapelle-aux-Pots",
+  },
+  esspace_150: { name: "Esspace 150", address: "150 Rte de Paris, 76220 Gournay-en-Bray" },
+} as const;
+
 async function nextOrderReference(ctx: { db: { query: (t: "btOrders") => any } }) {
   const all = await ctx.db.query("btOrders").collect();
   return `BT${String(all.length + 1).padStart(5, "0")}`;
@@ -821,6 +838,7 @@ export const createOrder = internalMutation({
     quantity: v.number(),
     customer: customerValidator,
     channel: v.union(v.literal("boutique"), v.literal("terminal")),
+    pickupLocation: v.optional(pickupLocationValidator),
     userId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -850,6 +868,7 @@ export const createOrder = internalMutation({
       unitPrice: material.price,
       amountCents,
       customer: { ...args.customer, email: args.customer.email.trim().toLowerCase() },
+      pickupLocation: args.pickupLocation,
       channel: args.channel,
       status: "en_attente",
       userId: args.userId,
@@ -897,6 +916,9 @@ export const markOrderPaid = internalMutation({
       unit: order.unit,
       amountCents: order.amountCents,
       depot: material?.depot,
+      pickupLocation: order.pickupLocation
+        ? pickupLocations[order.pickupLocation]
+        : undefined,
     });
     if (material) {
       const remaining = Math.max(0, material.quantity - order.quantity);
@@ -923,6 +945,9 @@ export const startCheckout = action({
     materialId: v.id("btMaterials"),
     quantity: v.number(),
     customer: customerValidator,
+    // Optionnel temporairement pour les pages déjà ouvertes avant la mise à
+    // jour du checkout ; la nouvelle interface l'impose avant le paiement.
+    pickupLocation: v.optional(pickupLocationValidator),
     returnUrl: v.string(),
   },
   handler: async (ctx, args): Promise<{ checkoutUrl: string; orderId: Id<"btOrders"> }> => {
@@ -944,6 +969,7 @@ export const startCheckout = action({
       quantity: args.quantity,
       customer: { ...args.customer, email },
       channel: "boutique",
+      pickupLocation: args.pickupLocation,
       userId: identity?.subject,
     });
 

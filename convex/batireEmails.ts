@@ -239,6 +239,7 @@ export const sendOrderReceipt = internalAction({
     unit: v.string(),
     amountCents: v.number(),
     depot: v.optional(v.string()),
+    pickupLocation: v.optional(v.object({ name: v.string(), address: v.string() })),
   },
   handler: async (_ctx, args) => {
     const total = (args.amountCents / 100).toLocaleString("fr-FR", {
@@ -260,8 +261,10 @@ export const sendOrderReceipt = internalAction({
         </table>` +
         note(
           "Retrait",
-          args.depot
-            ? `Dépôt : ${args.depot}. Présentez la référence ${args.reference} à l'équipe, aux horaires d'ouverture.`
+          args.pickupLocation
+            ? `${args.pickupLocation.name} — ${args.pickupLocation.address}. Présentez la référence ${args.reference} à l'équipe, aux horaires d'ouverture.`
+            : args.depot
+              ? `Dépôt : ${args.depot}. Présentez la référence ${args.reference} à l'équipe, aux horaires d'ouverture.`
             : `Présentez la référence ${args.reference} à l'équipe, aux horaires d'ouverture du dépôt.`,
         ) +
         button(`${appUrl()}/mon-compte`, "Mon espace client"),

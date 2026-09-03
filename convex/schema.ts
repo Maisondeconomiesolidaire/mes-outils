@@ -2809,6 +2809,15 @@ export default defineSchema(
       phone: v.optional(v.string()),
       company: v.optional(v.string()),
     }),
+    /** Lieu choisi par le client pour récupérer sa commande en boutique. */
+    pickupLocation: v.optional(
+      v.union(
+        v.literal("usine_agile"),
+        v.literal("comptoir_c"),
+        v.literal("recyclerie_pays_de_bray"),
+        v.literal("esspace_150"),
+      ),
+    ),
     channel: v.union(v.literal("boutique"), v.literal("terminal")),
     status: v.union(v.literal("en_attente"), v.literal("payee"), v.literal("annulee")),
     stripeSessionId: v.optional(v.string()),
