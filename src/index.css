@@ -132,6 +132,18 @@ textarea {
   background: rgba(47, 170, 80, 0.22);
 }
 
+/* Animation « Auth Switch » (identique à BâtiRe, aux couleurs Mes Outils) :
+   les deux panneaux se croisent au passage connexion / inscription. */
+.auth-switch-page { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; background: linear-gradient(135deg, #f0fbf3, #dcf6e2); overflow: hidden; }
+.auth-switch-container { position: relative; width: min(100%, 1100px); height: 700px; overflow: hidden; border-radius: 1.5rem; background: #fff; box-shadow: 0 25px 50px rgb(20 45 26 / 25%); }
+.auth-switch-container::before { content: ""; position: absolute; z-index: 6; top: -10%; right: 48%; width: 2000px; height: 2000px; border-radius: 50%; background: linear-gradient(-45deg, #2faa50, #1d5931); transform: translateY(-50%); transition: 1.8s ease-in-out; }
+.auth-switch-form { position: absolute; z-index: 5; top: 50%; left: 75%; width: 50%; padding: 2.5rem 4.5rem; transform: translate(-50%, -50%); transition: left 1s .7s ease-in-out; }
+.auth-switch-panels { position: absolute; z-index: 7; inset: 0; display: grid; grid-template-columns: repeat(2, 1fr); pointer-events: none; }
+.auth-switch-panel { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-around; text-align: center; color: white; }.auth-switch-panel-content { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; transition: transform .9s ease-in-out; transition-delay: .6s; }.left-panel { padding: 3rem 17% 2rem 12%; pointer-events: all; }.right-panel { padding: 3rem 12% 2rem 17%; pointer-events: none; }.right-panel .auth-switch-panel-content { transform: translateX(800px); }
+.auth-switch-panel h2, .auth-switch-panel p { margin: 0; }.auth-switch-panel h2 { font-size: 2rem; font-weight: 800; }.auth-switch-panel p { max-width: 22rem; line-height: 1.55; }.auth-switch-panel button { border: 1px solid rgb(255 255 255 / .8); border-radius: 999px; padding: .75rem 1.4rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; transition: background .2s, color .2s; }.auth-switch-panel button:hover { background: white; color: #258841; }
+.sign-up-mode::before { right: 52%; transform: translate(100%, -50%); }.sign-up-mode .auth-switch-form { left: 25%; }.sign-up-mode .left-panel .auth-switch-panel-content { transform: translateX(-800px); }.sign-up-mode .right-panel .auth-switch-panel-content { transform: translateX(0); }.sign-up-mode .left-panel { pointer-events: none; }.sign-up-mode .right-panel { pointer-events: all; }
+@media (max-width: 700px) { .auth-switch-container { height: 820px; }.auth-switch-container::before { top: initial; right: initial; bottom: 66%; left: 50%; width: 1300px; height: 1300px; transform: translateX(-50%); }.auth-switch-form { top: 65%; left: 50%; width: 100%; padding: 2rem 1.5rem; transform: translate(-50%, -50%); }.auth-switch-panels { height: 34%; grid-template-columns: 1fr; }.auth-switch-panel { align-items: center; padding: 2rem 18%; }.right-panel { display: none; }.sign-up-mode::before { right: initial; transform: translate(-50%, 100%); }.sign-up-mode .auth-switch-form { left: 50%; }.sign-up-mode .left-panel .auth-switch-panel-content { transform: none; } }
+
 /* ─── Surfaces (toutes unies, aucun dégradé) ─────────────────────────────── */
 .glass-card,
 .mesh-panel,
