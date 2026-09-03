@@ -50,7 +50,7 @@ export function AppLayout() {
  */
 function AuthPanel() {
   const location = useLocation();
-  return <AuthSwitch initialMode={location.pathname.startsWith("/sign-up") ? "signup" : "signin"} />;
+  return <AuthSwitch appName="Mes Outils" logoSrc="/mesoutils-light.png" initialMode={location.pathname.startsWith("/sign-up") ? "signup" : "signin"} />;
 }
 
 function RequiredNameGate({ theme, setTheme }: { theme: "light" | "dark"; setTheme: (t: "light" | "dark") => void }) {

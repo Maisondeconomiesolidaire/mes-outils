@@ -132,17 +132,170 @@ textarea {
   background: rgba(47, 170, 80, 0.22);
 }
 
-/* Animation « Auth Switch » (identique à BâtiRe, aux couleurs Mes Outils) :
-   les deux panneaux se croisent au passage connexion / inscription. */
-.auth-switch-page { min-height: 100vh; display: grid; place-items: center; padding: 2rem 1rem; background: linear-gradient(135deg, #f0fbf3, #dcf6e2); overflow: hidden; }
-.auth-switch-container { position: relative; width: min(100%, 1100px); height: 700px; overflow: hidden; border-radius: 1.5rem; background: #fff; box-shadow: 0 25px 50px rgb(20 45 26 / 25%); }
-.auth-switch-container::before { content: ""; position: absolute; z-index: 6; top: -10%; right: 48%; width: 2000px; height: 2000px; border-radius: 50%; background: linear-gradient(-45deg, #2faa50, #1d5931); transform: translateY(-50%); transition: 1.8s ease-in-out; }
-.auth-switch-form { position: absolute; z-index: 5; top: 50%; left: 75%; width: 50%; padding: 2.5rem 4.5rem; transform: translate(-50%, -50%); transition: left 1s .7s ease-in-out; }
-.auth-switch-panels { position: absolute; z-index: 7; inset: 0; display: grid; grid-template-columns: repeat(2, 1fr); pointer-events: none; }
-.auth-switch-panel { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-around; text-align: center; color: white; }.auth-switch-panel-content { display: flex; flex-direction: column; align-items: center; gap: 1.25rem; transition: transform .9s ease-in-out; transition-delay: .6s; }.left-panel { padding: 3rem 17% 2rem 12%; pointer-events: all; }.right-panel { padding: 3rem 12% 2rem 17%; pointer-events: none; }.right-panel .auth-switch-panel-content { transform: translateX(800px); }
-.auth-switch-panel h2, .auth-switch-panel p { margin: 0; }.auth-switch-panel h2 { font-size: 2rem; font-weight: 800; }.auth-switch-panel p { max-width: 22rem; line-height: 1.55; }.auth-switch-panel button { border: 1px solid rgb(255 255 255 / .8); border-radius: 999px; padding: .75rem 1.4rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; transition: background .2s, color .2s; }.auth-switch-panel button:hover { background: white; color: #258841; }
-.sign-up-mode::before { right: 52%; transform: translate(100%, -50%); }.sign-up-mode .auth-switch-form { left: 25%; }.sign-up-mode .left-panel .auth-switch-panel-content { transform: translateX(-800px); }.sign-up-mode .right-panel .auth-switch-panel-content { transform: translateX(0); }.sign-up-mode .left-panel { pointer-events: none; }.sign-up-mode .right-panel { pointer-events: all; }
-@media (max-width: 700px) { .auth-switch-container { height: 820px; }.auth-switch-container::before { top: initial; right: initial; bottom: 66%; left: 50%; width: 1300px; height: 1300px; transform: translateX(-50%); }.auth-switch-form { top: 65%; left: 50%; width: 100%; padding: 2rem 1.5rem; transform: translate(-50%, -50%); }.auth-switch-panels { height: 34%; grid-template-columns: 1fr; }.auth-switch-panel { align-items: center; padding: 2rem 18%; }.right-panel { display: none; }.sign-up-mode::before { right: initial; transform: translate(-50%, 100%); }.sign-up-mode .auth-switch-form { left: 50%; }.sign-up-mode .left-panel .auth-switch-panel-content { transform: none; } }
+/* >>> AUTH-PORTAL >>> */
+/* ─── Portail d'authentification « Auth Switch » ────────────────────────────
+ *
+ * Bloc CANONIQUE, identique dans toutes les apps de l'écosystème. Édite-le
+ * UNIQUEMENT dans `~/mesoutils/src/index.css`, puis propage-le avec
+ * `bash ~/mesoutils/scripts/sync-auth-portal.sh`.
+ *
+ * Les couleurs viennent des variables `--auth-*`. Par défaut elles se déduisent
+ * de la palette `--color-brand-*` de l'app ; une app qui veut un habillage
+ * particulier (BâtiRe, Klyde) redéfinit ces variables dans son propre `:root`,
+ * en dehors de ce bloc.
+ *
+ * Desktop (> 900px) : le formulaire glisse d'un bord à l'autre pendant que le
+ * grand cercle traverse la carte et que les deux panneaux se croisent.
+ *
+ * Mobile (≤ 900px) : la carte passe en colonne — bandeau de panneaux en haut,
+ * formulaire dessous, hauteur libre. Le cercle y est remplacé par un bandeau
+ * arrondi solidaire des panneaux. Avant, il gardait sa position absolue et le
+ * mode inscription le translatait de `100%` vers le bas : il recouvrait alors
+ * tout le formulaire, qui devenait invisible. La hauteur fixe de 820px coupait
+ * en plus le formulaire d'inscription, plus haut que celui de connexion, et le
+ * panneau droit était masqué (`display: none`) — une fois en inscription, plus
+ * aucun bouton ne permettait de revenir à la connexion.
+ */
+.auth-switch-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  background: var(--auth-page-bg, linear-gradient(135deg, var(--color-brand-50), var(--color-brand-100)));
+  /* `overflow-x` seulement : `overflow: hidden` empêchait de faire défiler la
+     carte sur les écrans moins hauts qu'elle. */
+  overflow-x: hidden;
+}
+.auth-switch-container {
+  position: relative;
+  width: min(100%, 1100px);
+  height: 700px;
+  overflow: hidden;
+  border-radius: 1.5rem;
+  background: #fff;
+  box-shadow: 0 25px 50px var(--auth-shadow, rgb(15 23 20 / 22%));
+}
+.auth-switch-container::before {
+  content: "";
+  position: absolute;
+  z-index: 6;
+  top: -10%;
+  right: 48%;
+  width: 2000px;
+  height: 2000px;
+  border-radius: 50%;
+  background: var(--auth-circle, linear-gradient(-45deg, var(--color-brand-600), var(--color-brand-900)));
+  transform: translateY(-50%);
+  transition: 1.8s ease-in-out;
+}
+.auth-switch-form {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  left: 75%;
+  width: 50%;
+  /* Marges élastiques : entre 900 et 1100px, les 4.5rem fixes ne laissaient
+     presque plus de place aux champs. */
+  padding: 2.5rem clamp(1.5rem, 4vw, 4.5rem);
+  transform: translate(-50%, -50%);
+  transition: left 1s .7s ease-in-out;
+}
+.auth-switch-panels {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  pointer-events: none;
+}
+.auth-switch-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: space-around;
+  text-align: center;
+  color: white;
+}
+.auth-switch-panel-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  transition: transform .9s ease-in-out;
+  transition-delay: .6s;
+}
+.left-panel { padding: 3rem 17% 2rem 12%; pointer-events: all; }
+.right-panel { padding: 3rem 12% 2rem 17%; pointer-events: none; }
+.right-panel .auth-switch-panel-content { transform: translateX(800px); }
+.auth-switch-panel h2, .auth-switch-panel p { margin: 0; }
+.auth-switch-panel h2 { font-size: 2rem; font-weight: 800; }
+.auth-switch-panel p { max-width: 22rem; line-height: 1.55; }
+.auth-switch-panel button {
+  border: 1px solid rgb(255 255 255 / .8);
+  border-radius: 999px;
+  padding: .75rem 1.4rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+  transition: background .2s, color .2s;
+}
+.auth-switch-panel button:hover { background: white; color: var(--auth-accent, var(--color-brand-700)); }
+.auth-switch-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  font-size: .875rem;
+  font-weight: 600;
+  color: rgb(255 255 255 / .92);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.auth-switch-back-link:hover { color: white; }
+.sign-up-mode::before { right: 52%; transform: translate(100%, -50%); }
+.sign-up-mode .auth-switch-form { left: 25%; }
+.sign-up-mode .left-panel .auth-switch-panel-content { transform: translateX(-800px); }
+.sign-up-mode .right-panel .auth-switch-panel-content { transform: translateX(0); }
+.sign-up-mode .left-panel { pointer-events: none; }
+.sign-up-mode .right-panel { pointer-events: all; }
+
+@media (max-width: 900px) {
+  .auth-switch-page { padding: 1rem; }
+  /* Colonne, hauteur libre : le formulaire d'inscription ne peut plus être
+     coupé par une carte figée. */
+  .auth-switch-container { display: flex; flex-direction: column; height: auto; }
+  /* Le grand cercle laisse place à un bandeau arrondi calé sur les panneaux :
+     le vert suit toujours la hauteur réelle du texte et ne peut plus déborder
+     sur le formulaire. */
+  .auth-switch-container::before { content: none; }
+  .auth-switch-panels {
+    position: relative;
+    inset: auto;
+    order: 1;
+    grid-template-columns: 1fr;
+    background: var(--auth-circle, linear-gradient(-45deg, var(--color-brand-600), var(--color-brand-900)));
+    border-radius: 0 0 50% 50% / 0 0 4rem 4rem;
+  }
+  /* Les deux panneaux partagent la même case et se croisent toujours — le
+     panneau droit reste donc accessible pour revenir à la connexion. */
+  .auth-switch-panel { grid-area: 1 / 1; align-items: center; justify-content: center; }
+  .left-panel, .right-panel { padding: 2.75rem 1.5rem 5.5rem; }
+  .auth-switch-panel h2 { font-size: 1.625rem; }
+  .right-panel .auth-switch-panel-content { transform: translateX(700px); }
+  .sign-up-mode .left-panel .auth-switch-panel-content { transform: translateX(-700px); }
+  .auth-switch-form {
+    position: relative;
+    z-index: 8;
+    order: 2;
+    top: auto;
+    left: auto;
+    width: 100%;
+    padding: 2rem 1.5rem 2.5rem;
+    transform: none;
+    transition: none;
+  }
+  .sign-up-mode .auth-switch-form { left: auto; }
+}
+/* <<< AUTH-PORTAL <<< */
 
 /* ─── Surfaces (toutes unies, aucun dégradé) ─────────────────────────────── */
 .glass-card,

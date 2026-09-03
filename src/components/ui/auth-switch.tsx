@@ -1,9 +1,21 @@
 import { useEffect, useRef, useState, type FormEvent, type HTMLAttributes, type ReactNode } from "react";
 import { useSignIn, useSignUp } from "@clerk/clerk-react";
-import { KeyRound, Loader2, LockKeyhole, Mail, UserRound } from "lucide-react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft, KeyRound, Loader2, LockKeyhole, Mail, UserRound } from "lucide-react";
 
 type Mode = "signin" | "signup" | "code" | "reset-request" | "reset" | "mfa";
+
+type AuthSwitchProps = {
+  initialMode?: "signin" | "signup";
+  /** Nom affiché dans les titres ("Bienvenue sur …"). */
+  appName?: string;
+  logoSrc?: string;
+  /** Lien de retour affiché sous les panneaux ; absent = pas de lien. */
+  homeHref?: string;
+  homeLabel?: string;
+  /** Pages légales ; absentes = mention en texte simple, sans lien. */
+  termsHref?: string;
+  privacyHref?: string;
+};
 
 function message(error: unknown) {
   if (typeof error === "object" && error && "errors" in error) {
@@ -13,10 +25,26 @@ function message(error: unknown) {
   return error instanceof Error ? error.message : "Une erreur est survenue.";
 }
 
-/** Écran Clerk entièrement personnalisé : les mots de passe et sessions restent gérés par Clerk. */
-export function AuthSwitch({ initialMode = "signin" }: { initialMode?: "signin" | "signup" }) {
-  const navigate = useNavigate();
-  const [params] = useSearchParams();
+/**
+ * Portail d'authentification COMMUN à toutes les apps de l'écosystème.
+ *
+ * Fichier canonique : `~/mesoutils/src/components/ui/auth-switch.tsx`, propagé
+ * par `bash ~/mesoutils/scripts/sync-auth-portal.sh`. Ne l'édite que là.
+ *
+ * Les mots de passe, codes et sessions restent entièrement gérés par Clerk :
+ * seul l'habillage est à nous. Volontairement SANS react-router (`<a>` et
+ * `window.location`), parce que Klyde n'a pas de routeur — le composant doit
+ * pouvoir être déposé tel quel dans les 7 apps web.
+ */
+export function AuthSwitch({
+  initialMode = "signin",
+  appName = "Votre espace",
+  logoSrc = "/logo-lsdb.png",
+  homeHref,
+  homeLabel = "Retour à l'accueil",
+  termsHref,
+  privacyHref,
+}: AuthSwitchProps) {
   const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn();
   const { isLoaded: signUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
   const [mode, setMode] = useState<Mode>(initialMode);
@@ -33,16 +61,21 @@ export function AuthSwitch({ initialMode = "signin" }: { initialMode?: "signin" 
   const actionInProgress = useRef(false);
   const switchTimer = useRef<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const returnTo = params.get("redirect_url") || "/";
 
   useEffect(() => () => {
     if (switchTimer.current !== null) window.clearTimeout(switchTimer.current);
   }, []);
 
+  /**
+   * Ouvre la session puis rejoint la page demandée. On recharge la page au lieu
+   * de faire une navigation cliente : c'est le seul comportement identique dans
+   * les apps avec routeur et dans Klyde qui n'en a pas.
+   */
   const go = async (sessionId: string | null, setActive: (args: { session: string | null }) => Promise<void>) => {
     if (!sessionId) throw new Error("Session de connexion introuvable.");
     await setActive({ session: sessionId });
-    navigate(returnTo, { replace: true });
+    const returnTo = new URLSearchParams(window.location.search).get("redirect_url") || "/";
+    if (returnTo !== window.location.pathname + window.location.search) window.location.replace(returnTo);
   };
   const run = (action: () => Promise<void>) => async (event?: FormEvent) => {
     event?.preventDefault();
@@ -116,18 +149,19 @@ export function AuthSwitch({ initialMode = "signin" }: { initialMode?: "signin" 
     if (result.status === "complete") return go(result.createdSessionId, setSignInActive);
     throw new Error("Code incorrect ou expiré.");
   };
-  const title = mode === "signup" ? "Créer votre compte" : mode === "reset" ? "Nouveau mot de passe" : mode === "reset-request" ? "Réinitialiser le mot de passe" : "Bienvenue sur Mes Outils";
-  const subtitle = mode === "signup" ? "Créez votre espace en quelques instants." : mode === "reset" ? "Saisissez le code reçu et choisissez un nouveau mot de passe." : mode === "reset-request" ? "Nous vous enverrons un code de réinitialisation." : mode === "code" || mode === "mfa" ? "Saisissez le code de sécurité reçu par email." : "Connectez-vous pour accéder aux outils du groupe.";
+  const title = mode === "signup" ? "Créer votre compte" : mode === "reset" ? "Nouveau mot de passe" : mode === "reset-request" ? "Réinitialiser le mot de passe" : `Bienvenue sur ${appName}`;
+  const subtitle = mode === "signup" ? "Créez votre espace en quelques instants." : mode === "reset" ? "Saisissez le code reçu et choisissez un nouveau mot de passe." : mode === "reset-request" ? "Nous vous enverrons un code de réinitialisation." : mode === "code" || mode === "mfa" ? "Saisissez le code de sécurité reçu par email." : `Connectez-vous pour retrouver votre espace ${appName}.`;
   const needsCode = mode === "code" || mode === "mfa";
+  const backLink = homeHref ? <a href={homeHref} className="auth-switch-back-link"><ArrowLeft className="h-4 w-4" /> {homeLabel}</a> : null;
   return <main className="auth-switch-page"><section className={`auth-switch-container ${signUpSide ? "sign-up-mode" : ""}`}>
     <div className="auth-switch-form">
-    <img src="/mesoutils-light.png" alt="Mes Outils" className="mb-6 h-16 w-auto object-contain" />
+    <img src={logoSrc} alt={appName} className="mb-6 h-16 w-auto object-contain" />
     <h1 className="text-3xl font-black tracking-tight text-zinc-950">{title}</h1><p className="mt-2 text-sm text-zinc-600">{subtitle}</p>
     <form className="mt-7 space-y-4" onSubmit={run(needsCode ? mode === "mfa" ? completeMfa : completeLoginCode : mode === "reset-request" ? resetPassword : mode === "reset" ? completeReset : mode === "signup" ? createAccount : loginWithPassword)}>
       {mode === "signup" ? <div className="grid gap-4 sm:grid-cols-2"><Field label="Prénom" value={firstName} onChange={setFirstName} /><Field label="Nom" value={lastName} onChange={setLastName} /></div> : null}
       {!needsCode && mode !== "reset" ? <Field label="Adresse email" value={email} onChange={setEmail} type="email" icon={<Mail className="h-4 w-4" />} /> : null}
       {(mode === "signin" || mode === "signup") ? <Field label="Mot de passe" value={password} onChange={setPassword} type="password" icon={<LockKeyhole className="h-4 w-4" />} /> : null}
-      {mode === "signup" ? <div className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm leading-5 text-zinc-700"><input id="terms-acceptance" required checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-brand-600" /><label htmlFor="terms-acceptance">J'accepte les conditions générales d'utilisation et la politique de confidentialité du groupe.</label></div> : null}
+      {mode === "signup" ? <div className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm leading-5 text-zinc-700"><input id="terms-acceptance" required checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-brand-600" /><label htmlFor="terms-acceptance">J'accepte les <LegalLink href={termsHref}>conditions générales d'utilisation</LegalLink> et la <LegalLink href={privacyHref}>politique de confidentialité</LegalLink>.</label></div> : null}
       {needsCode || mode === "reset" ? <Field label="Code de confirmation" value={code} onChange={setCode} inputMode="numeric" icon={<KeyRound className="h-4 w-4" />} /> : null}
       {mode === "reset" ? <Field label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} type="password" icon={<LockKeyhole className="h-4 w-4" />} /> : null}
       {error ? <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p> : null}
@@ -139,19 +173,27 @@ export function AuthSwitch({ initialMode = "signin" }: { initialMode?: "signin" 
       <aside className="auth-switch-panel left-panel">
         <div className="auth-switch-panel-content">
           <h2>Nouveau ici ?</h2>
-          <p>Créez votre espace pour accéder au portail et aux outils du groupe.</p>
+          <p>Créez votre espace en quelques instants pour suivre vos démarches.</p>
           <button type="button" onClick={() => switchForm("signup")}>Créer un compte</button>
+          {backLink}
         </div>
       </aside>
       <aside className="auth-switch-panel right-panel">
         <div className="auth-switch-panel-content">
           <h2>Déjà membre ?</h2>
-          <p>Retrouvez votre espace Mes Outils et vos démarches en cours.</p>
+          <p>Retrouvez votre espace {appName} et vos démarches en cours.</p>
           <button type="button" onClick={() => switchForm("signin")}>Se connecter</button>
+          {backLink}
         </div>
       </aside>
     </div>
   </section></main>;
+}
+
+/** Mention légale : lien si l'app a la page, texte simple sinon. */
+function LegalLink({ href, children }: { href?: string; children: ReactNode }) {
+  if (!href) return <>{children}</>;
+  return <a href={href} className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-900">{children}</a>;
 }
 
 function Field({ label, value, onChange, type = "text", inputMode, icon }: { label: string; value: string; onChange: (value: string) => void; type?: string; inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"]; icon?: ReactNode }) {
