@@ -2131,6 +2131,22 @@ export default defineSchema(
     createdAt: v.number(),
   }).index("by_company", ["companyId"]),
 
+  /** Documents généraux du CRM, publiés dans la documentation de tous les clients. */
+  bpPublicDocuments: defineTable({
+    storageId: v.id("_storage"),
+    name: v.string(),
+    note: v.optional(v.string()),
+    mimeType: v.optional(v.string()),
+    createdAt: v.number(),
+  }),
+
+  /** Accusé de consultation d'un document général, partagé par entreprise. */
+  bpPublicDocumentConsultations: defineTable({
+    documentId: v.id("bpPublicDocuments"),
+    companyId: v.id("bpCompanies"),
+    consultedAt: v.number(),
+  }).index("by_document_and_company", ["documentId", "companyId"]),
+
   /** Messagerie entre une entreprise cliente et le staff. */
   bpCompanyMessages: defineTable({
     companyId: v.id("bpCompanies"),

@@ -587,6 +587,58 @@ export const removeCompanyDocument = mutation({
   },
 });
 
+/* ─── Documentation générale (CRM ↔ tous les clients) ───────────────────── */
+
+export const listPublicDocuments = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await requireUser(ctx);
+    const company = await ctx.db.query("bpCompanies").withIndex("by_owner", (q) => q.eq("ownerUserId", identity.subject)).first();
+    const docs = await ctx.db.query("bpPublicDocuments").order("desc").collect();
+    return Promise.all(docs.map(async (doc) => {
+      const consultation = company ? await ctx.db.query("bpPublicDocumentConsultations").withIndex("by_document_and_company", (q) => q.eq("documentId", doc._id).eq("companyId", company._id)).first() : null;
+      return { ...doc, consultedAt: consultation?.consultedAt ?? null, url: await ctx.storage.getUrl(doc.storageId) };
+    }));
+  },
+});
+
+export const listPublicDocumentsForCrm = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "read");
+    const docs = await ctx.db.query("bpPublicDocuments").order("desc").collect();
+    return Promise.all(docs.map(async (doc) => ({ ...doc, url: await ctx.storage.getUrl(doc.storageId) })));
+  },
+});
+
+export const addPublicDocument = mutation({
+  args: { storageId: v.id("_storage"), name: v.string(), note: v.optional(v.string()), mimeType: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "update");
+    return await ctx.db.insert("bpPublicDocuments", { ...args, name: args.name.trim(), note: args.note?.trim() || undefined, createdAt: Date.now() });
+  },
+});
+
+export const removePublicDocument = mutation({
+  args: { documentId: v.id("bpPublicDocuments") },
+  handler: async (ctx, { documentId }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "delete");
+    const doc = await ctx.db.get(documentId);
+    if (!doc) return;
+    await ctx.storage.delete(doc.storageId);
+    await ctx.db.delete(documentId);
+  },
+});
+
+export const markPublicDocumentConsulted = mutation({
+  args: { documentId: v.id("bpPublicDocuments") },
+  handler: async (ctx, { documentId }) => {
+    const { company } = await requireMyCompany(ctx);
+    const existing = await ctx.db.query("bpPublicDocumentConsultations").withIndex("by_document_and_company", (q) => q.eq("documentId", documentId).eq("companyId", company._id)).first();
+    if (!existing) await ctx.db.insert("bpPublicDocumentConsultations", { documentId, companyId: company._id, consultedAt: Date.now() });
+  },
+});
+
 export const listCompanyMessages = query({
   args: { companyId: v.id("bpCompanies") },
   handler: async (ctx, { companyId }) => {
