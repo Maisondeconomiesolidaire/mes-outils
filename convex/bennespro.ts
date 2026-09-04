@@ -589,16 +589,29 @@ export const removeCompanyDocument = mutation({
 
 /* ─── Documentation générale (CRM ↔ tous les clients) ───────────────────── */
 
+const defaultPublicDocuments = [
+  { key: "dds", name: "DDS — Déchets Diffus Spécifiques", note: "Liste et consignes de tri des déchets diffus spécifiques.", url: "/DDS.pdf" },
+  { key: "dechets-acceptes", name: "Déchets acceptés", note: "Détail des flux de reprise acceptés sur le site.", url: "/dechets-acceptes.pdf" },
+  { key: "velux", name: "Savoir décrypter un vélux", note: "Guide d'identification et de reprise des menuiseries de type vélux.", url: "/savoir-decrypter-un-velux.pdf" },
+] as const;
+
+async function visibleDefaultPublicDocuments(ctx: QueryCtx | MutationCtx) {
+  const hides = await ctx.db.query("bpDefaultPublicDocumentHides").collect();
+  const hidden = new Set(hides.map((item) => item.key));
+  return defaultPublicDocuments.filter((doc) => !hidden.has(doc.key));
+}
+
 export const listPublicDocuments = query({
   args: {},
   handler: async (ctx) => {
     const identity = await requireUser(ctx);
     const company = await ctx.db.query("bpCompanies").withIndex("by_owner", (q) => q.eq("ownerUserId", identity.subject)).first();
     const docs = await ctx.db.query("bpPublicDocuments").order("desc").collect();
-    return Promise.all(docs.map(async (doc) => {
+    const uploaded = await Promise.all(docs.map(async (doc) => {
       const consultation = company ? await ctx.db.query("bpPublicDocumentConsultations").withIndex("by_document_and_company", (q) => q.eq("documentId", doc._id).eq("companyId", company._id)).first() : null;
-      return { ...doc, consultedAt: consultation?.consultedAt ?? null, url: await ctx.storage.getUrl(doc.storageId) };
+      return { key: doc._id, name: doc.name, note: doc.note ?? null, url: await ctx.storage.getUrl(doc.storageId), consultedAt: consultation?.consultedAt ?? null, uploaded: true as const };
     }));
+    return [...(await visibleDefaultPublicDocuments(ctx)).map((doc) => ({ ...doc, consultedAt: null, uploaded: false as const })), ...uploaded];
   },
 });
 
@@ -607,7 +620,8 @@ export const listPublicDocumentsForCrm = query({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, "bennespro:entreprises", "read");
     const docs = await ctx.db.query("bpPublicDocuments").order("desc").collect();
-    return Promise.all(docs.map(async (doc) => ({ ...doc, url: await ctx.storage.getUrl(doc.storageId) })));
+    const uploaded = await Promise.all(docs.map(async (doc) => ({ key: doc._id, name: doc.name, note: doc.note ?? null, url: await ctx.storage.getUrl(doc.storageId), uploaded: true as const })));
+    return [...(await visibleDefaultPublicDocuments(ctx)).map((item) => ({ ...item, uploaded: false as const })), ...uploaded];
   },
 });
 
@@ -627,6 +641,16 @@ export const removePublicDocument = mutation({
     if (!doc) return;
     await ctx.storage.delete(doc.storageId);
     await ctx.db.delete(documentId);
+  },
+});
+
+export const hideDefaultPublicDocument = mutation({
+  args: { key: v.string() },
+  handler: async (ctx, { key }) => {
+    await requireCrmPermission(ctx, "bennespro:entreprises", "delete");
+    if (!defaultPublicDocuments.some((doc) => doc.key === key)) throw new Error("Document introuvable.");
+    const existing = await ctx.db.query("bpDefaultPublicDocumentHides").withIndex("by_key", (q) => q.eq("key", key)).first();
+    if (!existing) await ctx.db.insert("bpDefaultPublicDocumentHides", { key, hiddenAt: Date.now() });
   },
 });
 

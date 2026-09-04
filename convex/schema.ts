@@ -2147,6 +2147,12 @@ export default defineSchema(
     consultedAt: v.number(),
   }).index("by_document_and_company", ["documentId", "companyId"]),
 
+  /** Masquage des guides historiques depuis le CRM. */
+  bpDefaultPublicDocumentHides: defineTable({
+    key: v.string(),
+    hiddenAt: v.number(),
+  }).index("by_key", ["key"]),
+
   /** Messagerie entre une entreprise cliente et le staff. */
   bpCompanyMessages: defineTable({
     companyId: v.id("bpCompanies"),
