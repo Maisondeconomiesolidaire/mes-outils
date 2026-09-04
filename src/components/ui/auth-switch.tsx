@@ -8,6 +8,10 @@ type AuthSwitchProps = {
   initialMode?: "signin" | "signup";
   /** Nom affiché dans les titres ("Bienvenue sur …"). */
   appName?: string;
+  /** Libellés d'accueil propres à l'application, si le nom ne doit pas être affiché. */
+  welcomeTitle?: string;
+  signinSubtitle?: string;
+  memberPanelDescription?: string;
   logoSrc?: string;
   /**
    * Page à rejoindre une fois connecté. À défaut, le `redirect_url` de l'URL,
@@ -45,6 +49,9 @@ function message(error: unknown) {
 export function AuthSwitch({
   initialMode = "signin",
   appName = "Votre espace",
+  welcomeTitle,
+  signinSubtitle,
+  memberPanelDescription,
   logoSrc = "/logo-lsdb.png",
   redirectUrl,
   homeHref,
@@ -156,8 +163,8 @@ export function AuthSwitch({
     if (result.status === "complete") return go(result.createdSessionId, setSignInActive);
     throw new Error("Code incorrect ou expiré.");
   };
-  const title = mode === "signup" ? "Créer votre compte" : mode === "reset" ? "Nouveau mot de passe" : mode === "reset-request" ? "Réinitialiser le mot de passe" : `Bienvenue sur ${appName}`;
-  const subtitle = mode === "signup" ? "Créez votre espace en quelques instants." : mode === "reset" ? "Saisissez le code reçu et choisissez un nouveau mot de passe." : mode === "reset-request" ? "Nous vous enverrons un code de réinitialisation." : mode === "code" || mode === "mfa" ? "Saisissez le code de sécurité reçu par email." : `Connectez-vous pour retrouver votre espace ${appName}.`;
+  const title = mode === "signup" ? "Créer votre compte" : mode === "reset" ? "Nouveau mot de passe" : mode === "reset-request" ? "Réinitialiser le mot de passe" : welcomeTitle ?? `Bienvenue sur ${appName}`;
+  const subtitle = mode === "signup" ? "Créez votre espace en quelques instants." : mode === "reset" ? "Saisissez le code reçu et choisissez un nouveau mot de passe." : mode === "reset-request" ? "Nous vous enverrons un code de réinitialisation." : mode === "code" || mode === "mfa" ? "Saisissez le code de sécurité reçu par email." : signinSubtitle ?? `Connectez-vous pour retrouver votre espace ${appName}.`;
   const needsCode = mode === "code" || mode === "mfa";
   const backLink = homeHref ? <a href={homeHref} className="auth-switch-back-link"><ArrowLeft className="h-4 w-4" /> {homeLabel}</a> : null;
   return <main className="auth-switch-page"><section className={`auth-switch-container ${signUpSide ? "sign-up-mode" : ""}`}>
@@ -188,7 +195,7 @@ export function AuthSwitch({
       <aside className="auth-switch-panel right-panel">
         <div className="auth-switch-panel-content">
           <h2>Déjà membre ?</h2>
-          <p>Retrouvez votre espace {appName} et vos démarches en cours.</p>
+          <p>{memberPanelDescription ?? <>Retrouvez votre espace {appName} et vos démarches en cours.</>}</p>
           <button type="button" onClick={() => switchForm("signin")}>Se connecter</button>
           {backLink}
         </div>
