@@ -374,10 +374,24 @@ export const listMyDocuments = query({
           uploadedByRole: d.uploadedByRole,
           validated: d.validatedAt !== undefined,
           validatedAt: d.validatedAt ?? null,
+          clientConsultedAt: d.clientConsultedAt ?? null,
           createdAt: d.createdAt,
           url: await ctx.storage.getUrl(d.storageId),
         })),
     );
+  },
+});
+
+/** Le client accuse réception d'un document mis à disposition par le CRM. */
+export const markMyDocumentConsulted = mutation({
+  args: { documentId: v.id("bpCompanyDocuments") },
+  handler: async (ctx, { documentId }) => {
+    const { company } = await requireMyCompany(ctx);
+    const doc = await ctx.db.get(documentId);
+    if (!doc || doc.companyId !== company._id || doc.uploadedByRole !== "staff" || doc.sharedWithClientAt === undefined) {
+      throw new Error("Ce document n'est pas disponible.");
+    }
+    if (doc.clientConsultedAt === undefined) await ctx.db.patch(documentId, { clientConsultedAt: Date.now() });
   },
 });
 
@@ -472,6 +486,7 @@ export const listCompanyDocuments = query({
           sharedWithClientAt: d.sharedWithClientAt ?? null,
           validated: d.validatedAt !== undefined,
           validatedAt: d.validatedAt ?? null,
+          clientConsultedAt: d.clientConsultedAt ?? null,
           createdAt: d.createdAt,
           url: await ctx.storage.getUrl(d.storageId),
         })),
@@ -544,8 +559,8 @@ export const addCompanyDocument = mutation({
       note: args.note?.trim() || undefined,
       mimeType: args.mimeType,
       uploadedByRole: "staff",
-      // Non partagé par défaut : le staff décide explicitement via shareCompanyDocument.
-      sharedWithClientAt: undefined,
+      // Les documents ajoutés dans le CRM sont immédiatement à disposition du client.
+      sharedWithClientAt: Date.now(),
       createdBy: identity.email ?? undefined,
       createdAt: Date.now(),
     });

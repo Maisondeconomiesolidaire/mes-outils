@@ -2122,6 +2122,8 @@ export default defineSchema(
     uploadedByRole: v.union(v.literal("client"), v.literal("staff")),
     /** Horodatage de partage au client (docs staff visibles côté client). */
     sharedWithClientAt: v.optional(v.number()),
+    /** Accusé de consultation du document partagé par l'entreprise cliente. */
+    clientConsultedAt: v.optional(v.number()),
     /** Validation par le staff d'un document signé (convention, protocole…). */
     validatedAt: v.optional(v.number()),
     validatedBy: v.optional(v.string()),
