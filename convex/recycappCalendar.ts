@@ -62,6 +62,11 @@ export const assignableWorkers = query({ args: {}, handler: async (ctx) => {
   const withHours = await Promise.all(active.map(async (worker) => ({
     _id: worker._id,
     name: `${worker.firstName} ${worker.lastName}`.trim(),
+    firstName: worker.firstName,
+    lastName: worker.lastName,
+    email: worker.email,
+    sites: worker.sites,
+    employmentType: worker.employmentType,
     weeklyHours: await weeklyHours(ctx, worker),
   })));
   return withHours.sort((a, b) => a.name.localeCompare(b.name, "fr"));
