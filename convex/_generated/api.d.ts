@@ -59,6 +59,7 @@ import type * as points from "../points.js";
 import type * as polyvalents from "../polyvalents.js";
 import type * as posts from "../posts.js";
 import type * as processes from "../processes.js";
+import type * as recycappCalendar from "../recycappCalendar.js";
 import type * as requestAnalysis from "../requestAnalysis.js";
 import type * as requests from "../requests.js";
 import type * as reservations from "../reservations.js";
@@ -131,6 +132,7 @@ declare const fullApi: ApiFromModules<{
   polyvalents: typeof polyvalents;
   posts: typeof posts;
   processes: typeof processes;
+  recycappCalendar: typeof recycappCalendar;
   requestAnalysis: typeof requestAnalysis;
   requests: typeof requests;
   reservations: typeof reservations;
