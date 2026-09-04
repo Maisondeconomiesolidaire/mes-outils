@@ -2140,6 +2140,16 @@ export default defineSchema(
     createdAt: v.number(),
   }),
 
+  /** Évènements internes affichés dans le calendrier CRM Recycapp. */
+  recycappCalendarEvents: defineTable({
+    title: v.string(),
+    startAt: v.number(),
+    endAt: v.number(),
+    attachments: v.array(v.id("_storage")),
+    urls: v.array(v.string()),
+    createdAt: v.number(),
+  }).index("by_startAt", ["startAt"]),
+
   /** Accusé de consultation d'un document général, partagé par entreprise. */
   bpPublicDocumentConsultations: defineTable({
     documentId: v.id("bpPublicDocuments"),
