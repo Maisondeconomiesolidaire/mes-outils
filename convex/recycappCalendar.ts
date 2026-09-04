@@ -7,7 +7,7 @@ export const list = query({ args: { from: v.number(), to: v.number() }, handler:
   const events = await ctx.db.query("recycappCalendarEvents").withIndex("by_startAt", (q) => q.gte("startAt", args.from).lte("startAt", args.to)).collect();
   return Promise.all(events.map(async (event) => ({ ...event, attachmentUrls: await Promise.all(event.attachments.map((id) => ctx.storage.getUrl(id))) })));
 } });
-export const create = mutation({ args: { title: v.string(), startAt: v.number(), endAt: v.number(), attachments: v.array(v.id("_storage")), urls: v.array(v.string()) }, handler: async (ctx, args) => {
+export const create = mutation({ args: { title: v.string(), animationType: v.optional(v.string()), structure: v.optional(v.string()), activity: v.optional(v.string()), location: v.optional(v.string()), relatedEvent: v.optional(v.string()), targetAudience: v.optional(v.string()), organizer: v.optional(v.string()), completed: v.optional(v.boolean()), startAt: v.number(), endAt: v.number(), attachments: v.array(v.id("_storage")), urls: v.array(v.string()) }, handler: async (ctx, args) => {
   await requireCrmPermission(ctx, "calendrier", "create");
   if (!args.title.trim() || args.endAt <= args.startAt) throw new Error("Renseignez un intitulé et des dates valides.");
   return await ctx.db.insert("recycappCalendarEvents", { ...args, title: args.title.trim(), createdAt: Date.now() });

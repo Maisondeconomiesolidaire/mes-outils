@@ -2143,6 +2143,14 @@ export default defineSchema(
   /** Évènements internes affichés dans le calendrier CRM Recycapp. */
   recycappCalendarEvents: defineTable({
     title: v.string(),
+    animationType: v.optional(v.string()),
+    structure: v.optional(v.string()),
+    activity: v.optional(v.string()),
+    location: v.optional(v.string()),
+    relatedEvent: v.optional(v.string()),
+    targetAudience: v.optional(v.string()),
+    organizer: v.optional(v.string()),
+    completed: v.optional(v.boolean()),
     startAt: v.number(),
     endAt: v.number(),
     attachments: v.array(v.id("_storage")),
