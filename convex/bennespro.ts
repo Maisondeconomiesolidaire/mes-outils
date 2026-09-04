@@ -93,6 +93,7 @@ export const createCompany = mutation({
   args: {
     name: v.string(),
     siret: v.optional(v.string()),
+    nafCode: v.optional(v.string()),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
@@ -116,6 +117,7 @@ export const updateCompany = mutation({
     companyId: v.id("bpCompanies"),
     name: v.string(),
     siret: v.optional(v.string()),
+    nafCode: v.optional(v.string()),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
@@ -127,6 +129,52 @@ export const updateCompany = mutation({
   handler: async (ctx, { companyId, ...patch }) => {
     await requireCrmPermission(ctx, "bennespro:entreprises", "update");
     await ctx.db.patch(companyId, { ...patch, name: patch.name.trim() });
+  },
+});
+
+/**
+ * Recherche dans l'API publique de l'Annuaire des entreprises (data.gouv.fr).
+ * L'API est appelée côté serveur pour ne pas exposer le navigateur au rate-limit
+ * et pour fournir le même résultat au CRM comme à l'espace client.
+ */
+export const searchEnterpriseDirectory = action({
+  args: { query: v.optional(v.string()), nafCode: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await requireUser(ctx);
+    const queryText = args.query?.replace(/\s/g, "").match(/^\d{9}(\d{5})?$/)
+      ? args.query!.replace(/\s/g, "")
+      : args.query?.trim();
+    const nafCode = args.nafCode?.trim().toUpperCase();
+    if (!queryText && !nafCode) throw new Error("Saisissez un nom, un SIREN, un SIRET ou un code NAF.");
+
+    const url = new URL("https://recherche-entreprises.api.gouv.fr/search");
+    if (queryText) url.searchParams.set("q", queryText);
+    if (nafCode) url.searchParams.set("activite_principale", nafCode);
+    url.searchParams.set("per_page", "10");
+    url.searchParams.set("minimal", "true");
+    url.searchParams.set("include", "siege,matching_etablissements");
+    url.searchParams.set("etat_administratif", "A");
+    const response = await fetch(url, { headers: { Accept: "application/json", "User-Agent": "BennesPro/1.0 entreprise-directory" } });
+    if (!response.ok) throw new Error("L'Annuaire des entreprises est momentanément indisponible.");
+    const payload = await response.json() as { results?: Array<{
+      siren?: string; nom_complet?: string; activite_principale?: string; etat_administratif?: string;
+      siege?: { siret?: string; adresse?: string; activite_principale?: string } | null;
+      matching_etablissements?: Array<{ siret?: string; adresse?: string; activite_principale?: string }>;
+    }> };
+    return (payload.results ?? [])
+      .filter((result) => result.etat_administratif !== "C")
+      .map((result) => {
+        const establishment = queryText && /^\d{14}$/.test(queryText)
+          ? result.matching_etablissements?.find((item) => item.siret === queryText) ?? result.siege
+          : result.siege;
+        return {
+          name: result.nom_complet ?? "Entreprise sans nom",
+          siren: result.siren ?? "",
+          siret: establishment?.siret ?? "",
+          address: establishment?.adresse ?? "",
+          nafCode: result.activite_principale ?? establishment?.activite_principale ?? "",
+        };
+      });
   },
 });
 
@@ -243,6 +291,7 @@ export const saveMyCompany = mutation({
   args: {
     name: v.string(),
     siret: v.optional(v.string()),
+    nafCode: v.optional(v.string()),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),

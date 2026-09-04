@@ -2078,6 +2078,8 @@ export default defineSchema(
   bpCompanies: defineTable({
     name: v.string(),
     siret: v.optional(v.string()),
+    /** Code APE / NAF récupéré depuis l'Annuaire des entreprises. */
+    nafCode: v.optional(v.string()),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
