@@ -2151,6 +2151,8 @@ export default defineSchema(
     targetAudience: v.optional(v.string()),
     organizer: v.optional(v.string()),
     completed: v.optional(v.boolean()),
+    /** Salariés mobilisés sur l'évènement (équipe Recyclerie). */
+    workerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
     startAt: v.number(),
     endAt: v.number(),
     attachments: v.array(v.id("_storage")),
