@@ -2158,6 +2158,17 @@ export default defineSchema(
     createdAt: v.number(),
   }).index("by_startAt", ["startAt"]),
 
+  /**
+   * Options ajoutées à la main dans les listes déroulantes des évènements
+   * Recycapp (structure, activité, type d'animation, public ciblé). Une option
+   * saisie une fois reste proposée à toute l'équipe.
+   */
+  recycappCalendarOptions: defineTable({
+    field: v.string(),
+    label: v.string(),
+    createdAt: v.number(),
+  }).index("by_field", ["field"]),
+
   /** Accusé de consultation d'un document général, partagé par entreprise. */
   bpPublicDocumentConsultations: defineTable({
     documentId: v.id("bpPublicDocuments"),
