@@ -100,9 +100,15 @@ function saleWeight(item: Doc<"klydeItems">) {
   return klydeAverageWeightKg(item.category, item.subcategory, item.subsubcategory);
 }
 
-/** Prix encaissé : le prix réel prime sur le prix affiché. */
+/**
+ * Prix encaissé : le prix réel prime sur le prix affiché.
+ *
+ * Un `actualSalePrice` à 0 vaut « non renseigné » : le formulaire de Klyd en a
+ * longtemps posé un dès qu'un article était enregistré sans passer par ce
+ * champ, et ces articles pesaient alors 0 € au chiffre d'affaires.
+ */
 function saleAmount(item: Doc<"klydeItems">) {
-  return item.actualSalePrice ?? item.price ?? 0;
+  return item.actualSalePrice || item.price || 0;
 }
 
 /**

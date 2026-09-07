@@ -724,7 +724,9 @@ export const advanceWorkflow = mutation({
     if (status === "en_ligne" && item.price == null) {
       throw new Error("Renseignez le prix affiché avant la mise en ligne.");
     }
-    if (status === "en_cours_envoi" && item.actualSalePrice == null) {
+    // Un prix à 0 vaut « non renseigné » : d'anciens enregistrements en ont
+    // posé un, et le contrôle laissait alors passer l'article sans son prix.
+    if (status === "en_cours_envoi" && !item.actualSalePrice) {
       throw new Error("Renseignez le prix de vente réel avant de marquer l'article comme vendu.");
     }
     if (status === "envoye" && !cleanOptional(item.trackingNotes)) {
