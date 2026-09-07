@@ -295,8 +295,9 @@ export const KLYDE_PAGES: PermissionPage[] = [
     app: "klyde",
     key: "klyde:rapports",
     label: "Rapports de ventes",
-    description: "Chiffre d'affaires par mois et par annee, partage du rapport par email.",
-    actions: ["read", "share"],
+    description:
+      "Chiffre d'affaires par mois et par annee, releve du magasin, partage du rapport par email.",
+    actions: ["read", "create", "delete", "share"],
   },
   {
     app: "klyde",

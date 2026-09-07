@@ -1820,6 +1820,31 @@ export default defineSchema(
    * restent ainsi totalement séparés, tout en partageant le même déploiement
    * Convex / la même base de données.
    */
+  /**
+   * Chiffre d'affaires du magasin, saisi à la main.
+   *
+   * Les ventes en boutique physique ne passent par aucun outil : elles sont
+   * relevées par semaine et par recyclerie, et complètent les ventes en ligne
+   * dans les rapports. Une semaine est identifiée par son rang dans le mois
+   * (1 à 4), qui est la maille de relevé de l'équipe — pas la semaine ISO.
+   */
+  klydeStoreRevenues: defineTable({
+    site: v.union(v.literal("60"), v.literal("76")),
+    year: v.number(),
+    /** Mois, de 0 (janvier) à 11 (décembre), comme `Date#getMonth`. */
+    month: v.number(),
+    /** Rang de la semaine dans le mois, de 1 à 4. */
+    week: v.number(),
+    amount: v.number(),
+    note: v.optional(v.string()),
+    createdByClerkId: v.string(),
+    createdByName: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
+  })
+    .index("by_period", ["year", "month"])
+    .index("by_site_and_period", ["site", "year", "month", "week"]),
+
   klydeItems: defineTable({
     photos: v.array(v.id("_storage")),
     title: v.string(),

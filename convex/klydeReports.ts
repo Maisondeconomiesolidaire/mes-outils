@@ -6,7 +6,7 @@
  * article en « gagné » avec son prix réellement encaissé. Compter les autres
  * sources en plus reviendrait à compter deux fois la même vente.
  */
-import { action, internalQuery, query } from "./_generated/server";
+import { action, internalQuery, mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
@@ -664,5 +664,140 @@ export const assertCanShare = internalQuery({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "share");
     return true;
+  },
+});
+
+/* ─── Chiffre d'affaires du magasin (saisi à la main) ─────────────────────── */
+
+/**
+ * Le magasin n'a pas d'outil de caisse relié : son chiffre d'affaires est
+ * relevé à la main, par recyclerie et par semaine. Ces montants vivent à côté
+ * des ventes en ligne — les additionner d'office masquerait la performance de
+ * chaque canal.
+ */
+const STORE_SITE = v.union(v.literal("60"), v.literal("76"));
+
+/** Semaines proposées : le relevé de l'équipe compte 4 semaines par mois. */
+const STORE_WEEKS = [1, 2, 3, 4];
+
+function assertStorePeriod(year: number, month: number, week: number) {
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    throw new Error("Année invalide.");
+  }
+  if (!Number.isInteger(month) || month < 0 || month > 11) {
+    throw new Error("Mois invalide.");
+  }
+  if (!STORE_WEEKS.includes(week)) {
+    throw new Error("La semaine doit être comprise entre 1 et 4.");
+  }
+}
+
+export const storeReport = query({
+  args: {
+    year: v.number(),
+    /** `null` = toute l'année. */
+    month: v.union(v.number(), v.null()),
+    /** `null` = les deux recycleries. */
+    site: v.union(STORE_SITE, v.null()),
+  },
+  handler: async (ctx, { year, month, site }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const all = await ctx.db
+      .query("klydeStoreRevenues")
+      .withIndex("by_period", (q) => q.eq("year", year))
+      .collect();
+    const scoped = all.filter((entry) => !site || entry.site === site);
+
+    // Totaux par mois : la vue annuelle se lit d'un coup d'œil, et la vue
+    // mensuelle garde le même repère de comparaison.
+    const monthly = Array.from({ length: 12 }, () => 0);
+    for (const entry of scoped) monthly[entry.month] += entry.amount;
+
+    const entries = scoped
+      .filter((entry) => month === null || entry.month === month)
+      .sort((a, b) => a.month - b.month || a.week - b.week || a.site.localeCompare(b.site));
+
+    const weekly = STORE_WEEKS.map((week) =>
+      entries.filter((entry) => entry.week === week).reduce((total, entry) => total + entry.amount, 0),
+    );
+    const revenue = entries.reduce((total, entry) => total + entry.amount, 0);
+    const bySite = {
+      "60": entries.filter((entry) => entry.site === "60").reduce((total, entry) => total + entry.amount, 0),
+      "76": entries.filter((entry) => entry.site === "76").reduce((total, entry) => total + entry.amount, 0),
+    };
+
+    return {
+      label: month === null ? String(year) : `${MONTHS[month]} ${year}`,
+      revenue,
+      monthly,
+      weekly,
+      bySite,
+      entries: entries.map((entry) => ({
+        id: entry._id,
+        site: entry.site,
+        year: entry.year,
+        month: entry.month,
+        week: entry.week,
+        amount: entry.amount,
+        note: entry.note,
+        createdByName: entry.createdByName,
+        updatedAt: entry.updatedAt ?? entry.createdAt,
+      })),
+    };
+  },
+});
+
+/**
+ * Enregistre le relevé d'une semaine. Une même semaine d'une même recyclerie
+ * ne peut être saisie qu'une fois : une nouvelle saisie corrige la précédente,
+ * plutôt que de s'y ajouter en silence.
+ */
+export const saveStoreRevenue = mutation({
+  args: {
+    site: STORE_SITE,
+    year: v.number(),
+    month: v.number(),
+    week: v.number(),
+    amount: v.number(),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "create");
+    assertStorePeriod(args.year, args.month, args.week);
+    if (!Number.isFinite(args.amount) || args.amount < 0) {
+      throw new Error("Le montant doit être positif.");
+    }
+    const identity = await ctx.auth.getUserIdentity();
+    const amount = Math.round(args.amount * 100) / 100;
+    const note = args.note?.trim() || undefined;
+    const existing = await ctx.db
+      .query("klydeStoreRevenues")
+      .withIndex("by_site_and_period", (q) =>
+        q.eq("site", args.site).eq("year", args.year).eq("month", args.month).eq("week", args.week),
+      )
+      .unique();
+    if (existing) {
+      await ctx.db.patch(existing._id, { amount, note, updatedAt: Date.now() });
+      return existing._id;
+    }
+    return await ctx.db.insert("klydeStoreRevenues", {
+      site: args.site,
+      year: args.year,
+      month: args.month,
+      week: args.week,
+      amount,
+      note,
+      createdByClerkId: identity?.subject ?? "inconnu",
+      createdByName: identity?.name ?? undefined,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const deleteStoreRevenue = mutation({
+  args: { id: v.id("klydeStoreRevenues") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "delete");
+    await ctx.db.delete(id);
   },
 });
