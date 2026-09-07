@@ -99,6 +99,19 @@ export function AuthSwitch({
     try { await action(); } catch (caught) { setError(message(caught)); } finally { setBusy(false); }
     actionInProgress.current = false;
   };
+  /**
+   * Bascule immédiate, sans le délai calé sur l'animation : utilisée par la
+   * barre compacte des écrans étroits, où il n'y a plus rien à animer.
+   */
+  const switchFormNow = (nextMode: "signin" | "signup") => {
+    if (switchTimer.current !== null) {
+      window.clearTimeout(switchTimer.current);
+      switchTimer.current = null;
+    }
+    setSignUpSide(nextMode === "signup");
+    setMode(nextMode);
+    setError(null);
+  };
   const switchForm = (nextMode: "signin" | "signup") => {
     if (switchTimer.current !== null) window.clearTimeout(switchTimer.current);
     setSignUpSide(nextMode === "signup");
@@ -169,6 +182,17 @@ export function AuthSwitch({
   const backLink = homeHref ? <a href={homeHref} className="auth-switch-back-link"><ArrowLeft className="h-4 w-4" /> {homeLabel}</a> : null;
   return <main className="auth-switch-page"><section className={`auth-switch-container ${signUpSide ? "sign-up-mode" : ""}`}>
     <div className="auth-switch-form">
+    {/* Écrans étroits : les panneaux qui se croisent laissent place à une
+        simple bascule, qui change de formulaire sans animation ni délai. */}
+    <div className="auth-switch-compact">
+      {backLink}
+      <p>
+        {signUpSide ? "Déjà un compte ?" : "Pas de compte ?"}{" "}
+        <button type="button" onClick={() => switchFormNow(signUpSide ? "signin" : "signup")}>
+          {signUpSide ? "Se connecter" : "Je m'inscris"}
+        </button>
+      </p>
+    </div>
     <img src={logoSrc} alt={appName} className="mb-6 h-16 w-auto object-contain" />
     <h1 className="text-3xl font-black tracking-tight text-zinc-950">{title}</h1><p className="mt-2 text-sm text-zinc-600">{subtitle}</p>
     <form className="mt-7 space-y-4" onSubmit={run(needsCode ? mode === "mfa" ? completeMfa : completeLoginCode : mode === "reset-request" ? resetPassword : mode === "reset" ? completeReset : mode === "signup" ? createAccount : loginWithPassword)}>

@@ -147,14 +147,12 @@ textarea {
  * Large (conteneur > 900px) : le formulaire glisse d'un bord à l'autre pendant que le
  * grand cercle traverse la carte et que les deux panneaux se croisent.
  *
- * Étroit (conteneur ≤ 900px) : la carte passe en colonne — bandeau de panneaux en haut,
- * formulaire dessous, hauteur libre. Le cercle y est remplacé par un bandeau
- * arrondi solidaire des panneaux. Avant, il gardait sa position absolue et le
- * mode inscription le translatait de `100%` vers le bas : il recouvrait alors
- * tout le formulaire, qui devenait invisible. La hauteur fixe de 820px coupait
- * en plus le formulaire d'inscription, plus haut que celui de connexion, et le
- * panneau droit était masqué (`display: none`) — une fois en inscription, plus
- * aucun bouton ne permettait de revenir à la connexion.
+ * Étroit (conteneur ≤ 900px) : plus de cercle, plus de panneaux, plus
+ * d'animation — la carte se réduit au formulaire, précédé d'une barre
+ * « Pas de compte ? Je m'inscris » qui bascule d'un formulaire à l'autre
+ * instantanément. Le bandeau de panneaux qui la précédait poussait le
+ * formulaire sous la ligne de flottaison et rejouait, sur un écran de
+ * téléphone, une chorégraphie pensée pour un grand écran.
  */
 .auth-switch-page {
   /* Requête de conteneur, pas de media query : le portail est parfois monté
@@ -204,6 +202,8 @@ textarea {
   transform: translate(-50%, -50%);
   transition: left 1s .7s ease-in-out;
 }
+/* Barre de bascule des écrans étroits : masquée tant que la carte est large. */
+.auth-switch-compact { display: none; }
 .auth-switch-panels {
   position: absolute;
   z-index: 7;
@@ -263,32 +263,36 @@ textarea {
 .sign-up-mode .right-panel { pointer-events: all; }
 
 @container (max-width: 900px) {
-  /* Colonne, hauteur libre : le formulaire d'inscription ne peut plus être
-     coupé par une carte figée. */
+  /* Colonne, hauteur libre : le formulaire d'inscription, plus haut que celui
+     de connexion, ne peut plus être coupé par une carte figée. */
   .auth-switch-container { display: flex; flex-direction: column; height: auto; }
-  /* Le grand cercle laisse place à un bandeau arrondi calé sur les panneaux :
-     le vert suit toujours la hauteur réelle du texte et ne peut plus déborder
-     sur le formulaire. */
   .auth-switch-container::before { content: none; }
-  .auth-switch-panels {
-    position: relative;
-    inset: auto;
-    order: 1;
-    grid-template-columns: 1fr;
-    background: var(--auth-circle, linear-gradient(-45deg, var(--color-brand-600), var(--color-brand-900)));
-    border-radius: 0 0 50% 50% / 0 0 4rem 4rem;
+  /* Les panneaux qui se croisent sont remplacés par la barre compacte. */
+  .auth-switch-panels { display: none; }
+  .auth-switch-compact {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .75rem 1rem;
+    margin-bottom: 1.5rem;
+    font-size: .875rem;
+    color: #52525b;
   }
-  /* Les deux panneaux partagent la même case et se croisent toujours — le
-     panneau droit reste donc accessible pour revenir à la connexion. */
-  .auth-switch-panel { grid-area: 1 / 1; align-items: center; justify-content: center; }
-  .left-panel, .right-panel { padding: 2.75rem 1.5rem 5.5rem; }
-  .auth-switch-panel h2 { font-size: 1.625rem; }
-  .right-panel .auth-switch-panel-content { transform: translateX(700px); }
-  .sign-up-mode .left-panel .auth-switch-panel-content { transform: translateX(-700px); }
+  /* La bascule se cale à droite, le retour à l'accueil restant à gauche. */
+  .auth-switch-compact p { margin: 0 0 0 auto; }
+  .auth-switch-compact p button {
+    font-weight: 700;
+    color: var(--auth-accent, var(--color-brand-700));
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  /* Le lien de retour vivait sur le panneau coloré : ici, fond clair. */
+  .auth-switch-compact .auth-switch-back-link {
+    color: var(--auth-accent, var(--color-brand-700));
+  }
   .auth-switch-form {
     position: relative;
     z-index: 8;
-    order: 2;
     top: auto;
     left: auto;
     width: 100%;
@@ -298,6 +302,7 @@ textarea {
   }
   .sign-up-mode .auth-switch-form { left: auto; }
 }
+
 /* <<< AUTH-PORTAL <<< */
 
 /* ─── Surfaces (toutes unies, aucun dégradé) ─────────────────────────────── */
