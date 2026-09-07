@@ -10,10 +10,9 @@ const BRAND = "#47c667";
 const BRAND_DARK = "#2fa855";
 
 /**
- * L'intendance suit l'ensemble des réservations (véhicules, salles,
- * équipements) : demandes, acceptations, refus et annulations. Elle est donc
- * ajoutée aux listes de responsables et mise en copie cachée des emails
- * envoyés aux demandeurs.
+ * L'intendance suit les demandes, confirmations et annulations de réservation
+ * (véhicules, salles, équipements). Les décisions d'acceptation ou de refus
+ * restent privées et sont envoyées uniquement au demandeur.
  */
 export const INTENDANCE_EMAIL = "intendance@eco-solidaire.fr";
 
@@ -286,13 +285,14 @@ export const sendReservationEmail = internalAction({
         ${button(appLink(myReservationsPath), "Voir mes réservations")}
       `,
     });
+    const recipientOnlyDecision = args.state === "approved" || args.state === "rejected";
     await resendSend(
       args.email,
       `${copy.subject} · ${args.assetName}`,
       html,
       FROM,
       undefined,
-      { bcc: [INTENDANCE_EMAIL] },
+      recipientOnlyDecision ? undefined : { bcc: [INTENDANCE_EMAIL] },
     );
   },
 });
