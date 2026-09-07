@@ -56,14 +56,6 @@ const SCOPES = [
 const KEPT_KINDS = new Set<VintedKind>(["vente", "bordereau", "expedition", "offre"]);
 
 /**
- * Adresses qui transfèrent les emails Vinted vers la boîte scrutée. En
- * pratique les notifications n'arrivent pas de Vinted mais d'un collègue qui
- * les fait suivre depuis son compte : sans ces adresses, la requête Gmail ne
- * ramène rien.
- */
-const FORWARDERS = ["s.maccioni@eco-solidaire.fr"];
-
-/**
  * Expéditeurs des emails de suivi : les notifications d'expédition ne viennent
  * pas de Vinted mais du transporteur qui achemine le colis.
  */
@@ -74,17 +66,34 @@ const CARRIER_SENDERS = [
   "mondialrelay.com",
 ];
 
-/** Requête Gmail par défaut : Vinted, les transporteurs et les transferts. */
-const DEFAULT_QUERY = `(from:(vinted.fr OR vinted.com OR vinted.co.uk OR ${CARRIER_SENDERS.join(" OR ")}) OR from:(${FORWARDERS.join(" OR ")}))`;
+/** Expéditeurs directs : Vinted et les transporteurs. */
+const DIRECT_SENDERS = [
+  "vinted.fr",
+  "vinted.com",
+  "vinted.co.uk",
+  ...CARRIER_SENDERS,
+];
 
 /**
- * Requêtes posées par une version antérieure du module : elles ne ramenaient
- * que les emails envoyés par Vinted, donc rien depuis que les notifications
- * arrivent par transfert. On les remplace à la volée par la requête courante.
+ * Requête Gmail par défaut.
+ *
+ * Le compte Vinted est désormais rattaché à la boîte scrutée : les
+ * notifications arrivent directement de Vinted et des transporteurs. Elles
+ * transitaient auparavant par le transfert d'un collègue, dont l'adresse
+ * n'a plus à figurer ici.
+ */
+const DEFAULT_QUERY = `from:(${DIRECT_SENDERS.join(" OR ")})`;
+
+/**
+ * Requêtes posées par les versions antérieures du module. Elles sont
+ * remplacées à la volée par la requête courante : sans cela, une boîte
+ * connectée avant la bascule continuerait de chercher les transferts d'une
+ * adresse qui n'en envoie plus.
  */
 const LEGACY_QUERIES = new Set([
   "from:(vinted.fr OR vinted.com OR vinted.co.uk)",
-  `(from:(vinted.fr OR vinted.com OR vinted.co.uk) OR from:(${FORWARDERS.join(" OR ")}))`,
+  "(from:(vinted.fr OR vinted.com OR vinted.co.uk) OR from:(s.maccioni@eco-solidaire.fr))",
+  `(from:(vinted.fr OR vinted.com OR vinted.co.uk OR ${CARRIER_SENDERS.join(" OR ")}) OR from:(s.maccioni@eco-solidaire.fr))`,
 ]);
 
 /**
@@ -423,6 +432,17 @@ export function readForwardedOrigin(subject: string, body: string): ForwardedOri
  * message sans rapport. On exige une trace de Vinted ou d'un transporteur —
  * les emails d'expédition ne mentionnent pas toujours Vinted.
  */
+/**
+ * Reconnaît un email transféré à sa forme : préfixe « TR : » / « Fwd: » dans le
+ * sujet, ou en-tête de transfert recopié par Gmail en tête du corps.
+ */
+export function isForwardedMessage(subject: string, body: string): boolean {
+  // Volontairement plus strict que `FORWARD_PREFIX`, qui couvre aussi les
+  // réponses : une réponse n'a pas d'en-tête d'origine à relire.
+  if (/^\s*(?:(?:tr|fwd?)\s*:\s*)+/i.test(subject)) return true;
+  return /-{2,}\s*(?:Forwarded message|Message transf[ée]r[ée])\s*-{2,}/i.test(body);
+}
+
 export function isRelevantForward(...parts: string[]): boolean {
   return parts.some((part) => /vinted|chronopost|mondial\s?relay/i.test(part));
 }
@@ -1083,11 +1103,11 @@ export const syncAccount = internalAction({
         const body = messageBodyText(message);
         const html = messageRawHtml(message);
 
-        // Les notifications arrivent transférées par un collègue : on remonte
-        // au sujet, à l'expéditeur et à la date d'origine avant d'analyser.
-        const forwarded = FORWARDERS.some((address) =>
-          rawFrom.toLowerCase().includes(address.toLowerCase()),
-        );
+        // Les notifications arrivent directement de Vinted ou du transporteur.
+        // Un message transféré reste possible (reprise d'un ancien email, envoi
+        // manuel) : il est reconnu à sa forme, plus à l'adresse d'un collègue,
+        // et on remonte alors au sujet, à l'expéditeur et à la date d'origine.
+        const forwarded = isForwardedMessage(rawSubject, body);
         const origin = forwarded
           ? readForwardedOrigin(rawSubject, body)
           : { subject: rawSubject, from: rawFrom, sentAt: undefined };
