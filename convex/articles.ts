@@ -292,30 +292,67 @@ function matchesArticleFilters(
  * Boutique publique : articles disponibles ET en cours d'achat (réservés mais
  * pas encore vendus). Les articles vendus sont masqués.
  */
+/** Statuts visibles en boutique : l'article est encore à vendre. */
+const PUBLIC_STATUSES = ["disponible", "reserve"] as const;
+
+/**
+ * Article tel qu'affiché dans une grille publique (boutique, vitrine, suggestions
+ * de recherche).
+ *
+ * La projection est explicite : renvoyer le document entier envoyait à chaque
+ * visiteur les mots-clés, les identifiants Stripe, la référence interne et la
+ * liste complète des `_storage` — près de la moitié de la charge, pour des
+ * champs qu'aucune carte n'affiche.
+ */
+async function toPublicCard(
+  ctx: QueryCtx,
+  article: Doc<"articles">,
+  codes: Map<string, string>,
+) {
+  const cover = article.images[0]
+    ? await ctx.storage.getUrl(article.images[0])
+    : null;
+  return {
+    _id: article._id,
+    title: article.title,
+    description: article.description,
+    category: article.category,
+    subcategory: article.subcategory,
+    condition: article.condition,
+    price: article.price,
+    originalPrice: article.originalPrice,
+    weightKg: article.weightKg,
+    status: article.status,
+    isLot: article.isLot,
+    bundledArticleIds: article.bundledArticleIds,
+    location: article.location,
+    caisseCode: caisseCodeOf(article, codes),
+    imageUrls: cover ? [cover] : [],
+  };
+}
+
 export const listPublic = query({
   args: {
     categories: v.optional(v.array(v.string())),
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
   },
   handler: async (ctx, args) => {
-    const articles = await ctx.db
-      .query("articles")
-      .order("desc")
-      .collect();
-    const visible = articles.filter(
-      (a) =>
-        a.status !== "vendu" &&
-        a.status !== "attente" &&
-        a.status !== "lot" &&
-        matchesArticleFilters(a, args),
+    // Lecture par index : la table entière contenait aussi tout l'historique
+    // des ventes, qui grossit sans fin alors que la boutique n'en montre rien.
+    const byStatus = await Promise.all(
+      PUBLIC_STATUSES.map((status) =>
+        ctx.db
+          .query("articles")
+          .withIndex("by_status", (q) => q.eq("status", status))
+          .collect(),
+      ),
     );
+    const visible = byStatus
+      .flat()
+      .filter((article) => matchesArticleFilters(article, args))
+      .sort((a, b) => b._creationTime - a._creationTime);
     const codes = await caisseCodesById(ctx);
-    return Promise.all(
-      visible.map(async (a) => ({
-        ...(await withCoverImageUrl(ctx, a)),
-        caisseCode: caisseCodeOf(a, codes),
-      })),
-    );
+    return Promise.all(visible.map((article) => toPublicCard(ctx, article, codes)));
   },
 });
 
@@ -860,6 +897,35 @@ export const update = mutation({
         : undefined,
     });
     await scheduleStripeSync(ctx, id);
+  },
+});
+
+/**
+ * Remplace les photos d'un article par des versions recompressées.
+ *
+ * Sert au rattrapage lancé depuis le CRM : les photos détourées avaient été
+ * stockées en PNG de plusieurs Mo (cf. `useUpload`), et seul un navigateur sait
+ * les ré-encoder — le runtime Convex n'a pas d'encodeur d'image.
+ */
+export const replaceImages = mutation({
+  args: { id: v.id("articles"), images: v.array(v.id("_storage")) },
+  handler: async (ctx, { id, images }) => {
+    await requireCrmPermission(ctx, "articles", "update");
+    const article = await ctx.db.get(id);
+    if (!article) throw new Error("Article introuvable.");
+    if (images.length === 0) throw new Error("Un article garde au moins une photo.");
+    const previous = article.images;
+    await ctx.db.patch(id, { images });
+    // Les anciens fichiers ne sont plus référencés : les garder, c'est payer le
+    // stockage de ce qu'on vient justement d'alléger.
+    for (const storageId of previous) {
+      if (images.includes(storageId)) continue;
+      try {
+        await ctx.storage.delete(storageId);
+      } catch {
+        // Fichier déjà absent.
+      }
+    }
   },
 });
 
