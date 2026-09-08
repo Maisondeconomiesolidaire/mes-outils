@@ -119,6 +119,45 @@ export const bpCompanyType = v.union(
   v.literal("autre"),
 );
 
+/** App « Bennes & Pro » — spécialité métier des entreprises du bâtiment. */
+export const bpTradeCategory = v.union(
+  v.literal("gros_oeuvre"),
+  v.literal("charpente"),
+  v.literal("couverture"),
+  v.literal("facade"),
+  v.literal("isolation"),
+  v.literal("menuiseries_exterieures"),
+  v.literal("menuiserie_interieure"),
+  v.literal("electricite"),
+  v.literal("photovoltaique"),
+  v.literal("chauffage"),
+  v.literal("pompes_a_chaleur"),
+  v.literal("ventilation"),
+  v.literal("plomberie"),
+  v.literal("salle_de_bains"),
+  v.literal("poeles_cheminees"),
+  v.literal("solaire_thermique"),
+  v.literal("eau_chaude_sanitaire"),
+  v.literal("platrerie"),
+  v.literal("peinture"),
+  v.literal("sols"),
+  v.literal("cuisine"),
+  v.literal("amenagement_interieur"),
+  v.literal("accessibilite_adaptation"),
+  v.literal("ascenseurs"),
+  v.literal("etancheite"),
+  v.literal("humidite"),
+  v.literal("traitement_du_bois"),
+  v.literal("amenagement_exterieur"),
+  v.literal("terrassement_vrd"),
+  v.literal("piscine"),
+  v.literal("construction"),
+  v.literal("renovation_generale"),
+  v.literal("maitrise_oeuvre"),
+  v.literal("architecture"),
+  v.literal("etudes_diagnostics"),
+);
+
 /** App « Bennes & Pro » — unités de mesure. */
 export const bpUnit = v.union(
   v.literal("kg"),
@@ -2107,6 +2146,8 @@ export default defineSchema(
     nafCode: v.optional(v.string()),
     /** Intitulé officiel de l'activité principale correspondant au code NAF. */
     activityLabel: v.optional(v.string()),
+    /** Catégorie métier utilisée par Bennes & Pro. */
+    tradeCategory: v.optional(bpTradeCategory),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),

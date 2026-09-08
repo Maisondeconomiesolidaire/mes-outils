@@ -15,7 +15,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { accessAllows, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
 import { bytesToBase64, resendSend, storageImageUrl, type EmailAttachment } from "./emails";
-import { bpBilling, bpCompanyType, bpMaterial, bpUnit } from "./schema";
+import { bpBilling, bpCompanyType, bpMaterial, bpTradeCategory, bpUnit } from "./schema";
 import { resolveActingProfile } from "./bennesproProfiles";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
@@ -95,6 +95,7 @@ export const createCompany = mutation({
     siret: v.optional(v.string()),
     nafCode: v.optional(v.string()),
     activityLabel: v.optional(v.string()),
+    tradeCategory: v.optional(bpTradeCategory),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
@@ -120,6 +121,7 @@ export const updateCompany = mutation({
     siret: v.optional(v.string()),
     nafCode: v.optional(v.string()),
     activityLabel: v.optional(v.string()),
+    tradeCategory: v.optional(bpTradeCategory),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
@@ -177,6 +179,7 @@ export const searchEnterpriseDirectory = action({
           address: establishment?.adresse ?? "",
           nafCode: resultNafCode,
           activityLabel: await nafActivityLabel(resultNafCode),
+          tradeCategory: tradeCategoryForNaf(resultNafCode),
         };
       }));
   },
@@ -199,6 +202,30 @@ async function nafActivityLabel(nafCode: string): Promise<string> {
   }
 }
 
+const TRADE_CATEGORY_BY_NAF: Record<string, Infer<typeof bpTradeCategory>> = {
+  "41.20A": "construction",
+  "41.20B": "construction",
+  "43.11Z": "gros_oeuvre",
+  "43.12A": "terrassement_vrd",
+  "43.12B": "terrassement_vrd",
+  "43.13Z": "gros_oeuvre",
+  "43.21A": "electricite",
+  "43.22A": "plomberie",
+  "43.22B": "chauffage",
+  "43.29A": "isolation",
+  "43.31Z": "platrerie",
+  "43.32B": "menuiseries_exterieures",
+  "43.33Z": "sols",
+  "43.34Z": "peinture",
+  "43.91A": "charpente",
+  "43.91B": "couverture",
+  "43.99C": "gros_oeuvre",
+};
+
+function tradeCategoryForNaf(nafCode: string): Infer<typeof bpTradeCategory> | undefined {
+  return TRADE_CATEGORY_BY_NAF[nafCode.trim().toUpperCase()];
+}
+
 /** Liste bornée des entreprises à enrichir, réservée à l'action de backfill. */
 export const companiesForActivityBackfill = internalQuery({
   args: {},
@@ -213,11 +240,13 @@ export const saveCompanyActivity = internalMutation({
     companyId: v.id("bpCompanies"),
     nafCode: v.string(),
     activityLabel: v.string(),
+    tradeCategory: v.optional(bpTradeCategory),
   },
-  handler: async (ctx, { companyId, nafCode, activityLabel }) => {
+  handler: async (ctx, { companyId, nafCode, activityLabel, tradeCategory }) => {
     await ctx.db.patch(companyId, {
       nafCode,
       ...(activityLabel ? { activityLabel } : {}),
+      ...(tradeCategory ? { tradeCategory } : {}),
     });
   },
 });
@@ -278,6 +307,7 @@ export const backfillCompanyActivities = action({
           companyId: company._id,
           nafCode,
           activityLabel,
+          tradeCategory: tradeCategoryForNaf(nafCode),
         });
         updated += 1;
       } catch {
@@ -403,6 +433,7 @@ export const saveMyCompany = mutation({
     siret: v.optional(v.string()),
     nafCode: v.optional(v.string()),
     activityLabel: v.optional(v.string()),
+    tradeCategory: v.optional(bpTradeCategory),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
