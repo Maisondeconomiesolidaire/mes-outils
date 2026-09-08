@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireCrmPermission, normalizeCustomer, titleCaseName } from "./lib";
 import { RequestType } from "./processes";
@@ -188,5 +188,106 @@ export const get = query({
       customer,
       requests: requests.map((r) => ({ ...r, customer: normalizeCustomer(r.customer) })),
     };
+  },
+});
+
+/* ─── Modification et suppression d'une fiche client ──────────────────────── */
+
+/**
+ * Met à jour un client.
+ *
+ * Une fiche client n'existe pas en tant que telle : elle est agrégée depuis les
+ * demandes, qui portent chacune leur copie des coordonnées, et depuis les
+ * prospects importés. Corriger un client, c'est donc corriger toutes ses
+ * demandes — sans quoi l'agrégat afficherait de nouveau l'ancienne valeur au
+ * prochain calcul.
+ */
+export const update = mutation({
+  args: {
+    email: v.string(),
+    firstName: v.string(),
+    lastName: v.string(),
+    phone: v.string(),
+    /** Nouvelle adresse email, si elle change (elle sert de clé de regroupement). */
+    newEmail: v.optional(v.string()),
+    address: v.optional(v.string()),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, "clients", "update");
+    const target = args.email.trim().toLowerCase();
+    if (!target) throw new Error("Client introuvable.");
+    const firstName = args.firstName.trim();
+    const lastName = args.lastName.trim();
+    if (!firstName && !lastName) throw new Error("Renseignez le nom du client.");
+    const nextEmail = (args.newEmail ?? args.email).trim().toLowerCase();
+    if (!nextEmail.includes("@")) throw new Error("Adresse email invalide.");
+
+    const text = (value?: string) => value?.trim() || undefined;
+    const fields = {
+      firstName,
+      lastName,
+      email: nextEmail,
+      phone: args.phone.trim(),
+      address: text(args.address),
+      postalCode: text(args.postalCode),
+      city: text(args.city),
+    };
+
+    const requests = await ctx.db.query("requests").collect();
+    const mine = requests.filter(
+      (request) => request.customer.email.trim().toLowerCase() === target,
+    );
+    for (const request of mine) {
+      await ctx.db.patch(request._id, {
+        customer: { ...request.customer, ...fields },
+      });
+    }
+
+    const imported = await ctx.db
+      .query("crmCustomers")
+      .withIndex("by_email", (q) => q.eq("email", target))
+      .collect();
+    for (const customer of imported) {
+      await ctx.db.patch(customer._id, { ...fields, updatedAt: Date.now() });
+    }
+
+    if (mine.length === 0 && imported.length === 0) {
+      throw new Error("Client introuvable.");
+    }
+    return { requests: mine.length, imported: imported.length, email: nextEmail };
+  },
+});
+
+/**
+ * Supprime un client.
+ *
+ * Seule la fiche prospect importée est supprimable : un client qui a des
+ * demandes n'existe qu'à travers elles, et les effacer emporterait des dossiers
+ * (devis, photos, factures). L'appelant est renvoyé vers la suppression d'une
+ * demande, qui est un geste distinct et tracé.
+ */
+export const remove = mutation({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    await requireCrmPermission(ctx, "clients", "delete");
+    const target = email.trim().toLowerCase();
+    const requests = await ctx.db.query("requests").collect();
+    const linked = requests.filter(
+      (request) => request.customer.email.trim().toLowerCase() === target,
+    );
+    if (linked.length > 0) {
+      throw new Error(
+        `Ce client a ${linked.length} demande${linked.length > 1 ? "s" : ""} : supprimez-les d'abord depuis la fiche de chaque demande.`,
+      );
+    }
+    const imported = await ctx.db
+      .query("crmCustomers")
+      .withIndex("by_email", (q) => q.eq("email", target))
+      .collect();
+    if (imported.length === 0) throw new Error("Client introuvable.");
+    for (const customer of imported) await ctx.db.delete(customer._id);
+    return { removed: imported.length };
   },
 });
