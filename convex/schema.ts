@@ -2105,6 +2105,8 @@ export default defineSchema(
     siret: v.optional(v.string()),
     /** Code APE / NAF récupéré depuis l'Annuaire des entreprises. */
     nafCode: v.optional(v.string()),
+    /** Intitulé officiel de l'activité principale correspondant au code NAF. */
+    activityLabel: v.optional(v.string()),
     address: v.optional(v.string()),
     contactName: v.optional(v.string()),
     contactPhone: v.optional(v.string()),
