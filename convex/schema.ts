@@ -1884,6 +1884,29 @@ export default defineSchema(
     .index("by_period", ["year", "month"])
     .index("by_site_and_period", ["site", "year", "month", "week"]),
 
+  /**
+   * Clients Klyd saisis à la main.
+   *
+   * L'essentiel des clients se déduit des emails Vinted, qui portent le nom et
+   * l'adresse de facturation de l'acheteur. Cette table ne stocke que ce qui
+   * n'en vient pas : une vente de la main à la main, un contact pris en
+   * boutique, ou un complément (téléphone, note) sur un acheteur connu.
+   */
+  klydeCustomers: defineTable({
+    name: v.string(),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    /** Pseudo Vinted, quand il permet de rapprocher le contact d'un acheteur. */
+    vintedPseudo: v.optional(v.string()),
+    note: v.optional(v.string()),
+    outlet: v.optional(v.union(v.literal("klyd"), v.literal("mobifrip"))),
+    createdByClerkId: v.string(),
+    createdByName: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
+  }).index("by_email", ["email"]),
+
   klydeItems: defineTable({
     photos: v.array(v.id("_storage")),
     title: v.string(),

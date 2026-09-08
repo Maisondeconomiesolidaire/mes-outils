@@ -40,6 +40,7 @@ import type * as http from "../http.js";
 import type * as importLegacy from "../importLegacy.js";
 import type * as kiosk from "../kiosk.js";
 import type * as klyde from "../klyde.js";
+import type * as klydeCustomers from "../klydeCustomers.js";
 import type * as klydeGmail from "../klydeGmail.js";
 import type * as klydeInvoices from "../klydeInvoices.js";
 import type * as klydeReports from "../klydeReports.js";
@@ -113,6 +114,7 @@ declare const fullApi: ApiFromModules<{
   importLegacy: typeof importLegacy;
   kiosk: typeof kiosk;
   klyde: typeof klyde;
+  klydeCustomers: typeof klydeCustomers;
   klydeGmail: typeof klydeGmail;
   klydeInvoices: typeof klydeInvoices;
   klydeReports: typeof klydeReports;

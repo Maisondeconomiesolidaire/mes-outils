@@ -301,6 +301,14 @@ export const KLYDE_PAGES: PermissionPage[] = [
   },
   {
     app: "klyde",
+    key: "klyde:clients",
+    label: "Clients",
+    description:
+      "Acheteurs reconstitues depuis les emails Vinted, et fiches ajoutees a la main.",
+    actions: ["read", "create", "update", "delete"],
+  },
+  {
+    app: "klyde",
     key: "klyde:vinted",
     label: "Emails Vinted",
     description: "Boite Gmail connectee : ventes, bordereaux et virements Vinted.",

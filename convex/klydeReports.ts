@@ -788,3 +788,140 @@ export const deleteStoreRevenue = mutation({
     await ctx.db.delete(id);
   },
 });
+
+/* ─── Analyse : ce qui se vend, et en combien de temps ────────────────────── */
+
+/** Date de mise en vente : la première publication connue, Vinted ou boutique. */
+function listedAt(item: Doc<"klydeItems">) {
+  const dates = [item.vintedAt, item.boutiquePublishedAt].filter(
+    (value): value is number => typeof value === "number",
+  );
+  return dates.length ? Math.min(...dates) : undefined;
+}
+
+/** Jours écoulés entre la mise en ligne et la vente, quand les deux sont connues. */
+function daysToSell(item: Doc<"klydeItems">) {
+  const listed = listedAt(item);
+  const sold = saleDate(item);
+  if (listed === undefined || !sold || sold <= listed) return undefined;
+  return (sold - listed) / 86_400_000;
+}
+
+function median(values: number[]) {
+  if (values.length === 0) return undefined;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+type Ranked = {
+  label: string;
+  count: number;
+  revenue: number;
+  /** Délai moyen de vente sur ce groupe, en jours ; absent si jamais mesurable. */
+  averageDays?: number;
+};
+
+/** Classement d'une dimension (catégorie, marque…) par chiffre d'affaires. */
+function rank(items: Doc<"klydeItems">[], pick: (item: Doc<"klydeItems">) => string | undefined) {
+  const groups = new Map<string, { count: number; revenue: number; days: number[] }>();
+  for (const item of items) {
+    const label = pick(item)?.trim();
+    if (!label) continue;
+    const group = groups.get(label) ?? { count: 0, revenue: 0, days: [] };
+    group.count += item.quantity;
+    group.revenue += saleAmount(item) * item.quantity;
+    const delay = daysToSell(item);
+    if (delay !== undefined) group.days.push(delay);
+    groups.set(label, group);
+  }
+  const ranked: Ranked[] = [...groups.entries()].map(([label, group]) => ({
+    label,
+    count: group.count,
+    revenue: Math.round(group.revenue * 100) / 100,
+    averageDays: group.days.length
+      ? Math.round((group.days.reduce((total, value) => total + value, 0) / group.days.length) * 10) / 10
+      : undefined,
+  }));
+  return ranked.sort((a, b) => b.revenue - a.revenue || b.count - a.count);
+}
+
+/**
+ * Ce qui se vend le mieux, et en combien de temps.
+ *
+ * Un article de recyclerie est unique : classer les ventes par article n'a
+ * aucun sens, deux robes ne sont jamais le même produit. L'analyse porte donc
+ * sur ce qui se répète — catégorie, sous-catégorie, marque, état, taille.
+ */
+export const salesAnalysis = query({
+  args: {
+    year: v.number(),
+    month: v.union(v.number(), v.null()),
+    outlet: v.union(v.literal("klyd"), v.literal("mobifrip"), v.null()),
+  },
+  handler: async (ctx, { year, month, outlet }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const all = await ctx.db.query("klydeItems").collect();
+    const items = all.filter((item) => {
+      if (!isRecordedSale(item)) return false;
+      if (outlet && (item.outlet ?? "klyd") !== outlet) return false;
+      const when = inParis(saleDate(item));
+      return when.year === year && (month === null || when.month === month);
+    });
+
+    const delays = items
+      .map(daysToSell)
+      .filter((value): value is number => value !== undefined);
+    // Quatre paliers : sous la semaine, sous le mois, sous le trimestre, au-delà.
+    const buckets = [
+      { label: "Moins de 7 jours", max: 7 },
+      { label: "7 à 30 jours", max: 30 },
+      { label: "30 à 90 jours", max: 90 },
+      { label: "Plus de 90 jours", max: Infinity },
+    ].map((bucket, index, list) => {
+      const min = index === 0 ? 0 : list[index - 1].max;
+      return {
+        label: bucket.label,
+        count: delays.filter((value) => value >= min && value < bucket.max).length,
+      };
+    });
+
+    const sold = items
+      .map((item) => ({
+        id: item._id,
+        title: item.title,
+        category: item.category,
+        brand: item.brand,
+        amount: Math.round(saleAmount(item) * 100) / 100,
+        days: daysToSell(item),
+        listedAt: listedAt(item),
+        soldAt: saleDate(item),
+      }))
+      .filter((entry) => entry.days !== undefined)
+      .sort((a, b) => (a.days ?? 0) - (b.days ?? 0));
+
+    return {
+      label: month === null ? String(year) : `${MONTHS[month]} ${year}`,
+      salesCount: items.reduce((total, item) => total + item.quantity, 0),
+      categories: rank(items, (item) => item.category).slice(0, 10),
+      subcategories: rank(items, (item) => item.subcategory).slice(0, 10),
+      brands: rank(items, (item) => item.brand).slice(0, 10),
+      conditions: rank(items, (item) => item.condition).slice(0, 10),
+      sizes: rank(items, (item) => item.size).slice(0, 10),
+      delay: {
+        measured: delays.length,
+        /** Articles vendus sans date de mise en ligne : le délai leur échappe. */
+        unknown: items.length - delays.length,
+        averageDays: delays.length
+          ? Math.round((delays.reduce((total, value) => total + value, 0) / delays.length) * 10) / 10
+          : undefined,
+        medianDays: delays.length ? Math.round((median(delays) ?? 0) * 10) / 10 : undefined,
+        buckets,
+        fastest: sold.slice(0, 5),
+        slowest: sold.slice(-5).reverse(),
+      },
+    };
+  },
+});
