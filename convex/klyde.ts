@@ -577,6 +577,7 @@ export const submitCartOrder = mutation({
       available.map((item) =>
         ctx.db.patch(item._id, {
           status: "en_cours_envoi",
+          saleRecordedAt: now,
           trackingNotes: [
             item.trackingNotes,
             `Commande boutique ${orderId} créée. Paiement carte en attente.`,
@@ -695,9 +696,14 @@ export const updateStatus = mutation({
       status,
       vinted: status === "stock" || status === "stock_b" ? undefined : status === "en_ligne" ? true : item.vinted,
       vintedAt: status === "en_ligne" ? item.vintedAt ?? now : status === "stock" || status === "stock_b" ? undefined : item.vintedAt,
-      // Date d'encaissement : posée une fois, conservée si l'article repasse
-      // par « gagné », effacée s'il quitte cet état (vente annulée).
-      soldAt: status === "gagne" ? item.soldAt ?? now : undefined,
+      // Le rapport date la vente au passage en « Vendu », pas à la validation
+      // ultérieure « Gagné ». La date reste acquise pendant l'expédition.
+      saleRecordedAt:
+        status === "en_cours_envoi"
+          ? item.saleRecordedAt ?? now
+          : status === "envoye" || status === "gagne"
+            ? item.saleRecordedAt ?? item.soldAt ?? now
+            : undefined,
       updatedAt: now,
     });
   },
@@ -740,7 +746,12 @@ export const advanceWorkflow = mutation({
       status,
       vinted: status === "en_ligne" ? true : item.vinted,
       vintedAt: status === "en_ligne" ? item.vintedAt ?? now : item.vintedAt,
-      soldAt: status === "gagne" ? item.soldAt ?? now : undefined,
+      saleRecordedAt:
+        status === "en_cours_envoi"
+          ? item.saleRecordedAt ?? now
+          : status === "envoye" || status === "gagne"
+            ? item.saleRecordedAt ?? item.soldAt ?? now
+            : undefined,
       updatedAt: now,
     });
   },

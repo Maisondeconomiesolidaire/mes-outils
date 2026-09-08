@@ -2,9 +2,9 @@
  * Rapports de ventes Klyd.
  *
  * Le chiffre d'affaires se lit sur le stock, pas sur les emails Vinted ni sur
- * les commandes boutique : toute vente, quel que soit son canal, finit par un
- * article en « gagné » avec son prix réellement encaissé. Compter les autres
- * sources en plus reviendrait à compter deux fois la même vente.
+ * les commandes boutique : une vente est comptée dès que l'article est
+ * enregistré « Vendu ». La confirmation ultérieure « Gagné » ne doit pas
+ * déplacer le chiffre d'affaires vers un autre mois.
  */
 import { action, internalQuery, mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
@@ -112,12 +112,16 @@ function saleAmount(item: Doc<"klydeItems">) {
 }
 
 /**
- * Date de vente. `soldAt` n'existe que depuis la mise en place des rapports :
- * pour les ventes antérieures, `updatedAt` reste la meilleure approximation
- * disponible.
+ * Date de vente : celle du passage en « Vendu ». Les anciens articles, qui ne
+ * disposent pas encore de cette date, gardent leur date historique de gain.
  */
 function saleDate(item: Doc<"klydeItems">) {
-  return item.soldAt ?? item.updatedAt;
+  return item.saleRecordedAt ?? item.soldAt ?? item.updatedAt;
+}
+
+/** Une vente reste comptée après l'expédition ou la confirmation « Gagné ». */
+function isRecordedSale(item: Doc<"klydeItems">) {
+  return item.saleRecordedAt !== undefined || ["en_cours_envoi", "envoye", "gagne", "vendu"].includes(item.status);
 }
 
 function inParis(ms: number) {
@@ -158,10 +162,8 @@ async function buildReport(
   month: number | null,
   outlet: ReportOutlet,
 ): Promise<SalesReport> {
-  const won = await ctx.db
-    .query("klydeItems")
-    .withIndex("by_status", (q) => q.eq("status", "gagne"))
-    .collect();
+  const items = await ctx.db.query("klydeItems").collect();
+  const sold = items.filter(isRecordedSale);
 
   const monthly = new Array(12).fill(0) as number[];
   const monthlyWeight = new Array(12).fill(0) as number[];
@@ -170,7 +172,7 @@ async function buildReport(
   let revenue = 0;
   let weightKg = 0;
 
-  for (const item of won) {
+  for (const item of sold) {
     const itemOutlet = item.outlet === "mobifrip" ? "mobifrip" : "klyd";
     // Le filtre s'applique aussi a la serie mensuelle : sans cela, les barres
     // et le total du rapport raconteraient deux perimetres differents.
@@ -198,19 +200,6 @@ async function buildReport(
     });
   }
 
-  // Expédié mais pas encore confirmé : vendu, pas encore encaissé. Distinguer
-  // les deux évite de gonfler le chiffre d'affaires d'une période.
-  const shipped = await ctx.db
-    .query("klydeItems")
-    .withIndex("by_status", (q) => q.eq("status", "envoye"))
-    .collect();
-  const pending = shipped.filter((item) => {
-    const itemOutlet = item.outlet === "mobifrip" ? "mobifrip" : "klyd";
-    if (outlet && itemOutlet !== outlet) return false;
-    const when = inParis(saleDate(item));
-    return when.year === year && (month === null || when.month === month);
-  });
-
   sales.sort((a, b) => b.soldAt - a.soldAt);
   return {
     year,
@@ -227,9 +216,8 @@ async function buildReport(
     },
     monthly: monthly.map((value) => Math.round(value * 100) / 100),
     monthlyWeight: monthlyWeight.map((value) => Math.round(value * 100) / 100),
-    pendingRevenue:
-      Math.round(pending.reduce((sum, item) => sum + saleAmount(item), 0) * 100) / 100,
-    pendingCount: pending.length,
+    pendingRevenue: 0,
+    pendingCount: 0,
     sales,
     generatedAt: Date.now(),
   };
@@ -261,16 +249,15 @@ export const reportForEmail = internalQuery({
     buildReport(ctx, args.year, args.month, args.outlet),
 });
 
-/** Années où au moins une vente a été encaissée, la plus récente d'abord. */
+/** Années où au moins une vente a été enregistrée, la plus récente d'abord. */
 export const availableYears = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
-    const won = await ctx.db
-      .query("klydeItems")
-      .withIndex("by_status", (q) => q.eq("status", "gagne"))
-      .collect();
-    const years = new Set(won.map((item) => inParis(saleDate(item)).year));
+    const items = await ctx.db.query("klydeItems").collect();
+    const years = new Set(
+      items.filter(isRecordedSale).map((item) => inParis(saleDate(item)).year),
+    );
     years.add(inParis(Date.now()).year);
     return [...years].sort((a, b) => b - a);
   },
