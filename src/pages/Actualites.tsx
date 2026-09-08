@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -26,6 +26,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { endOfMonth, endOfWeek, startOfMonth, startOfWeek } from "date-fns";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
@@ -33,6 +34,7 @@ import { SectionHeader } from "../components/SectionHeader";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { usePermissionsAccess } from "../components/RequirePermission";
 import { Button } from "../components/ui/Button";
+import { CalendarBoard } from "../components/ui/CalendarBoard";
 import { DateRangePicker } from "../components/ui/DateRangePicker";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
@@ -750,26 +752,25 @@ function likeSummary(latestLikeName: string | undefined, likesCount: number) {
 
 /* ─── Événements ─────────────────────────────────────────────────────────── */
 
-type EventItem = {
-  _id: Id<"events">;
-  authorName: string;
-  authorImageUrl?: string;
-  title: string;
-  description?: string;
-  location?: string;
-  start?: number;
-  end?: number;
-  imageUrls: string[];
-  canManage: boolean;
-};
-
 function Evenements({ canCreate }: { canCreate: boolean }) {
-  const events = useQuery(api.community.listEvents) as EventItem[] | undefined;
+  // Le calendrier ne charge que le mois affiché, grille complète comprise :
+  // un évènement du 31 août visible sur la case de la première semaine de
+  // septembre doit être chargé avec septembre.
+  const [month, setMonth] = useState(() => startOfMonth(new Date()).getTime());
+  const range = useMemo(() => {
+    const base = new Date(month);
+    return {
+      from: startOfWeek(startOfMonth(base), { weekStartsOn: 1 }).getTime(),
+      to: endOfWeek(endOfMonth(base), { weekStartsOn: 1 }).getTime(),
+    };
+  }, [month]);
+  const calendar = useQuery(api.community.calendarEvents, range);
+  const undated = useQuery(api.community.undatedEvents, {});
+  const [openId, setOpenId] = useState<string | null>(null);
   const createEvent = useMutation(api.community.createEvent);
   const removeEvent = useMutation(api.community.removeEvent);
   const generatePost = useAction(api.community.generateEventPost);
   const [open, setOpen] = useState(false);
-  const [detailEvent, setDetailEvent] = useState<EventItem | null>(null);
   const [form, setForm] = useState({ title: "", description: "", location: "", start: null as number | null, end: null as number | null });
   const [images, setImages] = useState<Id<"_storage">[]>([]);
   const [saving, setSaving] = useState(false);
@@ -818,7 +819,7 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
     }
   }
 
-  if (events === undefined) return <FullSpinner label="Chargement..." />;
+  if (calendar === undefined) return <FullSpinner label="Chargement..." />;
 
   async function removeEventWithConfirmation(eventId: Id<"events">) {
     if (!(await confirmPermanentDelete("Êtes-vous sûr(e) de vouloir supprimer définitivement cet événement ?"))) return;
@@ -833,49 +834,52 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
         </div>
       ) : null}
 
-      {events.length === 0 ? (
-        <EmptyState icon={<PartyPopper className="h-8 w-8" />} title="Aucun événement" description="Les événements internes apparaîtront ici." />
-      ) : (
-        <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
-          {events.map((event) => (
-            <article key={event._id} className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-sm">
-              <button type="button" onClick={() => setDetailEvent(event)} className="block w-full text-left">
-                {event.imageUrls[0] ? (
-                  <img src={event.imageUrls[0]} alt="" className="aspect-video w-full object-cover" />
-                ) : (
-                  <div className="flex aspect-video items-center justify-center bg-brand-50"><PartyPopper className="h-10 w-10 text-brand-500" /></div>
-                )}
-              </button>
-              <div className="p-4">
-                <p className="text-xs font-bold uppercase tracking-wide text-brand-600">{event.start ? formatDate(event.start) : "Date à venir"}</p>
-                <button type="button" onClick={() => setDetailEvent(event)} className="mt-1 text-left">
-                  <h3 className="text-lg font-bold text-[var(--foreground)] hover:text-brand-600">{event.title}</h3>
+      <CalendarBoard
+        month={month}
+        onMonthChange={(next) => setMonth(startOfMonth(next).getTime())}
+        events={(calendar ?? []).map((event) => ({
+          id: event.id,
+          start: event.start,
+          end: event.end,
+          title: event.title,
+          subtitle: event.location ?? undefined,
+          // Deux origines, deux couleurs : on voit d'un coup d'œil ce qui vient
+          // du calendrier de la Recyclerie.
+          tone: event.kind === "recyclerie" ? "violet" : "brand",
+        }))}
+        onEventClick={(id) => setOpenId(id)}
+      />
+
+      {calendar !== undefined && calendar.length === 0 ? (
+        <EmptyState
+          icon={<PartyPopper className="h-8 w-8" />}
+          title="Aucun événement ce mois-ci"
+          description="Les événements internes et ceux partagés depuis le calendrier de la Recyclerie apparaîtront ici."
+        />
+      ) : null}
+
+      {undated && undated.length > 0 ? (
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+          <h3 className="text-sm font-semibold text-[var(--foreground)]">Sans date précise</h3>
+          <ul className="mt-3 divide-y divide-[var(--border)]">
+            {undated.map((event) => (
+              <li key={event.id}>
+                <button
+                  type="button"
+                  onClick={() => setOpenId(event.id)}
+                  className="flex w-full items-center gap-3 py-2.5 text-left"
+                >
+                  <PartyPopper className="h-4 w-4 shrink-0 text-brand-600" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{event.title}</span>
+                  <span className="shrink-0 text-xs text-[var(--muted-foreground)]">
+                    {event.authorName}
+                  </span>
                 </button>
-                {event.start ? (
-                  <p className="mt-1 text-sm text-[var(--muted-foreground)]">
-                    {formatDateTime(event.start)}{event.end ? ` → ${formatDateTime(event.end)}` : ""}
-                  </p>
-                ) : null}
-                {event.location ? (
-                  <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-[var(--foreground)]"><MapPin className="h-4 w-4 text-brand-600" />{event.location}</p>
-                ) : null}
-                {event.description ? <p className="mt-2 text-sm leading-6 text-[var(--muted-foreground)]">{event.description}</p> : null}
-                <p className="mt-3 text-xs text-[var(--muted-foreground)]">Proposé par {event.authorName}</p>
-                <div className="mt-3 flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setDetailEvent(event)}>
-                    Voir les détails
-                  </Button>
-                  {event.canManage ? (
-                    <Button variant="ghost" size="sm" onClick={() => removeEventWithConfirmation(event._id)}>
-                      <Trash2 className="h-4 w-4" /> Supprimer
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            </article>
-          ))}
+              </li>
+            ))}
+          </ul>
         </div>
-      )}
+      ) : null}
 
       <Modal open={open} onClose={() => setOpen(false)} title="Nouvel événement">
         <div className="grid gap-4">
@@ -921,72 +925,138 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
         </div>
       </Modal>
 
-      {detailEvent ? (
-        <EventDetail event={detailEvent} onClose={() => setDetailEvent(null)} />
+      {openId ? (
+        <CalendarEventDetail
+          event={
+            [...(calendar ?? []), ...(undated ?? [])].find((item) => item.id === openId) ?? null
+          }
+          onClose={() => setOpenId(null)}
+          onDelete={
+            canCreate
+              ? (eventId) => {
+                  void removeEventWithConfirmation(eventId);
+                  setOpenId(null);
+                }
+              : undefined
+          }
+        />
       ) : null}
     </div>
   );
 }
 
-function EventDetail({ event, onClose }: { event: EventItem; onClose: () => void }) {
-  const [active, setActive] = useState(0);
+/** Évènement du calendrier partagé : celui de Mes Outils, ou de la Recyclerie. */
+type CalendarItem = {
+  kind: "mesoutils" | "recyclerie";
+  id: string;
+  eventId?: Id<"events">;
+  title: string;
+  description?: string;
+  location?: string;
+  start?: number;
+  end?: number;
+  imageUrls: string[];
+  authorName: string;
+  authorImageUrl?: string;
+  structure?: string;
+  animationType?: string;
+  activity?: string;
+  relatedEvent?: string;
+  targetAudience?: string;
+  organizer?: string;
+  canManage: boolean;
+};
+
+function CalendarEventDetail({
+  event,
+  onClose,
+  onDelete,
+}: {
+  event: CalendarItem | null;
+  onClose: () => void;
+  onDelete?: (eventId: Id<"events">) => void;
+}) {
+  if (!event) return null;
+  const details = (
+    [
+      ["Type d'animation", event.animationType],
+      ["Structure", event.structure],
+      ["Activité", event.activity],
+      ["Évènement rattaché", event.relatedEvent],
+      ["Public(s) ciblé(s)", event.targetAudience],
+      ["Référent / organisateur", event.organizer],
+    ] as const
+  ).filter(([, value]) => Boolean(value));
+
   return (
     <Modal open onClose={onClose} title={event.title}>
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div>
-          {event.imageUrls.length > 0 ? (
-            <>
-              <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--muted)]">
-                <img src={event.imageUrls[active]} alt={event.title} className="max-h-[60vh] w-full object-contain" />
-              </div>
-              {event.imageUrls.length > 1 ? (
-                <div className="thin-scroll mt-3 flex gap-2 overflow-x-auto pb-1">
-                  {event.imageUrls.map((url, index) => (
-                    <button
-                      key={url}
-                      type="button"
-                      onClick={() => setActive(index)}
-                      className={cn(
-                        "h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition",
-                        index === active ? "border-brand-500" : "border-transparent opacity-70 hover:opacity-100",
-                      )}
-                    >
-                      <img src={url} alt="" className="h-full w-full object-cover" />
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-            </>
+      <div className="grid gap-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={cn(
+              "rounded-full px-2.5 py-1 text-xs font-semibold",
+              event.kind === "recyclerie"
+                ? "bg-violet-100 text-violet-700 dark:bg-violet-500/15 dark:text-violet-300"
+                : "bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300",
+            )}
+          >
+            {event.kind === "recyclerie" ? "Calendrier Recyclerie" : "Mes Outils"}
+          </span>
+          {event.start ? (
+            <span className="text-sm text-[var(--muted-foreground)]">
+              {formatDateTime(event.start)}
+              {event.end ? ` → ${formatDateTime(event.end)}` : ""}
+            </span>
           ) : (
-            <div className="flex aspect-video items-center justify-center rounded-2xl bg-brand-50">
-              <PartyPopper className="h-12 w-12 text-brand-500" />
-            </div>
+            <span className="text-sm text-[var(--muted-foreground)]">Date à venir</span>
           )}
         </div>
 
-        <div className="flex flex-col">
-          <p className="text-xs font-bold uppercase tracking-wide text-brand-600">
-            {event.start ? formatDate(event.start) : "Date à venir"}
+        {event.imageUrls.length > 0 ? (
+          <img
+            src={event.imageUrls[0]}
+            alt={event.title}
+            className="max-h-[45vh] w-full rounded-2xl border border-[var(--border)] object-contain"
+          />
+        ) : null}
+
+        {event.location ? (
+          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--foreground)]">
+            <MapPin className="h-4 w-4 text-brand-600" />
+            {event.location}
           </p>
-          <h2 className="mt-2 text-2xl font-bold text-[var(--foreground)]">{event.title}</h2>
-          {event.start ? (
-            <p className="mt-3 text-sm text-[var(--muted-foreground)]">
-              {formatDateTime(event.start)}{event.end ? ` → ${formatDateTime(event.end)}` : ""}
-            </p>
-          ) : null}
-          {event.location ? (
-            <p className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--foreground)]">
-              <MapPin className="h-4 w-4 text-brand-600" />{event.location}
-            </p>
-          ) : null}
-          {event.description ? (
-            <p className="mt-5 whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">{event.description}</p>
-          ) : (
-            <p className="mt-5 text-sm text-[var(--muted-foreground)]">Aucune description pour le moment.</p>
-          )}
-          <div className="mt-auto flex items-center gap-3 pt-6">
-            <Avatar name={event.authorName} src={event.authorImageUrl} size="sm" />
-            <p className="text-sm text-[var(--muted-foreground)]">Proposé par {event.authorName}</p>
+        ) : null}
+
+        {event.description ? (
+          <p className="whitespace-pre-wrap text-[15px] leading-7 text-[var(--foreground)]">
+            {event.description}
+          </p>
+        ) : null}
+
+        {details.length > 0 ? (
+          <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+            {details.map(([label, value]) => (
+              <div key={label}>
+                <dt className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+                  {label}
+                </dt>
+                <dd className="mt-0.5 text-sm text-[var(--foreground)]">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+          <p className="text-sm text-[var(--muted-foreground)]">Proposé par {event.authorName}</p>
+          <div className="flex gap-2">
+            {/* Un évènement de la Recyclerie se modifie dans Recycapp : le
+                dupliquer ici ferait exister deux versions du même évènement. */}
+            {event.kind === "mesoutils" && event.canManage && event.eventId && onDelete ? (
+              <Button variant="ghost" size="sm" onClick={() => onDelete(event.eventId!)}>
+                <Trash2 className="h-4 w-4" /> Supprimer
+              </Button>
+            ) : null}
+            <Button size="sm" onClick={onClose}>Fermer</Button>
           </div>
         </div>
       </div>

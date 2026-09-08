@@ -2246,6 +2246,12 @@ export default defineSchema(
     completed: v.optional(v.boolean()),
     /** Salariés mobilisés sur l'évènement (équipe Recyclerie). */
     workerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
+    /**
+     * Visible dans l'espace partagé de Mes Outils. Absent vaut partagé : les
+     * évènements du calendrier Recyclerie y figurent tous par défaut, et le
+     * bouton de la fiche sert à en retirer un plutôt qu'à les ajouter un à un.
+     */
+    sharedInMesOutils: v.optional(v.boolean()),
     startAt: v.number(),
     endAt: v.number(),
     attachments: v.array(v.id("_storage")),

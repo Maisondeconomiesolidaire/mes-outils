@@ -38,6 +38,8 @@ export function CalendarBoard({
   onEventClick,
   compact = false,
   disabledBefore,
+  month,
+  onMonthChange,
 }: {
   selected?: number | null;
   rangeStart?: number | null;
@@ -48,8 +50,21 @@ export function CalendarBoard({
   onEventClick?: (id: string, day?: Date) => void;
   compact?: boolean;
   disabledBefore?: number | null;
+  /**
+   * Mois affiché, piloté par le parent. Sans lui, le calendrier gère son mois
+   * lui-même — mais un parent qui charge les évènements du mois visible a
+   * besoin de savoir lequel c'est.
+   */
+  month?: number;
+  onMonthChange?: (month: Date) => void;
 }) {
-  const [viewMonth, setViewMonth] = useState(() => new Date(selected ?? rangeStart ?? Date.now()));
+  const [innerMonth, setInnerMonth] = useState(() => new Date(selected ?? rangeStart ?? Date.now()));
+  const viewMonth = month !== undefined ? new Date(month) : innerMonth;
+  const setViewMonth = (next: (current: Date) => Date) => {
+    const value = next(viewMonth);
+    if (month === undefined) setInnerMonth(value);
+    onMonthChange?.(value);
+  };
   const selectTimer = useRef<number | null>(null);
   useEffect(() => {
     return () => {

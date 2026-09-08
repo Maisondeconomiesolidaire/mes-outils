@@ -72,6 +72,18 @@ export const assignableWorkers = query({ args: {}, handler: async (ctx) => {
   return withHours.sort((a, b) => a.name.localeCompare(b.name, "fr"));
 } });
 
+/**
+ * Partage (ou retire) l'évènement dans l'espace partagé de Mes Outils.
+ *
+ * Rien n'est recopié : Mes Outils lit le calendrier Recyclerie. Un évènement
+ * modifié ici l'est donc partout, et il ne peut pas exister deux versions.
+ */
+export const setShared = mutation({ args: { id: v.id("recycappCalendarEvents"), shared: v.boolean() }, handler: async (ctx, args) => {
+  await requireCrmPermission(ctx, "calendrier", "update");
+  if (!await ctx.db.get(args.id)) throw new Error("Évènement introuvable.");
+  await ctx.db.patch(args.id, { sharedInMesOutils: args.shared });
+} });
+
 /** Réattribue l'évènement à une nouvelle liste de salariés. */
 export const setWorkers = mutation({ args: { id: v.id("recycappCalendarEvents"), workerIds: v.array(v.id("polyvalentWorkers")) }, handler: async (ctx, args) => {
   await requireCrmPermission(ctx, "calendrier", "update");
