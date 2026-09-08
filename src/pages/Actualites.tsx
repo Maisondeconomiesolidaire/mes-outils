@@ -36,6 +36,14 @@ import { usePermissionsAccess } from "../components/RequirePermission";
 import { Button } from "../components/ui/Button";
 import { CalendarBoard } from "../components/ui/CalendarBoard";
 import { DateRangePicker } from "../components/ui/DateRangePicker";
+import { DateTimePicker } from "../components/ui/DateTimePicker";
+import { AttachmentUpload, type Attachment } from "../components/ui/AttachmentUpload";
+import {
+  EVENT_OPTION_LABELS,
+  EventOptionSelect,
+  type EventOptionField,
+} from "../components/EventOptionSelect";
+import { EventWorkerPicker } from "../components/EventWorkerPicker";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
@@ -771,8 +779,38 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
   const removeEvent = useMutation(api.community.removeEvent);
   const generatePost = useAction(api.community.generateEventPost);
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ title: "", description: "", location: "", start: null as number | null, end: null as number | null });
+  const [form, setForm] = useState({
+    title: "",
+    description: "",
+    location: "",
+    relatedEvent: "",
+    organizer: "",
+    animationType: "",
+    structure: "",
+    activity: "",
+    targetAudience: "",
+    urls: "",
+    start: null as number | null,
+    end: null as number | null,
+  });
   const [images, setImages] = useState<Id<"_storage">[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [workerIds, setWorkerIds] = useState<Id<"polyvalentWorkers">[]>([]);
+  const customOptions = useQuery(api.community.eventOptions, open ? {} : "skip");
+  const optionsByField = useMemo(() => {
+    const map: Record<EventOptionField, string[]> = {
+      animationType: [],
+      structure: [],
+      activity: [],
+      targetAudience: [],
+    };
+    for (const option of customOptions ?? []) {
+      if (option.field in map) map[option.field as EventOptionField].push(option.label);
+    }
+    return map;
+  }, [customOptions]);
+  const eventHours =
+    form.start && form.end ? Math.max(0, form.end - form.start) / 3_600_000 : 0;
   const [saving, setSaving] = useState(false);
   const [aiContext, setAiContext] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -805,12 +843,39 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
         title: form.title,
         description: form.description || undefined,
         location: form.location || undefined,
+        relatedEvent: form.relatedEvent || undefined,
+        organizer: form.organizer || undefined,
+        animationType: form.animationType || undefined,
+        structure: form.structure || undefined,
+        activity: form.activity || undefined,
+        targetAudience: form.targetAudience || undefined,
         start: form.start ?? undefined,
         end: form.end ?? undefined,
         images,
+        attachments: attachments.map((item) => item.storageId),
+        urls: form.urls
+          .split(/\n|,/)
+          .map((url) => url.trim())
+          .filter(Boolean),
+        workerIds,
       });
-      setForm({ title: "", description: "", location: "", start: null, end: null });
+      setForm({
+        title: "",
+        description: "",
+        location: "",
+        relatedEvent: "",
+        organizer: "",
+        animationType: "",
+        structure: "",
+        activity: "",
+        targetAudience: "",
+        urls: "",
+        start: null,
+        end: null,
+      });
       setImages([]);
+      setAttachments([]);
+      setWorkerIds([]);
       setAiContext("");
       setAiError(null);
       setOpen(false);
@@ -906,16 +971,52 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
           </div>
 
           <Field label="Titre" required><Input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} /></Field>
-          <Field label="Lieu"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
-          <Field label="Période" hint="Optionnel : laissez vide pour un événement sans date précise.">
-            <DateRangePicker
-              value={{ start: form.start, end: form.end }}
-              onChange={(range) => setForm({ ...form, start: range.start, end: range.end })}
-              placeholder="Date et horaires"
-            />
+
+          {/* Mêmes champs que le calendrier de la Recyclerie, avec le même
+              vocabulaire : les deux se lisent côte à côte dans le calendrier. */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {EVENT_OPTION_LABELS.map(([key, label]) => (
+              <Field key={key} label={label}>
+                <EventOptionSelect
+                  field={key}
+                  value={form[key]}
+                  onChange={(value) => setForm((current) => ({ ...current, [key]: value }))}
+                  extraOptions={optionsByField[key]}
+                  canCreateOption={canCreate}
+                />
+              </Field>
+            ))}
+            <Field label="Où ?"><Input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
+            <Field label="Évènement rattaché"><Input value={form.relatedEvent} onChange={(e) => setForm({ ...form, relatedEvent: e.target.value })} /></Field>
+            <Field label="Référent / organisateur"><Input value={form.organizer} onChange={(e) => setForm({ ...form, organizer: e.target.value })} /></Field>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Date et heure de début" hint="Optionnel : laissez vide pour un événement sans date précise.">
+              <DateTimePicker
+                value={form.start}
+                onChange={(value) => setForm((current) => ({ ...current, start: value }))}
+                placeholder="Choisir le début"
+              />
+            </Field>
+            <Field label="Date et heure de fin">
+              <DateTimePicker
+                value={form.end}
+                onChange={(value) => setForm((current) => ({ ...current, end: value }))}
+                placeholder="Choisir la fin"
+              />
+            </Field>
+          </div>
+
+          <Field label="Salariés mobilisés">
+            <EventWorkerPicker value={workerIds} onChange={setWorkerIds} eventHours={eventHours} />
           </Field>
           <Field label="Description"><Textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></Field>
           <Field label="Photos"><PhotoUpload value={images} onChange={setImages} /></Field>
+          <Field label="Pièces jointes"><AttachmentUpload items={attachments} onChange={setAttachments} /></Field>
+          <Field label="URLs" hint="Une URL par ligne.">
+            <Textarea value={form.urls} onChange={(e) => setForm({ ...form, urls: e.target.value })} placeholder="https://…" />
+          </Field>
           <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
             <Button variant="ghost" onClick={() => setOpen(false)}>Annuler</Button>
             <Button onClick={save} disabled={saving || !form.title.trim()}>
@@ -964,6 +1065,8 @@ type CalendarItem = {
   relatedEvent?: string;
   targetAudience?: string;
   organizer?: string;
+  urls?: string[];
+  attachmentUrls?: string[];
   canManage: boolean;
 };
 
@@ -1044,6 +1147,50 @@ function CalendarEventDetail({
               </div>
             ))}
           </dl>
+        ) : null}
+
+        {event.attachmentUrls && event.attachmentUrls.length > 0 ? (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+              Pièces jointes
+            </p>
+            <ul className="space-y-1.5">
+              {event.attachmentUrls.map((url, index) => (
+                <li key={url}>
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-sm font-medium text-brand-600 underline underline-offset-2"
+                  >
+                    Ouvrir la pièce jointe {index + 1}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {event.urls && event.urls.length > 0 ? (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+              Liens utiles
+            </p>
+            <ul className="space-y-1.5">
+              {event.urls.map((url) => (
+                <li key={url}>
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="break-all text-sm font-medium text-brand-600 underline underline-offset-2"
+                  >
+                    {url}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
 
         <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">

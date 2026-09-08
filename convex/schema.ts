@@ -1646,6 +1646,20 @@ export default defineSchema(
     start: v.optional(v.number()),
     end: v.optional(v.number()),
     images: v.array(v.id("_storage")),
+    /**
+     * Champs communs avec le calendrier de la Recyclerie
+     * (`recycappCalendarEvents`) : les deux calendriers se lisent côte à côte
+     * dans l'espace partagé, ils décrivent donc un évènement de la même façon.
+     */
+    animationType: v.optional(v.string()),
+    structure: v.optional(v.string()),
+    activity: v.optional(v.string()),
+    relatedEvent: v.optional(v.string()),
+    targetAudience: v.optional(v.string()),
+    organizer: v.optional(v.string()),
+    workerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
+    attachments: v.optional(v.array(v.id("_storage"))),
+    urls: v.optional(v.array(v.string())),
     createdAt: v.number(),
   })
     .index("by_authorClerkId", ["authorClerkId"])

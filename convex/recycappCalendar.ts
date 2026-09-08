@@ -57,6 +57,15 @@ export const create = mutation({ args: { title: v.string(), animationType: v.opt
  */
 export const assignableWorkers = query({ args: {}, handler: async (ctx) => {
   await requireCrmPermission(ctx, "calendrier", "read");
+  return await assignableWorkerList(ctx);
+} });
+
+/**
+ * Équipe attribuable, sans contrôle de permission : l'appelant fait le sien.
+ * Partagée avec l'espace partagé de Mes Outils, qui propose le même champ
+ * « Salariés mobilisés » sous sa propre clé de permission.
+ */
+export async function assignableWorkerList(ctx: QueryCtx) {
   const workers = await ctx.db.query("polyvalentWorkers").take(1000);
   const active = workers.filter((worker) => worker.activeOverride ?? worker.active ?? true);
   const withHours = await Promise.all(active.map(async (worker) => ({
@@ -70,7 +79,7 @@ export const assignableWorkers = query({ args: {}, handler: async (ctx) => {
     weeklyHours: await weeklyHours(ctx, worker),
   })));
   return withHours.sort((a, b) => a.name.localeCompare(b.name, "fr"));
-} });
+}
 
 /**
  * Partage (ou retire) l'évènement dans l'espace partagé de Mes Outils.
