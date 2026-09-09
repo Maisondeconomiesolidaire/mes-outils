@@ -47,6 +47,7 @@ import {
 } from "../components/EventOptionSelect";
 import { EventWorkerPicker } from "../components/EventWorkerPicker";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Checkbox } from "../components/ui/Checkbox";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { MediaUpload } from "../components/ui/MediaUpload";
@@ -1311,6 +1312,13 @@ function FacebookPublishDialog({
 }) {
   const pages = useQuery(api.social.listPages, {});
   const publish = useAction(api.social.publishEvent);
+  const { user } = useUser();
+  // Facebook attribue toujours un post de Page à la Page : le nom de la
+  // personne ne peut apparaître que dans le texte, en signature.
+  const authorName =
+    user?.fullName?.trim() ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+  const [signed, setSigned] = useState(true);
   const [pageId, setPageId] = useState("");
   const [title, setTitle] = useState(event.title);
   const [body, setBody] = useState(() => defaultFacebookBody(event));
@@ -1329,7 +1337,10 @@ function FacebookPublishDialog({
   }, [pages]);
 
   const pageName = pages?.find((page) => page.pageId === pageId)?.name;
-  const message = [title.trim(), body.trim()].filter(Boolean).join("\n\n");
+  const signature = signed && authorName ? `Publié par ${authorName}` : "";
+  const message = [title.trim(), body.trim(), signature]
+    .filter(Boolean)
+    .join("\n\n");
   const allPhotos = [...photos, ...extraPhotos];
   const ready =
     Boolean(pageId) &&
@@ -1437,6 +1448,15 @@ function FacebookPublishDialog({
               })}
             </div>
           </Field>
+        ) : null}
+
+        {authorName ? (
+          <Checkbox
+            checked={signed}
+            onChange={setSigned}
+            label={`Signer « Publié par ${authorName} »`}
+            description="Facebook signe le post du nom de la Page : votre nom n'apparaît que si vous l'ajoutez au texte."
+          />
         ) : null}
 
         <Field label="Ajouter des photos" hint="Elles n'appartiennent qu'à la publication.">
