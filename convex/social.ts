@@ -10,7 +10,13 @@
  * backend : le navigateur ne reçoit que l'identifiant et le nom des Pages.
  */
 import { v } from "convex/values";
-import { action, internalMutation, internalQuery, query } from "./_generated/server";
+import {
+  action,
+  internalAction,
+  internalMutation,
+  internalQuery,
+  query,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { formatUserName, requireCrmPermission, requireUser } from "./lib";
@@ -345,5 +351,132 @@ export const upsertPage = internalMutation({
       active: args.active ?? true,
       createdAt: Date.now(),
     });
+  },
+});
+
+/* ─── Publications supprimées côté Facebook ───────────────────────────────── */
+
+export const recordedPosts = internalQuery({
+  args: {
+    /** Restreint la vérification aux publications d'un évènement. */
+    eventId: v.optional(v.id("events")),
+    recycappEventId: v.optional(v.id("recycappCalendarEvents")),
+  },
+  handler: async (ctx, args) => {
+    const [all, pages] = await Promise.all([
+      ctx.db.query("socialFacebookPosts").collect(),
+      ctx.db.query("socialFacebookPages").collect(),
+    ]);
+    const posts =
+      args.eventId || args.recycappEventId
+        ? all.filter(
+            (post) =>
+              (args.eventId && post.eventId === args.eventId) ||
+              (args.recycappEventId && post.recycappEventId === args.recycappEventId),
+          )
+        : all;
+    const tokenByPage = new Map(pages.map((page) => [page.pageId, page.accessToken]));
+    return posts
+      .map((post) => ({
+        id: post._id,
+        postId: post.postId,
+        accessToken: tokenByPage.get(post.pageId),
+      }))
+      // Une Page retirée de la configuration n'a plus de jeton : sans lui, on ne
+      // peut rien vérifier, et supprimer la ligne serait une conclusion hâtive.
+      .filter((post): post is { id: Id<"socialFacebookPosts">; postId: string; accessToken: string } =>
+        Boolean(post.accessToken),
+      );
+  },
+});
+
+export const forgetPost = internalMutation({
+  args: { id: v.id("socialFacebookPosts") },
+  handler: async (ctx, { id }) => {
+    await ctx.db.delete(id);
+  },
+});
+
+/**
+ * Retire les publications qui n'existent plus sur Facebook.
+ *
+ * Une publication supprimée depuis Facebook ou Meta Business Suite — ou une
+ * programmation annulée — laissait une ligne « Publié le… » sur la fiche de
+ * l'évènement, qui affirmait une annonce qui n'existe plus.
+ *
+ * Seule l'erreur « objet introuvable » fait oublier la ligne : un jeton devenu
+ * invalide (code 190) ou une panne réseau ne prouvent rien, et effacer sur ce
+ * signal-là effacerait tout l'historique le jour d'un incident.
+ */
+export const reconcilePosts = internalAction({
+  args: {
+    eventId: v.optional(v.id("events")),
+    recycappEventId: v.optional(v.id("recycappCalendarEvents")),
+  },
+  handler: async (ctx, args) => {
+    const posts: Array<{
+      id: Id<"socialFacebookPosts">;
+      postId: string;
+      accessToken: string;
+    }> = await ctx.runQuery(internal.social.recordedPosts, {
+      eventId: args.eventId,
+      recycappEventId: args.recycappEventId,
+    });
+
+    let forgotten = 0;
+    for (const post of posts) {
+      try {
+        const response = await fetch(
+          `https://graph.facebook.com/${GRAPH_VERSION}/${post.postId}` +
+            `?fields=id&access_token=${encodeURIComponent(post.accessToken)}`,
+        );
+        const result = (await response.json()) as {
+          id?: string;
+          error?: { code?: number; error_subcode?: number };
+        };
+        if (result.id) continue;
+        const code = result.error?.code;
+        if (code === 100 || code === 803) {
+          await ctx.runMutation(internal.social.forgetPost, { id: post.id });
+          forgotten += 1;
+        }
+      } catch (error) {
+        // Réseau indisponible : on retentera à la prochaine passe.
+        console.warn(
+          `Vérification publication ${post.postId} impossible :`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    return { checked: posts.length, forgotten };
+  },
+});
+
+/**
+ * Vérifie les publications d'un seul évènement, à l'ouverture de sa fiche.
+ *
+ * La repasse horaire suffit à tenir la liste à jour, mais pas à ce qu'on voie
+ * juste après avoir supprimé un post depuis Facebook : cet appel comble
+ * l'attente sans rien changer à la logique.
+ */
+export const verifyEventPosts = action({
+  args: {
+    eventId: v.optional(v.id("events")),
+    recycappEventId: v.optional(v.id("recycappCalendarEvents")),
+  },
+  handler: async (ctx, args): Promise<{ checked: number; forgotten: number }> => {
+    await ctx.runQuery(internal.social.assertCanRead, {});
+    return await ctx.runAction(internal.social.reconcilePosts, {
+      eventId: args.eventId,
+      recycappEventId: args.recycappEventId,
+    });
+  },
+});
+
+export const assertCanRead = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    return true;
   },
 });

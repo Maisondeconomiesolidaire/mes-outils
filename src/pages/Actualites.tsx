@@ -1096,6 +1096,7 @@ function CalendarEventDetail({
 }) {
   const [facebookOpen, setFacebookOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const verifyPosts = useAction(api.social.verifyEventPosts);
   const posts = useQuery(
     api.social.postsForEvent,
     event
@@ -1104,6 +1105,20 @@ function CalendarEventDetail({
         : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }
       : "skip",
   );
+  const eventKey = event?.id;
+  const eventKind = event?.kind;
+  const mesoutilsEventId = event?.eventId;
+  useEffect(() => {
+    if (!eventKey) return;
+    // Une publication supprimée depuis Facebook doit disparaître d'ici : la
+    // repasse horaire s'en charge, cet appel évite d'attendre jusque-là.
+    void verifyPosts(
+      eventKind === "mesoutils"
+        ? { eventId: mesoutilsEventId as Id<"events"> }
+        : { recycappEventId: eventKey as Id<"recycappCalendarEvents"> },
+    ).catch(() => undefined);
+  }, [eventKey, eventKind, mesoutilsEventId, verifyPosts]);
+
   if (!event) return null;
   const details = (
     [

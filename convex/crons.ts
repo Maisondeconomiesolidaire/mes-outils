@@ -70,4 +70,14 @@ crons.hourly(
   internal.klydeGmail.syncAll,
 );
 
+// Publications Facebook émises depuis Mes Outils : une publication supprimée
+// côté Facebook doit disparaître de la fiche de l'évènement. Facebook ne nous
+// prévient pas — on repasse donc toutes les heures.
+crons.hourly(
+  "verification publications facebook",
+  { minuteUTC: 25 },
+  internal.social.reconcilePosts,
+  {},
+);
+
 export default crons;
