@@ -69,6 +69,7 @@ export const postsForEvent = query({
     return posts
       .map((post) => ({
         id: post._id,
+        network: post.network ?? ("facebook" as const),
         pageName: post.pageName,
         postId: post.postId,
         scheduledFor: post.scheduledFor,
@@ -86,13 +87,19 @@ export const eventPayload = internalQuery({
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
     pageId: v.string(),
+    /** Instagram publie via ses propres comptes : pas de Page à résoudre. */
+    skipPage: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const page = await ctx.db
-      .query("socialFacebookPages")
-      .withIndex("by_pageId", (q) => q.eq("pageId", args.pageId))
-      .unique();
-    if (!page || !page.active) throw new Error("Page Facebook inconnue ou désactivée.");
+    const page = args.skipPage
+      ? { pageId: "", name: "", accessToken: "" }
+      : await ctx.db
+          .query("socialFacebookPages")
+          .withIndex("by_pageId", (q) => q.eq("pageId", args.pageId))
+          .unique();
+    if (!page || ("active" in page && !page.active)) {
+      throw new Error("Page Facebook inconnue ou désactivée.");
+    }
 
     if (args.eventId) {
       const event = await ctx.db.get(args.eventId);
@@ -138,6 +145,7 @@ export const recordPost = internalMutation({
   args: {
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
+    network: v.optional(v.union(v.literal("facebook"), v.literal("instagram"))),
     pageId: v.string(),
     pageName: v.string(),
     postId: v.string(),
@@ -367,7 +375,7 @@ export const recordedPosts = internalQuery({
       ctx.db.query("socialFacebookPosts").collect(),
       ctx.db.query("socialFacebookPages").collect(),
     ]);
-    const posts =
+    const scoped =
       args.eventId || args.recycappEventId
         ? all.filter(
             (post) =>
@@ -375,6 +383,9 @@ export const recordedPosts = internalQuery({
               (args.recycappEventId && post.recycappEventId === args.recycappEventId),
           )
         : all;
+    // Instagram n'expose pas de liste comparable : ses publications ne sont pas
+    // vérifiées, plutôt que jugées disparues faute de pouvoir les retrouver.
+    const posts = scoped.filter((post) => (post.network ?? "facebook") === "facebook");
     const tokenByPage = new Map(pages.map((page) => [page.pageId, page.accessToken]));
     return posts
       .map((post) => ({
@@ -528,5 +539,261 @@ export const assertCanRead = internalQuery({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     return true;
+  },
+});
+
+/* ─── Instagram ───────────────────────────────────────────────────────────── */
+
+/**
+ * Comptes Instagram publiables.
+ *
+ * Un compte Instagram ne se publie qu'à travers la Page Facebook qui le porte,
+ * avec le jeton de cette Page : la liste vient donc des Pages configurées, et
+ * seules celles dont le rattachement est connu y figurent.
+ */
+export const listInstagramAccounts = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "publish");
+    const pages = await ctx.db.query("socialFacebookPages").collect();
+    return pages
+      .filter((page) => page.active && page.instagramId)
+      .map((page) => ({
+        instagramId: page.instagramId!,
+        username: page.instagramUsername ?? page.name,
+        pageName: page.name,
+      }))
+      .sort((a, b) => a.username.localeCompare(b.username, "fr"));
+  },
+});
+
+export const instagramTargets = internalQuery({
+  args: { instagramIds: v.array(v.string()) },
+  handler: async (ctx, { instagramIds }) => {
+    const pages = await ctx.db.query("socialFacebookPages").collect();
+    return pages
+      .filter((page) => page.instagramId && instagramIds.includes(page.instagramId))
+      .map((page) => ({
+        instagramId: page.instagramId!,
+        username: page.instagramUsername ?? page.name,
+        accessToken: page.accessToken,
+      }));
+  },
+});
+
+export const setInstagramAccount = internalMutation({
+  args: {
+    pageId: v.string(),
+    instagramId: v.optional(v.string()),
+    instagramUsername: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("socialFacebookPages")
+      .withIndex("by_pageId", (q) => q.eq("pageId", args.pageId))
+      .unique();
+    if (!page) return;
+    await ctx.db.patch(page._id, {
+      instagramId: args.instagramId,
+      instagramUsername: args.instagramUsername,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/**
+ * Redécouvre les comptes Instagram rattachés aux Pages.
+ *
+ * Le rattachement se fait dans les réglages de la Page, hors de Mes Outils :
+ * cette passe le constate plutôt que de le demander à quelqu'un de saisir.
+ */
+export const refreshInstagramAccounts = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ pages: number; linked: number }> => {
+    const pages: Array<{ pageId: string; accessToken: string }> = await ctx.runQuery(
+      internal.social.pageTokens,
+      {},
+    );
+    let linked = 0;
+    for (const page of pages) {
+      try {
+        const response = await fetch(
+          `https://graph.facebook.com/${GRAPH_VERSION}/${page.pageId}` +
+            `?fields=instagram_business_account{id,username}` +
+            `&access_token=${encodeURIComponent(page.accessToken)}`,
+        );
+        const result = (await response.json()) as {
+          instagram_business_account?: { id: string; username?: string };
+        };
+        const account = result.instagram_business_account;
+        await ctx.runMutation(internal.social.setInstagramAccount, {
+          pageId: page.pageId,
+          instagramId: account?.id,
+          instagramUsername: account?.username,
+        });
+        if (account?.id) linked += 1;
+      } catch (error) {
+        console.warn(
+          `Compte Instagram de la Page ${page.pageId} illisible :`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+    return { pages: pages.length, linked };
+  },
+});
+
+export const pageTokens = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const pages = await ctx.db.query("socialFacebookPages").collect();
+    return pages
+      .filter((page) => page.active)
+      .map((page) => ({ pageId: page.pageId, accessToken: page.accessToken }));
+  },
+});
+
+/**
+ * Publie un évènement sur un ou plusieurs comptes Instagram.
+ *
+ * Instagram exige au moins une image — un post texte n'y existe pas — et
+ * publie en deux temps : on dépose d'abord un conteneur, on le publie ensuite.
+ * L'API ne connaît pas la programmation, contrairement à Facebook : la
+ * publication part immédiatement.
+ *
+ * Un compte en échec n'interrompt pas les autres : le rapport dit ce qui est
+ * passé et ce qui a échoué, plutôt que de tout annuler sur un refus.
+ */
+export const publishEventToInstagram = action({
+  args: {
+    eventId: v.optional(v.id("events")),
+    recycappEventId: v.optional(v.id("recycappCalendarEvents")),
+    instagramIds: v.array(v.string()),
+    message: v.optional(v.string()),
+    photoStorageIds: v.array(v.id("_storage")),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ published: string[]; failed: Array<{ account: string; reason: string }> }> => {
+    const author: { clerkId: string; name: string } = await ctx.runQuery(
+      internal.social.assertCanPublish,
+      {},
+    );
+    if (args.instagramIds.length === 0) throw new Error("Choisissez au moins un compte.");
+    if (args.photoStorageIds.length === 0) {
+      throw new Error("Instagram exige au moins une photo : un post texte n'y existe pas.");
+    }
+
+    const photoUrls = (
+      await Promise.all(
+        args.photoStorageIds.map((id) => ctx.storage.getUrl(id as Id<"_storage">)),
+      )
+    ).filter((url): url is string => Boolean(url));
+    if (photoUrls.length === 0) throw new Error("Photos introuvables.");
+
+    const targets: Array<{ instagramId: string; username: string; accessToken: string }> =
+      await ctx.runQuery(internal.social.instagramTargets, {
+        instagramIds: args.instagramIds,
+      });
+
+    const payload = await ctx.runQuery(internal.social.eventPayload, {
+      eventId: args.eventId,
+      recycappEventId: args.recycappEventId,
+      pageId: "",
+      skipPage: true,
+    });
+    const caption = args.message?.trim() || buildMessage(payload.event);
+
+    const call = async (path: string, params: URLSearchParams) => {
+      const response = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}`, {
+        method: "POST",
+        body: params,
+      });
+      const result = (await response.json()) as {
+        id?: string;
+        error?: { message?: string };
+      };
+      if (!response.ok || result.error || !result.id) {
+        throw new Error(result.error?.message ?? `HTTP ${response.status}`);
+      }
+      return result.id;
+    };
+
+    const published: string[] = [];
+    const failed: Array<{ account: string; reason: string }> = [];
+
+    for (const target of targets) {
+      try {
+        let containerId: string;
+        if (photoUrls.length === 1) {
+          containerId = await call(
+            `${target.instagramId}/media`,
+            new URLSearchParams({
+              access_token: target.accessToken,
+              image_url: photoUrls[0],
+              caption,
+            }),
+          );
+        } else {
+          // Carrousel : chaque image devient un élément, puis un conteneur les
+          // rassemble. Instagram en accepte dix au plus.
+          const children: string[] = [];
+          for (const url of photoUrls.slice(0, 10)) {
+            children.push(
+              await call(
+                `${target.instagramId}/media`,
+                new URLSearchParams({
+                  access_token: target.accessToken,
+                  image_url: url,
+                  is_carousel_item: "true",
+                }),
+              ),
+            );
+          }
+          containerId = await call(
+            `${target.instagramId}/media`,
+            new URLSearchParams({
+              access_token: target.accessToken,
+              media_type: "CAROUSEL",
+              children: children.join(","),
+              caption,
+            }),
+          );
+        }
+
+        const postId = await call(
+          `${target.instagramId}/media_publish`,
+          new URLSearchParams({
+            access_token: target.accessToken,
+            creation_id: containerId,
+          }),
+        );
+
+        await ctx.runMutation(internal.social.recordPost, {
+          eventId: args.eventId,
+          recycappEventId: args.recycappEventId,
+          network: "instagram",
+          pageId: target.instagramId,
+          pageName: `@${target.username}`,
+          postId,
+          message: caption,
+          withPhoto: true,
+          authorClerkId: author.clerkId,
+          authorName: author.name,
+        });
+        published.push(`@${target.username}`);
+      } catch (error) {
+        failed.push({
+          account: `@${target.username}`,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    if (published.length === 0 && failed.length > 0) {
+      throw new Error(`Instagram a refusé la publication : ${failed[0].reason}`);
+    }
+    return { published, failed };
   },
 });

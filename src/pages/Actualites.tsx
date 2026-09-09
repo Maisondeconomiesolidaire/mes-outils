@@ -32,6 +32,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
 import { FacebookIcon } from "../components/icons/FacebookIcon";
+import { InstagramIcon } from "../components/icons/InstagramIcon";
 import { SectionHeader } from "../components/SectionHeader";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { usePermissionsAccess } from "../components/RequirePermission";
@@ -1096,6 +1097,7 @@ function CalendarEventDetail({
   canPublish: boolean;
 }) {
   const [facebookOpen, setFacebookOpen] = useState(false);
+  const [instagramOpen, setInstagramOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const verifyPosts = useAction(api.social.verifyEventPosts);
   const posts = useQuery(
@@ -1245,13 +1247,17 @@ function CalendarEventDetail({
             <ul className="space-y-2 text-sm">
               {posts.map((post) => (
                 <li key={post.id} className="flex items-start gap-2">
-                  <FacebookIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#1877F2]" />
+                  {post.network === "instagram" ? (
+                    <InstagramIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#E1306C]" />
+                  ) : (
+                    <FacebookIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#1877F2]" />
+                  )}
                   <span className="text-[var(--foreground)]">
                     {/* Une publication programmée n'est pas encore parue : le
                         dire évite de croire l'évènement déjà annoncé. */}
                     {post.scheduledFor
-                      ? `Publication programmée sur Facebook (${post.pageName}) pour le ${formatDateTime(post.scheduledFor)} par ${post.authorName}`
-                      : `Publié sur Facebook (${post.pageName}) le ${formatDateTime(post.createdAt)} par ${post.authorName}`}
+                      ? `Publication programmée sur ${post.network === "instagram" ? "Instagram" : "Facebook"} (${post.pageName}) pour le ${formatDateTime(post.scheduledFor)} par ${post.authorName}`
+                      : `Publié sur ${post.network === "instagram" ? "Instagram" : "Facebook"} (${post.pageName}) le ${formatDateTime(post.createdAt)} par ${post.authorName}`}
                   </span>
                 </li>
               ))}
@@ -1263,9 +1269,14 @@ function CalendarEventDetail({
           <p className="text-sm text-[var(--muted-foreground)]">Proposé par {event.authorName}</p>
           <div className="flex gap-2">
             {canPublish ? (
-              <Button variant="secondary" size="sm" onClick={() => setFacebookOpen(true)}>
-                <FacebookIcon className="h-4 w-4 text-[#1877F2]" /> Publier sur Facebook
-              </Button>
+              <>
+                <Button variant="secondary" size="sm" onClick={() => setFacebookOpen(true)}>
+                  <FacebookIcon className="h-4 w-4 text-[#1877F2]" /> Publier sur Facebook
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setInstagramOpen(true)}>
+                  <InstagramIcon className="h-4 w-4 text-[#E1306C]" /> Publier sur Instagram
+                </Button>
+              </>
             ) : null}
             {/* Un évènement de la Recyclerie se modifie dans Recycapp : le
                 dupliquer ici ferait exister deux versions du même évènement. */}
@@ -1283,6 +1294,14 @@ function CalendarEventDetail({
         <FacebookPublishDialog
           event={event}
           onClose={() => setFacebookOpen(false)}
+          onPublished={setNotice}
+        />
+      ) : null}
+
+      {instagramOpen ? (
+        <InstagramPublishDialog
+          event={event}
+          onClose={() => setInstagramOpen(false)}
           onPublished={setNotice}
         />
       ) : null}
@@ -1523,6 +1542,225 @@ function FacebookPublishDialog({
                 : mode === "scheduled"
                   ? "Programmer la publication"
                   : "Publier maintenant"}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+
+/**
+ * Publication d'un évènement sur un ou plusieurs comptes Instagram.
+ *
+ * Instagram diffère de Facebook sur deux points qui se voient ici : une photo
+ * est obligatoire — un post texte n'existe pas — et l'API ne sait pas
+ * programmer, la publication part donc immédiatement.
+ */
+function InstagramPublishDialog({
+  event,
+  onClose,
+  onPublished,
+}: {
+  event: CalendarItem;
+  onClose: () => void;
+  onPublished: (message: string) => void;
+}) {
+  const accounts = useQuery(api.social.listInstagramAccounts, {});
+  const publish = useAction(api.social.publishEventToInstagram);
+  const { user } = useUser();
+  const authorName =
+    user?.fullName?.trim() ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
+  const [selected, setSelected] = useState<string[]>([]);
+  const [signed, setSigned] = useState(true);
+  const [caption, setCaption] = useState(() =>
+    [event.title, defaultFacebookBody(event)].filter(Boolean).join("\n\n"),
+  );
+  const [photos, setPhotos] = useState<Id<"_storage">[]>(event.imageIds ?? []);
+  const [extraPhotos, setExtraPhotos] = useState<Id<"_storage">[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const allPhotos = [...photos, ...extraPhotos];
+  const signature = signed && authorName ? `Publié par ${authorName}` : "";
+  const message = [caption.trim(), signature].filter(Boolean).join("\n\n");
+  const ready = selected.length > 0 && allPhotos.length > 0 && Boolean(message);
+
+  function toggleAccount(id: string) {
+    setSelected((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+    );
+  }
+
+  async function submit() {
+    if (!ready) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await publish({
+        ...(event.kind === "mesoutils"
+          ? { eventId: event.eventId as Id<"events"> }
+          : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }),
+        instagramIds: selected,
+        message,
+        photoStorageIds: allPhotos,
+      });
+      // Un compte en échec n'annule pas les autres : on dit ce qui est passé.
+      onPublished(
+        result.failed.length > 0
+          ? `Publié sur ${result.published.join(", ")}. Échec sur ${result.failed
+              .map((item) => item.account)
+              .join(", ")}.`
+          : `Publié sur ${result.published.join(", ")}.`,
+      );
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Publication impossible.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Publier sur Instagram">
+      <div className="grid gap-4">
+        {accounts === undefined ? (
+          <p className="text-sm text-[var(--muted-foreground)]">Chargement des comptes…</p>
+        ) : accounts.length === 0 ? (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+            Aucun compte Instagram n'est rattaché à vos Pages. Un compte doit être
+            professionnel et lié à sa Page Facebook pour pouvoir être publié depuis ici.
+          </p>
+        ) : (
+          <Field label="Comptes Instagram" required hint="Plusieurs comptes possibles.">
+            <div className="grid gap-2">
+              {accounts.map((account) => {
+                const checked = selected.includes(account.instagramId);
+                return (
+                  <button
+                    key={account.instagramId}
+                    type="button"
+                    role="checkbox"
+                    aria-checked={checked}
+                    onClick={() => toggleAccount(account.instagramId)}
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition",
+                      checked
+                        ? "border-brand-500 bg-brand-50 dark:bg-brand-500/10"
+                        : "border-[var(--border)] bg-[var(--card)] hover:border-brand-400",
+                    )}
+                  >
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+                        checked
+                          ? "border-brand-500 bg-brand-500 text-white"
+                          : "border-[var(--border)] bg-[var(--input)]",
+                      )}
+                    >
+                      {checked ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : null}
+                    </span>
+                    <InstagramIcon className="h-4 w-4 shrink-0 text-[#E1306C]" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium text-[var(--foreground)]">
+                        @{account.username}
+                      </span>
+                      <span className="block truncate text-xs text-[var(--muted-foreground)]">
+                        via {account.pageName}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        )}
+
+        <Field label="Légende" required>
+          <Textarea
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            className="min-h-[160px]"
+            placeholder="Le texte de la publication…"
+          />
+        </Field>
+
+        {authorName ? (
+          <Checkbox
+            checked={signed}
+            onChange={setSigned}
+            label={`Signer « Publié par ${authorName} »`}
+          />
+        ) : null}
+
+        {event.imageUrls.length > 0 && (event.imageIds?.length ?? 0) > 0 ? (
+          <Field label="Photos de l'évènement" hint="Cliquez pour retirer ou remettre.">
+            <div className="flex flex-wrap gap-2">
+              {event.imageIds!.map((id, index) => {
+                const kept = photos.includes(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() =>
+                      setPhotos((current) =>
+                        current.includes(id)
+                          ? current.filter((value) => value !== id)
+                          : [...current, id],
+                      )
+                    }
+                    className={cn(
+                      "relative h-20 w-20 overflow-hidden rounded-xl border-2 transition",
+                      kept ? "border-brand-500" : "border-transparent opacity-40 hover:opacity-70",
+                    )}
+                  >
+                    <img src={event.imageUrls[index]} alt="" className="h-full w-full object-cover" />
+                    {kept ? (
+                      <span className="absolute right-1 top-1 rounded-full bg-brand-500 p-0.5 text-white">
+                        <Check className="h-3 w-3" />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        ) : null}
+
+        <Field
+          label="Ajouter des photos"
+          required={allPhotos.length === 0}
+          hint="Instagram exige au moins une photo. Dix au plus, en carrousel."
+        >
+          <PhotoUpload value={extraPhotos} onChange={setExtraPhotos} />
+        </Field>
+
+        {error ? (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+          <p className="text-xs text-[var(--muted-foreground)]">
+            {/* Dit d'emblée ce que Facebook permet et pas Instagram, plutôt que
+                de laisser chercher un bouton « Programmer » absent. */}
+            Instagram ne permet pas de programmer : la publication part maintenant.
+          </p>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
+              Annuler
+            </Button>
+            <Button onClick={() => void submit()} disabled={busy || !ready}>
+              {busy ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <InstagramIcon className="h-4 w-4" />
+              )}
+              {busy ? "Envoi…" : `Publier${selected.length > 1 ? ` (${selected.length})` : ""}`}
             </Button>
           </div>
         </div>

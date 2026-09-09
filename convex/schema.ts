@@ -1677,6 +1677,13 @@ export default defineSchema(
     name: v.string(),
     accessToken: v.string(),
     active: v.boolean(),
+    /**
+     * Compte Instagram professionnel rattaché à la Page. Instagram ne se
+     * publie qu'à travers la Page qui le porte : sans ce rattachement, le
+     * compte n'existe pas pour l'API.
+     */
+    instagramId: v.optional(v.string()),
+    instagramUsername: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.optional(v.number()),
   }).index("by_pageId", ["pageId"]),
@@ -1686,9 +1693,12 @@ export default defineSchema(
     eventId: v.optional(v.id("events")),
     /** Évènement du calendrier Recyclerie, quand la publication vient de là. */
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
+    /** Réseau de publication ; absent vaut Facebook (posts antérieurs). */
+    network: v.optional(v.union(v.literal("facebook"), v.literal("instagram"))),
+    /** Page Facebook, ou compte Instagram selon le réseau. */
     pageId: v.string(),
     pageName: v.string(),
-    /** Identifiant du post renvoyé par Facebook (`{pageId}_{postId}`). */
+    /** Identifiant du post renvoyé par le réseau. */
     postId: v.string(),
     message: v.string(),
     /** Date de publication programmée, absente pour une publication immédiate. */
