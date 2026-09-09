@@ -1,6 +1,6 @@
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, CheckCircle2, ChevronDown, ExternalLink, FileText, Loader2, Search, Sparkles, UserPlus, Users, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronDown, ExternalLink, FileText, Loader2, Lock, Search, Sparkles, UserPlus, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -111,7 +111,113 @@ function parseFrenchNumber(value: string) {
   return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
+/** Le déverrouillage vaut pour l'onglet, pas au-delà : fermer la page reverrouille. */
+const RH_UNLOCK_KEY = "mesoutils_rh_unlocked";
+
+function readUnlocked() {
+  try {
+    return window.sessionStorage.getItem(RH_UNLOCK_KEY) === "1";
+  } catch {
+    // Navigation privée ou stockage bloqué : on redemande le mot de passe.
+    return false;
+  }
+}
+
+/**
+ * Les Ressources humaines demandent un mot de passe en plus de la permission.
+ *
+ * Les fiches salariés et les contrats sont les données les plus sensibles de
+ * l'outil : ce second cran protège un poste resté ouvert. Le mot de passe est
+ * vérifié côté serveur — il n'est pas dans le code de l'app.
+ */
 export function RessourcesHumaines() {
+  const [unlocked, setUnlocked] = useState(readUnlocked);
+  if (!unlocked) return <RhPasswordGate onUnlocked={() => setUnlocked(true)} />;
+  return <RhWorkspace />;
+}
+
+function RhPasswordGate({ onUnlocked }: { onUnlocked: () => void }) {
+  const unlock = useMutation(api.rh.unlock);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    if (!password) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await unlock({ password });
+      if (!result.ok) {
+        setError("Mot de passe incorrect.");
+        setPassword("");
+        return;
+      }
+      try {
+        window.sessionStorage.setItem(RH_UNLOCK_KEY, "1");
+      } catch {
+        // Stockage indisponible : l'accès reste ouvert pour cette visite.
+      }
+      onUnlocked();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Vérification impossible.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader title="Ressources humaines" />
+      <div className="mx-auto w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm">
+        <div className="flex items-center gap-3">
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-50 text-brand-600 dark:bg-brand-500/15">
+            <Lock className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="text-base font-semibold text-[var(--foreground)]">Espace protégé</h2>
+            <p className="text-sm text-[var(--muted-foreground)]">
+              Saisissez le mot de passe des Ressources humaines.
+            </p>
+          </div>
+        </div>
+
+        <form
+          className="mt-5 space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submit();
+          }}
+        >
+          <Field label="Mot de passe">
+            <Input
+              autoFocus
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="••••••••"
+            />
+          </Field>
+          {error ? (
+            <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+              {error}
+            </p>
+          ) : null}
+          <Button type="submit" disabled={busy || !password} className="w-full">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+            {busy ? "Vérification..." : "Déverrouiller"}
+          </Button>
+        </form>
+
+        <p className="mt-4 text-xs text-[var(--muted-foreground)]">
+          Le mot de passe est redemandé à chaque nouvelle session du navigateur.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RhWorkspace() {
   const employees = useQuery(api.rh.listEmployees) as Employee[] | undefined;
   const contracts = useQuery(api.rh.listContracts) as ContractHistoryItem[] | undefined;
   const upsertEmployee = useMutation(api.rh.upsertEmployee);

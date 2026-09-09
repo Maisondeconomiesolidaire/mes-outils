@@ -343,6 +343,34 @@ async function fetchContractAttachment(
   }
 }
 
+/**
+ * Verrou supplémentaire de la page RH.
+ *
+ * Les fiches salariés et les contrats se consultent déjà sous permission ; ce
+ * mot de passe ajoute un second cran contre le regard par-dessus l'épaule,
+ * sur un poste laissé ouvert. Il vit dans les variables d'environnement du
+ * déploiement (`RH_ACCESS_PASSWORD`) et n'est jamais envoyé au navigateur :
+ * seule la réponse « oui » ou « non » l'est.
+ *
+ * Ce n'est pas une frontière de sécurité — les données restent protégées par
+ * la permission `mesoutils:rh`, qui reste la seule barrière qui compte.
+ */
+export const unlock = mutation({
+  args: { password: v.string() },
+  handler: async (ctx, { password }) => {
+    // Seul quelqu'un qui a déjà accès à la page peut tenter le mot de passe :
+    // la vérification n'est pas une porte ouverte à qui n'a rien à y faire.
+    await requireCrmPermission(ctx, RH_PAGE_KEY, "read");
+    const expected = process.env.RH_ACCESS_PASSWORD;
+    if (!expected) {
+      throw new Error(
+        "Mot de passe RH non configuré : posez RH_ACCESS_PASSWORD sur le déploiement Convex.",
+      );
+    }
+    return { ok: password === expected };
+  },
+});
+
 export const listEmployees = query({
   args: {},
   handler: async (ctx) => {
