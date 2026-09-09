@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Boxes, CalendarCheck, CarFront, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
+import { Boxes, CalendarCheck, CarFront, Check, ChevronDown, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -312,9 +312,28 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
         days={days}
         onDayClick={handleDayClick}
         onDayDoubleClick={handleDayDoubleClick}
+        timeControls={
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <FilterField label="Heure de début">
+                <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
+              </FilterField>
+              <FilterField label="Heure de fin">
+                <TimeSelect value={endTime} onChange={setEndTime} disabled={fullDay} />
+              </FilterField>
+            </div>
+            <div className="border-t border-[var(--border)] pt-3">
+              <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
+            </div>
+            {!rangeValid ? (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
+                L'heure de fin doit être après l'heure de début.
+              </p>
+            ) : null}
+          </div>
+        }
       >
-        {/* Créneau sélectionné : résumé + heures, volontairement dans le même
-            panneau que le calendrier pour montrer que les deux sont liés. */}
+        {/* Créneau sélectionné et filtres, sous le calendrier. */}
         <div className="space-y-4 border-t border-[var(--border)] pt-4">
           <div className="flex flex-wrap items-center gap-3">
             <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3.5 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
@@ -324,23 +343,6 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
             <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
               {durationDays} jour{durationDays > 1 ? "s" : ""}
             </span>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-3">
-            <FilterField label="Heure de début">
-              <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
-            </FilterField>
-            <FilterField label="Heure de fin">
-              <TimeSelect value={endTime} onChange={setEndTime} disabled={fullDay} />
-            </FilterField>
-            <div className="pb-2">
-              <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
-            </div>
-            {!rangeValid ? (
-              <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
-                L'heure de fin doit être après l'heure de début.
-              </p>
-            ) : null}
           </div>
 
           <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
@@ -528,17 +530,55 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
 }
 
 function TimeSelect({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
   return (
-    <div className={`flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 ${disabled ? "opacity-50" : ""}`}>
-      <Clock className="h-4 w-4 text-brand-600" />
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
         disabled={disabled}
-        className="bg-transparent text-sm font-semibold text-[var(--foreground)] outline-none"
+        onClick={() => setOpen((current) => !current)}
+        className="flex h-11 w-full items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-semibold text-[var(--foreground)] shadow-sm transition hover:border-brand-500/60 disabled:cursor-not-allowed disabled:opacity-50"
+        aria-haspopup="listbox"
+        aria-expanded={open}
       >
-        {TIME_OPTIONS.map((time) => <option key={time} value={time}>{time}</option>)}
-      </select>
+        <span className="flex items-center gap-2"><Clock className="h-4 w-4 text-brand-600" />{value}</span>
+        <ChevronDown className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl" role="listbox">
+          {TIME_OPTIONS.map((time) => (
+            <button
+              key={time}
+              type="button"
+              role="option"
+              aria-selected={time === value}
+              onClick={() => {
+                onChange(time);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${time === value ? "bg-brand-500/10 font-semibold text-brand-700 dark:text-brand-300" : "text-[var(--foreground)] hover:bg-[var(--accent)]"}`}
+            >
+              {time}
+              {time === value ? <Check className="h-4 w-4" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -565,12 +605,14 @@ function Agenda({
   days,
   onDayClick,
   onDayDoubleClick,
+  timeControls,
   children,
 }: {
   tab: "rooms" | "vehicles";
   days: DaySelection;
   onDayClick: (day: Date) => void;
   onDayDoubleClick: (day: Date) => void;
+  timeControls: ReactNode;
   children?: ReactNode;
 }) {
   const navigate = useNavigate();
@@ -664,16 +706,24 @@ function Agenda({
           Double cliquez sur un jour du calendrier (début), puis un seul clic sur le second (fin). Double clic sur un jour = ce jour uniquement.
         </p>
       </div>
-      <CalendarBoard
-        rangeStart={days.start}
-        rangeEnd={days.end}
-        events={calendarEvents}
-        onSelect={onDayClick}
-        onDoubleSelect={onDayDoubleClick}
-        onEventClick={(id) => setDetailId(id)}
-        disabledBefore={Date.now()}
-        compact
-      />
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-start">
+        <CalendarBoard
+          rangeStart={days.start}
+          rangeEnd={days.end}
+          events={calendarEvents}
+          onSelect={onDayClick}
+          onDoubleSelect={onDayDoubleClick}
+          onEventClick={(id) => setDetailId(id)}
+          disabledBefore={Date.now()}
+          compact
+        />
+        <aside className="rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 lg:sticky lg:top-4">
+          <p className="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
+            Créneau horaire
+          </p>
+          {timeControls}
+        </aside>
+      </div>
       {children}
 
       <Modal open={Boolean(active)} onClose={() => setDetailId(null)} title="Détail de la réservation">
