@@ -52,7 +52,6 @@ import {
 } from "../components/EventOptionSelect";
 import { EventWorkerPicker } from "../components/EventWorkerPicker";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Checkbox } from "../components/ui/Checkbox";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { MediaUpload } from "../components/ui/MediaUpload";
@@ -1335,13 +1334,6 @@ function FacebookPublishDialog({
 }) {
   const pages = useQuery(api.social.listPages, {});
   const publish = useAction(api.social.publishEvent);
-  const { user } = useUser();
-  // Facebook attribue toujours un post de Page à la Page : le nom de la
-  // personne ne peut apparaître que dans le texte, en signature.
-  const authorName =
-    user?.fullName?.trim() ||
-    [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
-  const [signed, setSigned] = useState(true);
   const [pageId, setPageId] = useState("");
   const [title, setTitle] = useState(event.title);
   const [body, setBody] = useState(() => defaultFacebookBody(event));
@@ -1363,10 +1355,7 @@ function FacebookPublishDialog({
   }, [pages]);
 
   const pageName = pages?.find((page) => page.pageId === pageId)?.name;
-  const signature = signed && authorName ? `Publié par ${authorName}` : "";
-  const message = [title.trim(), body.trim(), signature]
-    .filter(Boolean)
-    .join("\n\n");
+  const message = [title.trim(), body.trim()].filter(Boolean).join("\n\n");
   const allPhotos = [...photos, ...extraPhotos];
   const previewUrls = [
     ...(event.imageIds ?? [])
@@ -1413,8 +1402,9 @@ function FacebookPublishDialog({
   }
 
   return (
-    <Modal open onClose={onClose} title="Publier sur Facebook">
-      <div className="grid gap-4">
+    <Modal open onClose={onClose} title="Publier sur Facebook" className="max-w-5xl">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid gap-4">
         {pages === undefined ? (
           <p className="text-sm text-[var(--muted-foreground)]">Chargement des Pages…</p>
         ) : pages.length === 0 ? (
@@ -1482,15 +1472,6 @@ function FacebookPublishDialog({
           </Field>
         ) : null}
 
-        {authorName ? (
-          <Checkbox
-            checked={signed}
-            onChange={setSigned}
-            label={`Signer « Publié par ${authorName} »`}
-            description="Facebook signe le post du nom de la Page : votre nom n'apparaît que si vous l'ajoutez au texte."
-          />
-        ) : null}
-
         <Field label="Ajouter des photos" hint="Elles n'appartiennent qu'à la publication.">
           <PhotoUpload
             value={extraPhotos}
@@ -1498,15 +1479,6 @@ function FacebookPublishDialog({
             onPreviewsChange={(previews) =>
               setExtraPreviews(previews.map((preview) => preview.previewUrl))
             }
-          />
-        </Field>
-
-        <Field label="Aperçu" hint="Rendu approché : Facebook n'expose pas d'aperçu réel.">
-          <FacebookPostPreview
-            accountName={pages && pageId && pageName ? pageName : "Nom du compte"}
-            message={message}
-            photoUrls={previewUrls}
-            scheduledFor={mode === "scheduled" ? scheduledFor : null}
           />
         </Field>
 
@@ -1553,7 +1525,27 @@ function FacebookPublishDialog({
           </p>
         ) : null}
 
-        <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+        </div>
+
+        {/* L'aperçu reste sous les yeux pendant qu'on écrit : c'est le seul
+            moyen de juger le rendu, faute d'aperçu officiel côté Facebook. */}
+        <aside className="lg:sticky lg:top-16 lg:self-start">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+            Aperçu
+          </p>
+          <FacebookPostPreview
+            accountName={pages && pageId && pageName ? pageName : "Nom du compte"}
+            message={message}
+            photoUrls={previewUrls}
+            scheduledFor={mode === "scheduled" ? scheduledFor : null}
+          />
+          <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+            Rendu approché : Facebook n'expose pas d'aperçu réel.
+          </p>
+        </aside>
+      </div>
+
+      <div className="mt-6 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
           <p className="text-xs text-[var(--muted-foreground)]">
             {allPhotos.length === 0
               ? "Publication sans photo"
@@ -1572,7 +1564,6 @@ function FacebookPublishDialog({
                   : "Publier maintenant"}
             </Button>
           </div>
-        </div>
       </div>
     </Modal>
   );
@@ -1597,12 +1588,7 @@ function InstagramPublishDialog({
 }) {
   const accounts = useQuery(api.social.listInstagramAccounts, {});
   const publish = useAction(api.social.publishEventToInstagram);
-  const { user } = useUser();
-  const authorName =
-    user?.fullName?.trim() ||
-    [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim();
   const [selected, setSelected] = useState<string[]>([]);
-  const [signed, setSigned] = useState(true);
   const [caption, setCaption] = useState(() =>
     [event.title, defaultFacebookBody(event)].filter(Boolean).join("\n\n"),
   );
@@ -1619,8 +1605,7 @@ function InstagramPublishDialog({
       .filter((url): url is string => Boolean(url)),
     ...extraPreviews,
   ];
-  const signature = signed && authorName ? `Publié par ${authorName}` : "";
-  const message = [caption.trim(), signature].filter(Boolean).join("\n\n");
+  const message = caption.trim();
   const ready = selected.length > 0 && allPhotos.length > 0 && Boolean(message);
 
   function toggleAccount(id: string) {
@@ -1659,8 +1644,9 @@ function InstagramPublishDialog({
   }
 
   return (
-    <Modal open onClose={onClose} title="Publier sur Instagram">
-      <div className="grid gap-4">
+    <Modal open onClose={onClose} title="Publier sur Instagram" className="max-w-5xl">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <div className="grid gap-4">
         {accounts === undefined ? (
           <p className="text-sm text-[var(--muted-foreground)]">Chargement des comptes…</p>
         ) : accounts.length === 0 ? (
@@ -1723,14 +1709,6 @@ function InstagramPublishDialog({
           />
         </Field>
 
-        {authorName ? (
-          <Checkbox
-            checked={signed}
-            onChange={setSigned}
-            label={`Signer « Publié par ${authorName} »`}
-          />
-        ) : null}
-
         {event.imageUrls.length > 0 && (event.imageIds?.length ?? 0) > 0 ? (
           <Field label="Photos de l'évènement" hint="Cliquez pour retirer ou remettre.">
             <div className="flex flex-wrap gap-2">
@@ -1779,7 +1757,18 @@ function InstagramPublishDialog({
           />
         </Field>
 
-        <Field label="Aperçu" hint="Rendu approché : Instagram n'expose pas d'aperçu réel.">
+        {error ? (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </p>
+        ) : null}
+
+        </div>
+
+        <aside className="lg:sticky lg:top-16 lg:self-start">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+            Aperçu
+          </p>
           <InstagramPostPreview
             accountName={
               // Un seul compte coché : on montre le sien. Plusieurs : un nom
@@ -1792,15 +1781,13 @@ function InstagramPublishDialog({
             caption={message}
             photoUrls={previewUrls}
           />
-        </Field>
-
-        {error ? (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-            {error}
+          <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+            Rendu approché : Instagram n'expose pas d'aperçu réel.
           </p>
-        ) : null}
+        </aside>
+      </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+      <div className="mt-6 flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
           <p className="text-xs text-[var(--muted-foreground)]">
             {/* Dit d'emblée ce que Facebook permet et pas Instagram, plutôt que
                 de laisser chercher un bouton « Programmer » absent. */}
@@ -1819,7 +1806,6 @@ function InstagramPublishDialog({
               {busy ? "Envoi…" : `Publier${selected.length > 1 ? ` (${selected.length})` : ""}`}
             </Button>
           </div>
-        </div>
       </div>
     </Modal>
   );
