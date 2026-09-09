@@ -43,20 +43,29 @@ export async function vehicleBusyReason(
     // flux de réservation véhicule vérifient les chevauchements précisément et
     // passent cette option pour ne pas bloquer toute la journée.
     ignoreReservations?: boolean;
+    /**
+     * Un même véhicule enchaîne plusieurs collectes dans la journée : les flux
+     * d'affectation passent cette option pour ne pas refuser une seconde
+     * collecte. Le nombre de collectes déjà prévues leur est renvoyé à part
+     * (`vehicleCollecteCount`), pour être annoncé plutôt qu'opposé.
+     */
+    allowSharedCollectes?: boolean;
   } = {},
 ): Promise<string | null> {
-  const requests = await ctx.db
-    .query("requests")
-    .withIndex("by_assignedVehicle", (q) => q.eq("assignedVehicle", vehicleId))
-    .collect();
-  for (const request of requests) {
-    if (opts.excludeRequestId && request._id === opts.excludeRequestId) continue;
-    if (
-      request.outcome === "open" &&
-      request.scheduledDate &&
-      sameUtcDay(request.scheduledDate, date)
-    ) {
-      return `Affecté à une collecte planifiée ce jour (#${request.reference ?? "?"})`;
+  if (!opts.allowSharedCollectes) {
+    const requests = await ctx.db
+      .query("requests")
+      .withIndex("by_assignedVehicle", (q) => q.eq("assignedVehicle", vehicleId))
+      .collect();
+    for (const request of requests) {
+      if (opts.excludeRequestId && request._id === opts.excludeRequestId) continue;
+      if (
+        request.outcome === "open" &&
+        request.scheduledDate &&
+        sameUtcDay(request.scheduledDate, date)
+      ) {
+        return `Affecté à une collecte planifiée ce jour (#${request.reference ?? "?"})`;
+      }
     }
   }
 
@@ -138,13 +147,41 @@ export const list = query({
   },
 });
 
+/**
+ * Nombre de collectes déjà prévues ce jour-là pour ce véhicule.
+ *
+ * Une collecte n'immobilise pas la journée : un véhicule en enchaîne plusieurs.
+ * Ce compte s'affiche dans les sélecteurs pour éclairer le choix, là où un
+ * refus pur et simple obligeait à réaffecter un véhicule pourtant disponible.
+ */
+export async function vehicleCollecteCount(
+  ctx: QueryCtx | MutationCtx,
+  vehicleId: Id<"vehicles">,
+  date: number,
+  excludeRequestId?: Id<"requests">,
+): Promise<number> {
+  const requests = await ctx.db
+    .query("requests")
+    .withIndex("by_assignedVehicle", (q) => q.eq("assignedVehicle", vehicleId))
+    .collect();
+  return requests.filter(
+    (request) =>
+      request._id !== excludeRequestId &&
+      request.outcome === "open" &&
+      request.scheduledDate &&
+      sameUtcDay(request.scheduledDate, date),
+  ).length;
+}
+
 /** Véhicules actifs disponibles à une date (pour les sélecteurs d'affectation). */
 export const availableOn = query({
   args: {
     date: v.number(),
     includeVehicleId: v.optional(v.id("vehicles")),
+    /** Demande en cours d'édition : ses propres collectes ne se comptent pas. */
+    excludeRequestId: v.optional(v.id("requests")),
   },
-  handler: async (ctx, { date, includeVehicleId }) => {
+  handler: async (ctx, { date, includeVehicleId, excludeRequestId }) => {
     await requireAnyCrmPermission(ctx, [
       ["flotte", "read"],
       ["tournees", "read"],
@@ -158,9 +195,14 @@ export const availableOn = query({
     const result = [];
     for (const vehicle of vehicles) {
       const isCurrent = vehicle._id === includeVehicleId;
+      // Les collectes du jour ne disqualifient plus un véhicule : elles sont
+      // comptées et annoncées. Tournée, réservation et maintenance, elles,
+      // l'immobilisent vraiment et continuent de l'écarter.
       const reason = isCurrent
         ? null
-        : await vehicleBusyReason(ctx, vehicle._id, date);
+        : await vehicleBusyReason(ctx, vehicle._id, date, {
+            allowSharedCollectes: true,
+          });
       if (reason && !isCurrent) continue;
       const photoUrl = vehicle.photo
         ? await ctx.storage.getUrl(vehicle.photo)
@@ -171,6 +213,8 @@ export const availableOn = query({
         plate: vehicle.plate ?? null,
         kind: vehicle.kind,
         photoUrl,
+        /** Collectes déjà prévues ce jour-là, hors demande en cours d'édition. */
+        collecteCount: await vehicleCollecteCount(ctx, vehicle._id, date, excludeRequestId),
       });
     }
     return result;

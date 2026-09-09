@@ -2034,8 +2034,11 @@ export const patchManagement = mutation({
     if (args.assignedVehicle !== undefined) {
       if (args.assignedVehicle) {
         const date = request.scheduledDate ?? Date.now();
+        // Un véhicule enchaîne plusieurs collectes dans la journée : seules
+        // une tournée, une réservation ou une maintenance l'immobilisent.
         const reason = await vehicleBusyReason(ctx, args.assignedVehicle, date, {
           excludeRequestId: args.id,
+          allowSharedCollectes: true,
         });
         if (reason) {
           throw new Error(`Véhicule indisponible à cette date : ${reason}`);
@@ -2144,7 +2147,7 @@ export const schedule = mutation({
           ctx,
           assignedVehicle,
           scheduledDate,
-          { excludeRequestId: id },
+          { excludeRequestId: id, allowSharedCollectes: true },
         );
         if (reason) {
           throw new Error(`Véhicule indisponible à cette date : ${reason}`);
