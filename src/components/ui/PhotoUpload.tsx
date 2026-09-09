@@ -12,10 +12,17 @@ type LocalPhoto = {
 export function PhotoUpload({
   value,
   onChange,
+  onPreviewsChange,
   className,
 }: {
   value: Id<"_storage">[];
   onChange: (ids: Id<"_storage">[]) => void;
+  /**
+   * Aperçus locaux des photos ajoutées. Le fichier n'est lisible qu'ici : sans
+   * ce rappel, un aperçu de publication ne pourrait pas montrer une image qui
+   * vient d'être choisie.
+   */
+  onPreviewsChange?: (previews: { storageId: Id<"_storage">; previewUrl: string }[]) => void;
   className?: string;
 }) {
   const upload = useUpload();
@@ -41,6 +48,7 @@ export function PhotoUpload({
       const next = [...photos, ...added];
       setPhotos(next);
       onChange(next.map((photo) => photo.storageId));
+      onPreviewsChange?.(next);
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -51,6 +59,7 @@ export function PhotoUpload({
     const next = photos.filter((photo) => photo.storageId !== storageId);
     setPhotos(next);
     onChange(next.map((photo) => photo.storageId));
+    onPreviewsChange?.(next);
   }
 
   return (

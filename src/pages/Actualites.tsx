@@ -33,6 +33,10 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
 import { FacebookIcon } from "../components/icons/FacebookIcon";
 import { InstagramIcon } from "../components/icons/InstagramIcon";
+import {
+  FacebookPostPreview,
+  InstagramPostPreview,
+} from "../components/social/PostPreview";
 import { SectionHeader } from "../components/SectionHeader";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { usePermissionsAccess } from "../components/RequirePermission";
@@ -1345,6 +1349,9 @@ function FacebookPublishDialog({
   // en ajouter d'autres, qui ne servent qu'au post.
   const [photos, setPhotos] = useState<Id<"_storage">[]>(event.imageIds ?? []);
   const [extraPhotos, setExtraPhotos] = useState<Id<"_storage">[]>([]);
+  // Une photo qui vient d'être ajoutée n'a pas encore d'URL servie : son
+  // aperçu local est le seul moyen de la montrer dans la prévisualisation.
+  const [extraPreviews, setExtraPreviews] = useState<string[]>([]);
   const [mode, setMode] = useState<"now" | "scheduled">("now");
   const [scheduledFor, setScheduledFor] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1361,6 +1368,12 @@ function FacebookPublishDialog({
     .filter(Boolean)
     .join("\n\n");
   const allPhotos = [...photos, ...extraPhotos];
+  const previewUrls = [
+    ...(event.imageIds ?? [])
+      .map((id, index) => (photos.includes(id) ? event.imageUrls[index] : null))
+      .filter((url): url is string => Boolean(url)),
+    ...extraPreviews,
+  ];
   const ready =
     Boolean(pageId) &&
     Boolean(message) &&
@@ -1479,7 +1492,22 @@ function FacebookPublishDialog({
         ) : null}
 
         <Field label="Ajouter des photos" hint="Elles n'appartiennent qu'à la publication.">
-          <PhotoUpload value={extraPhotos} onChange={setExtraPhotos} />
+          <PhotoUpload
+            value={extraPhotos}
+            onChange={setExtraPhotos}
+            onPreviewsChange={(previews) =>
+              setExtraPreviews(previews.map((preview) => preview.previewUrl))
+            }
+          />
+        </Field>
+
+        <Field label="Aperçu" hint="Rendu approché : Facebook n'expose pas d'aperçu réel.">
+          <FacebookPostPreview
+            accountName={pages && pageId && pageName ? pageName : "Nom du compte"}
+            message={message}
+            photoUrls={previewUrls}
+            scheduledFor={mode === "scheduled" ? scheduledFor : null}
+          />
         </Field>
 
         <Field label="Quand publier ?" required>
@@ -1580,10 +1608,17 @@ function InstagramPublishDialog({
   );
   const [photos, setPhotos] = useState<Id<"_storage">[]>(event.imageIds ?? []);
   const [extraPhotos, setExtraPhotos] = useState<Id<"_storage">[]>([]);
+  const [extraPreviews, setExtraPreviews] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const allPhotos = [...photos, ...extraPhotos];
+  const previewUrls = [
+    ...(event.imageIds ?? [])
+      .map((id, index) => (photos.includes(id) ? event.imageUrls[index] : null))
+      .filter((url): url is string => Boolean(url)),
+    ...extraPreviews,
+  ];
   const signature = signed && authorName ? `Publié par ${authorName}` : "";
   const message = [caption.trim(), signature].filter(Boolean).join("\n\n");
   const ready = selected.length > 0 && allPhotos.length > 0 && Boolean(message);
@@ -1735,7 +1770,28 @@ function InstagramPublishDialog({
           required={allPhotos.length === 0}
           hint="Instagram exige au moins une photo. Dix au plus, en carrousel."
         >
-          <PhotoUpload value={extraPhotos} onChange={setExtraPhotos} />
+          <PhotoUpload
+            value={extraPhotos}
+            onChange={setExtraPhotos}
+            onPreviewsChange={(previews) =>
+              setExtraPreviews(previews.map((preview) => preview.previewUrl))
+            }
+          />
+        </Field>
+
+        <Field label="Aperçu" hint="Rendu approché : Instagram n'expose pas d'aperçu réel.">
+          <InstagramPostPreview
+            accountName={
+              // Un seul compte coché : on montre le sien. Plusieurs : un nom
+              // générique, l'aperçu valant pour tous.
+              selected.length === 1
+                ? (accounts?.find((item) => item.instagramId === selected[0])?.username ??
+                  "Nom du compte")
+                : "Nom du compte"
+            }
+            caption={message}
+            photoUrls={previewUrls}
+          />
         </Field>
 
         {error ? (
