@@ -380,12 +380,22 @@ export const recordedPosts = internalQuery({
       .map((post) => ({
         id: post._id,
         postId: post.postId,
+        pageId: post.pageId,
+        createdAt: post.createdAt,
         accessToken: tokenByPage.get(post.pageId),
       }))
       // Une Page retirée de la configuration n'a plus de jeton : sans lui, on ne
       // peut rien vérifier, et supprimer la ligne serait une conclusion hâtive.
-      .filter((post): post is { id: Id<"socialFacebookPosts">; postId: string; accessToken: string } =>
-        Boolean(post.accessToken),
+      .filter(
+        (
+          post,
+        ): post is {
+          id: Id<"socialFacebookPosts">;
+          postId: string;
+          pageId: string;
+          createdAt: number;
+          accessToken: string;
+        } => Boolean(post.accessToken),
       );
   },
 });
@@ -397,6 +407,31 @@ export const forgetPost = internalMutation({
   },
 });
 
+/** Identifiants d'une liste Graph, en suivant la pagination. */
+async function collectIds(url: string, max = 300) {
+  const ids = new Set<string>();
+  let oldest: number | undefined;
+  let next: string | undefined = url;
+  while (next && ids.size < max) {
+    const response = await fetch(next);
+    const result = (await response.json()) as {
+      data?: Array<{ id: string; created_time?: string }>;
+      paging?: { next?: string };
+      error?: { message?: string };
+    };
+    if (result.error || !result.data) break;
+    for (const item of result.data) {
+      ids.add(item.id);
+      if (item.created_time) {
+        const time = Date.parse(item.created_time);
+        if (Number.isFinite(time)) oldest = Math.min(oldest ?? time, time);
+      }
+    }
+    next = result.paging?.next;
+  }
+  return { ids, oldest };
+}
+
 /**
  * Retire les publications qui n'existent plus sur Facebook.
  *
@@ -404,46 +439,61 @@ export const forgetPost = internalMutation({
  * programmation annulée — laissait une ligne « Publié le… » sur la fiche de
  * l'évènement, qui affirmait une annonce qui n'existe plus.
  *
- * Seule l'erreur « objet introuvable » fait oublier la ligne : un jeton devenu
- * invalide (code 190) ou une panne réseau ne prouvent rien, et effacer sur ce
- * signal-là effacerait tout l'historique le jour d'un incident.
+ * La vérification passe par les listes de la Page (`feed` et `scheduled_posts`)
+ * et non par l'identifiant du post : interroger `/{postId}?fields=id` renvoie
+ * l'identifiant même pour un objet disparu, ce qui ne prouvait rien.
+ *
+ * En cas de doute, la ligne est conservée : une liste illisible (jeton
+ * invalide, panne réseau) ou une publication plus ancienne que la fenêtre
+ * consultée ne prouvent pas une suppression.
  */
 export const reconcilePosts = internalAction({
   args: {
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ checked: number; forgotten: number }> => {
     const posts: Array<{
       id: Id<"socialFacebookPosts">;
       postId: string;
+      pageId: string;
+      createdAt: number;
       accessToken: string;
     }> = await ctx.runQuery(internal.social.recordedPosts, {
       eventId: args.eventId,
       recycappEventId: args.recycappEventId,
     });
 
-    let forgotten = 0;
+    const byPage = new Map<string, typeof posts>();
     for (const post of posts) {
+      byPage.set(post.pageId, [...(byPage.get(post.pageId) ?? []), post]);
+    }
+
+    let forgotten = 0;
+    for (const [pageId, pagePosts] of byPage) {
+      const token = encodeURIComponent(pagePosts[0].accessToken);
+      const base = `https://graph.facebook.com/${GRAPH_VERSION}/${pageId}`;
       try {
-        const response = await fetch(
-          `https://graph.facebook.com/${GRAPH_VERSION}/${post.postId}` +
-            `?fields=id&access_token=${encodeURIComponent(post.accessToken)}`,
-        );
-        const result = (await response.json()) as {
-          id?: string;
-          error?: { code?: number; error_subcode?: number };
-        };
-        if (result.id) continue;
-        const code = result.error?.code;
-        if (code === 100 || code === 803) {
+        const [published, scheduled] = await Promise.all([
+          collectIds(`${base}/feed?fields=id,created_time&limit=100&access_token=${token}`),
+          collectIds(`${base}/scheduled_posts?fields=id&limit=100&access_token=${token}`),
+        ]);
+        // Aucune liste lisible : on ne conclut rien pour cette Page.
+        if (published.ids.size === 0 && scheduled.ids.size === 0 && published.oldest === undefined) {
+          continue;
+        }
+        for (const post of pagePosts) {
+          if (published.ids.has(post.postId) || scheduled.ids.has(post.postId)) continue;
+          // Publication antérieure à la fenêtre consultée : son absence de la
+          // liste ne dit pas qu'elle a été supprimée.
+          if (published.oldest !== undefined && post.createdAt < published.oldest) continue;
           await ctx.runMutation(internal.social.forgetPost, { id: post.id });
           forgotten += 1;
         }
       } catch (error) {
         // Réseau indisponible : on retentera à la prochaine passe.
         console.warn(
-          `Vérification publication ${post.postId} impossible :`,
+          `Vérification des publications de la Page ${pageId} impossible :`,
           error instanceof Error ? error.message : String(error),
         );
       }

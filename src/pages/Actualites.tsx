@@ -21,7 +21,6 @@ import {
   Play,
   Plus,
   Send,
-  Share2,
   Sparkles,
   Tag,
   ThumbsUp,
@@ -32,6 +31,7 @@ import { endOfMonth, endOfWeek, startOfMonth, startOfWeek } from "date-fns";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
+import { FacebookIcon } from "../components/icons/FacebookIcon";
 import { SectionHeader } from "../components/SectionHeader";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { usePermissionsAccess } from "../components/RequirePermission";
@@ -1244,7 +1244,7 @@ function CalendarEventDetail({
             <ul className="space-y-2 text-sm">
               {posts.map((post) => (
                 <li key={post.id} className="flex items-start gap-2">
-                  <Share2 className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+                  <FacebookIcon className="mt-0.5 h-4 w-4 shrink-0 text-[#1877F2]" />
                   <span className="text-[var(--foreground)]">
                     {/* Une publication programmée n'est pas encore parue : le
                         dire évite de croire l'évènement déjà annoncé. */}
@@ -1263,7 +1263,7 @@ function CalendarEventDetail({
           <div className="flex gap-2">
             {canPublish ? (
               <Button variant="secondary" size="sm" onClick={() => setFacebookOpen(true)}>
-                <Share2 className="h-4 w-4" /> Publier sur Facebook
+                <FacebookIcon className="h-4 w-4 text-[#1877F2]" /> Publier sur Facebook
               </Button>
             ) : null}
             {/* Un évènement de la Recyclerie se modifie dans Recycapp : le
