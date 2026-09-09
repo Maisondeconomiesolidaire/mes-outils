@@ -324,3 +324,42 @@ export const sendDonationReceived = internalAction({
     await resendSend(args.to, `Proposition de don reçue — ${args.title}`, html, FROM);
   },
 });
+
+/**
+ * Bienvenue à un donateur qui vient de créer son compte.
+ *
+ * Le compte ne suffit pas à déposer : il y a des documents à lire d'abord. Le
+ * dire ici évite qu'une entreprise se présente au dépôt sans les connaître.
+ */
+export const sendDonorWelcome = internalAction({
+  args: {
+    to: v.string(),
+    firstName: v.optional(v.string()),
+    company: v.optional(v.string()),
+  },
+  handler: async (_ctx, args) => {
+    const greeting = args.firstName?.trim() ? `Bonjour ${esc(args.firstName.trim())},` : "Bonjour,";
+    const who = args.company?.trim()
+      ? ` au nom de <strong>${esc(args.company.trim())}</strong>`
+      : "";
+    const html = shell({
+      preheader: "Votre compte BâtiRe est créé — quelques documents à lire avant de déposer.",
+      heading: "Votre compte BâtiRe est créé",
+      intro:
+        `${greeting}<br/><br/>` +
+        `Votre compte est actif${who}. Vous pouvez dès maintenant consulter le catalogue, ` +
+        `suivre vos dons et vos recherches depuis votre espace client.`,
+      contentHtml:
+        note(
+          "Avant votre premier dépôt",
+          "Des documents sont à consulter dans votre espace client, onglet « Documents » : " +
+            "ils précisent les matériaux acceptés, l'état attendu et les conditions de dépôt. " +
+            "Merci d'en prendre connaissance avant de nous apporter un premier lot.",
+        ) +
+        button(`${appUrl()}/mon-compte?onglet=documents`, "Consulter les documents") +
+        `<p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;line-height:1.6;color:#71717a;">Une question ? Écrivez-nous depuis la messagerie de votre espace client.</p>`,
+    });
+
+    await resendSend(args.to, "Bienvenue sur BâtiRe — votre compte est créé", html, FROM);
+  },
+});

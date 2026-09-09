@@ -3146,6 +3146,8 @@ export default defineSchema(
     address: v.optional(v.string()),
     postalCode: v.optional(v.string()),
     city: v.optional(v.string()),
+    /** Email de bienvenue envoyé : il n'a de sens qu'une fois. */
+    welcomeEmailSentAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_clerkId", ["clerkId"]),

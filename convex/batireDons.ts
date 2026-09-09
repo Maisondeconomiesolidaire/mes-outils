@@ -104,11 +104,22 @@ export const saveMyDonorProfile = mutation({
       await ctx.db.patch(existing._id, patch);
       return existing._id;
     }
-    return await ctx.db.insert("btDonorProfiles", {
+    // Première fiche : le compte devient réellement utilisable, on souhaite la
+    // bienvenue et on renvoie vers les documents à lire avant de déposer.
+    const id = await ctx.db.insert("btDonorProfiles", {
       clerkId: identity.subject,
       createdAt: now,
+      welcomeEmailSentAt: patch.email ? now : undefined,
       ...patch,
     });
+    if (patch.email) {
+      await ctx.scheduler.runAfter(0, internal.batireEmails.sendDonorWelcome, {
+        to: patch.email,
+        firstName: patch.firstName,
+        company: patch.company,
+      });
+    }
+    return id;
   },
 });
 
