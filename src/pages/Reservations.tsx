@@ -314,6 +314,18 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
         onDayDoubleClick={handleDayDoubleClick}
         timeControls={
           <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-3">
+              <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
+                <CalendarCheck className="h-4 w-4" />
+                {summary}
+              </span>
+              <span className="rounded-full bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
+                {durationDays} jour{durationDays > 1 ? "s" : ""}
+              </span>
+            </div>
+            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
+              Créneau horaire
+            </p>
             <div className="space-y-3">
               <FilterField label="Heure de début">
                 <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
@@ -335,16 +347,6 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
       >
         {/* Créneau sélectionné et filtres, sous le calendrier. */}
         <div className="space-y-4 border-t border-[var(--border)] pt-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3.5 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
-              <CalendarCheck className="h-4 w-4" />
-              {summary}
-            </span>
-            <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
-              {durationDays} jour{durationDays > 1 ? "s" : ""}
-            </span>
-          </div>
-
           <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
             <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
               <Search className="h-4 w-4 text-brand-600" />
@@ -718,9 +720,6 @@ function Agenda({
           compact
         />
         <aside className="rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 lg:sticky lg:top-4">
-          <p className="mb-3 text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
-            Créneau horaire
-          </p>
           {timeControls}
         </aside>
       </div>
