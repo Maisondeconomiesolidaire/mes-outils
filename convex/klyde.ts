@@ -73,6 +73,21 @@ async function requireSignedIn(ctx: {
   return identity;
 }
 
+/**
+ * Variante allégée pour les listes : seule la photo de couverture est résolue.
+ *
+ * Le stock compte ~140 articles et près de 800 photos : tout résoudre, c'est
+ * autant d'URL signées à produire et à transmettre à chaque frappe dans la
+ * recherche, alors que les cartes n'affichent que la première.
+ */
+async function withCoverPhotoUrl(
+  ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
+  item: Doc<"klydeItems">,
+) {
+  const cover = item.photos[0] ? await ctx.storage.getUrl(item.photos[0]) : null;
+  return { ...item, photoUrls: cover ? [cover] : [] };
+}
+
 async function withPhotoUrls(
   ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
   item: Doc<"klydeItems">,
@@ -349,7 +364,24 @@ export const list = query({
         )
       : items;
 
-    return Promise.all(filtered.map((item) => withPhotoUrls(ctx, item)));
+    return Promise.all(filtered.map((item) => withCoverPhotoUrl(ctx, item)));
+  },
+});
+
+/**
+ * Toutes les photos d'un article, à la demande.
+ *
+ * La liste ne renvoie que la couverture : l'éditeur et la galerie chargent le
+ * reste au moment où on ouvre l'article, et non pour les 140 autres.
+ */
+export const photoUrls = query({
+  args: { id: v.id("klydeItems") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "read");
+    const item = await ctx.db.get(id);
+    if (!item) return [];
+    const urls = await Promise.all(item.photos.map((photo) => ctx.storage.getUrl(photo)));
+    return urls.filter((url): url is string => Boolean(url));
   },
 });
 
@@ -1446,5 +1478,34 @@ export const sendVintedAlerts = internalAction({
       }
     }
     return { sent };
+  },
+});
+
+/**
+ * Remplace les photos d'un article par des versions recompressées.
+ *
+ * Sert au rattrapage lancé depuis le stock : les photos étaient stockées telles
+ * qu'envoyées, à 3 ou 4 Mo pièce, et seul un navigateur sait les ré-encoder —
+ * le runtime Convex n'a pas d'encodeur d'image.
+ */
+export const replacePhotos = mutation({
+  args: { id: v.id("klydeItems"), photos: v.array(v.id("_storage")) },
+  handler: async (ctx, { id, photos }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    if (photos.length === 0) throw new Error("Un article garde au moins une photo.");
+    const previous = item.photos;
+    await ctx.db.patch(id, { photos, updatedAt: Date.now() });
+    // Les anciens fichiers ne sont plus référencés : les garder, c'est payer le
+    // stockage de ce qu'on vient justement d'alléger.
+    for (const storageId of previous) {
+      if (photos.includes(storageId)) continue;
+      try {
+        await ctx.storage.delete(storageId);
+      } catch {
+        // Fichier déjà absent.
+      }
+    }
   },
 });
