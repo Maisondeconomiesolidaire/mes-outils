@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import {
   CalendarPlus,
+  Check,
   CircleHelp,
   ChevronLeft,
   ChevronRight,
@@ -1068,6 +1069,7 @@ type CalendarItem = {
   start?: number;
   end?: number;
   imageUrls: string[];
+  imageIds?: Id<"_storage">[];
   authorName: string;
   authorImageUrl?: string;
   structure?: string;
@@ -1275,6 +1277,10 @@ function CalendarEventDetail({
 /**
  * Publication d'un évènement sur une Page Facebook.
  *
+ * Le formulaire est pré-rempli depuis l'évènement mais tout se corrige : un
+ * post Facebook ne s'écrit pas comme une fiche interne, et le recopier tel
+ * quel donnait des publications sèches.
+ *
  * Facebook programme lui-même : on lui remet le post avec sa date et il le
  * publie à l'heure dite. Rien à surveiller de notre côté, et rien à rejouer si
  * le déploiement redémarre entre-temps.
@@ -1291,6 +1297,12 @@ function FacebookPublishDialog({
   const pages = useQuery(api.social.listPages, {});
   const publish = useAction(api.social.publishEvent);
   const [pageId, setPageId] = useState("");
+  const [title, setTitle] = useState(event.title);
+  const [body, setBody] = useState(() => defaultFacebookBody(event));
+  // Les photos de l'évènement sont proposées cochées ; on peut en retirer et
+  // en ajouter d'autres, qui ne servent qu'au post.
+  const [photos, setPhotos] = useState<Id<"_storage">[]>(event.imageIds ?? []);
+  const [extraPhotos, setExtraPhotos] = useState<Id<"_storage">[]>([]);
   const [mode, setMode] = useState<"now" | "scheduled">("now");
   const [scheduledFor, setScheduledFor] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -1302,7 +1314,18 @@ function FacebookPublishDialog({
   }, [pages]);
 
   const pageName = pages?.find((page) => page.pageId === pageId)?.name;
-  const ready = Boolean(pageId) && (mode === "now" || scheduledFor !== null);
+  const message = [title.trim(), body.trim()].filter(Boolean).join("\n\n");
+  const allPhotos = [...photos, ...extraPhotos];
+  const ready =
+    Boolean(pageId) &&
+    Boolean(message) &&
+    (mode === "now" || scheduledFor !== null);
+
+  function togglePhoto(id: Id<"_storage">) {
+    setPhotos((current) =>
+      current.includes(id) ? current.filter((value) => value !== id) : [...current, id],
+    );
+  }
 
   async function submit() {
     if (!ready) return;
@@ -1314,9 +1337,9 @@ function FacebookPublishDialog({
           ? { eventId: event.eventId as Id<"events"> }
           : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }),
         pageId,
-        ...(mode === "scheduled" && scheduledFor !== null
-          ? { scheduledFor }
-          : {}),
+        message,
+        photoStorageIds: allPhotos,
+        ...(mode === "scheduled" && scheduledFor !== null ? { scheduledFor } : {}),
       });
       onPublished(
         mode === "scheduled" && scheduledFor !== null
@@ -1334,19 +1357,6 @@ function FacebookPublishDialog({
   return (
     <Modal open onClose={onClose} title="Publier sur Facebook">
       <div className="grid gap-4">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-4">
-          <p className="text-sm font-semibold text-[var(--foreground)]">{event.title}</p>
-          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
-            {event.start ? formatDateTime(event.start) : "Sans date"}
-            {event.location ? ` · ${event.location}` : ""}
-          </p>
-          {event.imageUrls.length > 0 ? (
-            <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-              La première photo de l'évènement accompagnera la publication.
-            </p>
-          ) : null}
-        </div>
-
         {pages === undefined ? (
           <p className="text-sm text-[var(--muted-foreground)]">Chargement des Pages…</p>
         ) : pages.length === 0 ? (
@@ -1366,6 +1376,57 @@ function FacebookPublishDialog({
             </Select>
           </Field>
         )}
+
+        <Field label="Titre" hint="Première ligne du post.">
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+        </Field>
+
+        <Field label="Message" required>
+          <Textarea
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            className="min-h-[160px]"
+            placeholder="Le texte de la publication…"
+          />
+        </Field>
+
+        {event.imageUrls.length > 0 && (event.imageIds?.length ?? 0) > 0 ? (
+          <Field label="Photos de l'évènement" hint="Cliquez pour retirer ou remettre.">
+            <div className="flex flex-wrap gap-2">
+              {event.imageIds!.map((id, index) => {
+                const selected = photos.includes(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => togglePhoto(id)}
+                    className={cn(
+                      "relative h-20 w-20 overflow-hidden rounded-xl border-2 transition",
+                      selected
+                        ? "border-brand-500"
+                        : "border-transparent opacity-40 hover:opacity-70",
+                    )}
+                  >
+                    <img
+                      src={event.imageUrls[index]}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                    {selected ? (
+                      <span className="absolute right-1 top-1 rounded-full bg-brand-500 p-0.5 text-white">
+                        <Check className="h-3 w-3" />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+        ) : null}
+
+        <Field label="Ajouter des photos" hint="Elles n'appartiennent qu'à la publication.">
+          <PhotoUpload value={extraPhotos} onChange={setExtraPhotos} />
+        </Field>
 
         <Field label="Quand publier ?" required>
           <div className="flex gap-2">
@@ -1410,24 +1471,49 @@ function FacebookPublishDialog({
           </p>
         ) : null}
 
-        <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
-            Annuler
-          </Button>
-          <Button onClick={() => void submit()} disabled={busy || !ready}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            {busy
-              ? "Envoi…"
-              : mode === "scheduled"
-                ? "Programmer la publication"
-                : "Publier maintenant"}
-          </Button>
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+          <p className="text-xs text-[var(--muted-foreground)]">
+            {allPhotos.length === 0
+              ? "Publication sans photo"
+              : `${allPhotos.length} photo${allPhotos.length > 1 ? "s" : ""}`}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose} disabled={busy}>
+              Annuler
+            </Button>
+            <Button onClick={() => void submit()} disabled={busy || !ready}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              {busy
+                ? "Envoi…"
+                : mode === "scheduled"
+                  ? "Programmer la publication"
+                  : "Publier maintenant"}
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>
   );
 }
 
+/** Corps pré-rempli : la date, le lieu, puis la description de l'évènement. */
+function defaultFacebookBody(event: CalendarItem) {
+  const lines: string[] = [];
+  if (event.start) {
+    lines.push(
+      new Date(event.start).toLocaleString("fr-FR", {
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    );
+  }
+  if (event.location) lines.push(`📍 ${event.location}`);
+  if (event.description) lines.push("", event.description);
+  return lines.join("\n");
+}
 
 /* ─── Bons plans ─────────────────────────────────────────────────────────── */
 

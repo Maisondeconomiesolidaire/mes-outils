@@ -12,6 +12,7 @@
 import { v } from "convex/values";
 import { action, internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { requireCrmPermission, requireUser } from "./lib";
 
 const PAGE_KEY = "mesoutils:actualites";
@@ -191,8 +192,10 @@ export const publishEvent = action({
     pageId: v.string(),
     /** Absent = publication immédiate ; sinon date de publication (ms). */
     scheduledFor: v.optional(v.number()),
-    /** Texte personnalisé ; à défaut, il est composé depuis l'évènement. */
+    /** Texte du post, composé depuis l'évènement à défaut. */
     message: v.optional(v.string()),
+    /** Photos du post. À défaut, celles de l'évènement. */
+    photoStorageIds: v.optional(v.array(v.id("_storage"))),
   },
   handler: async (ctx, args): Promise<{ postId: string; scheduledFor?: number }> => {
     const author: { clerkId: string; name: string } = await ctx.runQuery(
@@ -219,42 +222,75 @@ export const publishEvent = action({
     });
 
     const message = args.message?.trim() || buildMessage(payload.event);
-    const photoUrl = payload.event.photoUrl;
-    const body = new URLSearchParams({ access_token: payload.page.accessToken });
 
-    // Une photo passe par `/photos` (le message y devient la légende), le texte
-    // seul par `/feed`. Les deux acceptent la programmation.
-    const endpoint = photoUrl ? "photos" : "feed";
-    if (photoUrl) {
-      body.set("url", photoUrl);
-      body.set("caption", message);
-    } else {
-      body.set("message", message);
-    }
-    if (args.scheduledFor !== undefined) {
-      body.set("published", "false");
-      body.set("scheduled_publish_time", String(Math.floor(args.scheduledFor / 1000)));
-    }
+    // Photos choisies dans le formulaire ; à défaut, celle de l'évènement.
+    const photoUrls: string[] = args.photoStorageIds?.length
+      ? (
+          await Promise.all(
+            args.photoStorageIds.map((id) => ctx.storage.getUrl(id as Id<"_storage">)),
+          )
+        ).filter((url): url is string => Boolean(url))
+      : payload.event.photoUrl
+        ? [payload.event.photoUrl]
+        : [];
 
-    const response = await fetch(
-      `https://graph.facebook.com/${GRAPH_VERSION}/${payload.page.pageId}/${endpoint}`,
-      { method: "POST", body },
-    );
-    const result = (await response.json()) as {
-      id?: string;
-      post_id?: string;
-      error?: { message?: string; code?: number };
-    };
-    if (!response.ok || result.error) {
-      const detail = result.error?.message ?? `HTTP ${response.status}`;
+    const graph = (path: string, params: URLSearchParams) =>
+      fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}`, {
+        method: "POST",
+        body: params,
+      });
+
+    const fail = (result: { error?: { message?: string; code?: number } }, status: number) => {
+      const detail = result.error?.message ?? `HTTP ${status}`;
       // Le jeton de Page ne se périme pas, mais il saute si le mot de passe du
       // compte change : le dire évite de chercher ailleurs.
       const hint =
         result.error?.code === 190
           ? " Le jeton de la Page n'est plus valide : reconnectez la Page."
           : "";
-      throw new Error(`Facebook a refusé la publication : ${detail}.${hint}`);
+      return new Error(`Facebook a refusé la publication : ${detail}.${hint}`);
+    };
+
+    /**
+     * Les photos sont d'abord déposées sans être publiées, puis rattachées au
+     * post : c'est le seul montage qui accepte plusieurs images ET une date de
+     * publication. Un envoi direct sur `/photos` ne porterait qu'une image.
+     */
+    const mediaIds: string[] = [];
+    for (const url of photoUrls) {
+      const params = new URLSearchParams({
+        access_token: payload.page.accessToken,
+        url,
+        published: "false",
+      });
+      const response = await graph(`${payload.page.pageId}/photos`, params);
+      const result = (await response.json()) as {
+        id?: string;
+        error?: { message?: string; code?: number };
+      };
+      if (!response.ok || result.error || !result.id) throw fail(result, response.status);
+      mediaIds.push(result.id);
     }
+
+    const body = new URLSearchParams({
+      access_token: payload.page.accessToken,
+      message,
+    });
+    mediaIds.forEach((id, index) => {
+      body.set(`attached_media[${index}]`, JSON.stringify({ media_fbid: id }));
+    });
+    if (args.scheduledFor !== undefined) {
+      body.set("published", "false");
+      body.set("scheduled_publish_time", String(Math.floor(args.scheduledFor / 1000)));
+    }
+
+    const response = await graph(`${payload.page.pageId}/feed`, body);
+    const result = (await response.json()) as {
+      id?: string;
+      post_id?: string;
+      error?: { message?: string; code?: number };
+    };
+    if (!response.ok || result.error) throw fail(result, response.status);
 
     const postId = result.post_id ?? result.id;
     if (!postId) throw new Error("Facebook n'a pas renvoyé d'identifiant de publication.");
@@ -267,7 +303,7 @@ export const publishEvent = action({
       postId,
       message,
       scheduledFor: args.scheduledFor,
-      withPhoto: Boolean(photoUrl),
+      withPhoto: photoUrls.length > 0,
       authorClerkId: author.clerkId,
       authorName: author.name,
     });
