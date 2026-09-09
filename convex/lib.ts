@@ -167,7 +167,8 @@ export type CrmPermissionAction =
   | "checkout"
   | "print"
   | "analyze"
-  | "start";
+  | "start"
+  | "publish";
 
 export async function getCrmAccessForIdentity(
   ctx: QueryCtx | MutationCtx,

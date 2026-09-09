@@ -20,6 +20,7 @@ import {
   Play,
   Plus,
   Send,
+  Share2,
   Sparkles,
   Tag,
   ThumbsUp,
@@ -89,13 +90,16 @@ export function Actualites() {
   const sub = searchParams.get("v") ?? "publications";
   const canCreate = canAccess(access, "mesoutils:actualites", "create");
   const canManage = canAccess(access, "mesoutils:actualites", "manage");
+  const canPublish = canAccess(access, "mesoutils:actualites", "publish");
 
   return (
     <div className="space-y-6">
       <SectionHeader title="Espace partage" />
       <SectionTabs />
       {sub === "publications" ? <Publications canCreate={canCreate} canManage={canManage} /> : null}
-      {sub === "evenements" ? <Evenements canCreate={canCreate} /> : null}
+      {sub === "evenements" ? (
+        <Evenements canCreate={canCreate} canPublish={canPublish} />
+      ) : null}
       {sub === "bonsplans" ? <BonsPlans canCreate={canCreate} /> : null}
     </div>
   );
@@ -760,7 +764,13 @@ function likeSummary(latestLikeName: string | undefined, likesCount: number) {
 
 /* ─── Événements ─────────────────────────────────────────────────────────── */
 
-function Evenements({ canCreate }: { canCreate: boolean }) {
+function Evenements({
+  canCreate,
+  canPublish,
+}: {
+  canCreate: boolean;
+  canPublish: boolean;
+}) {
   // Le calendrier ne charge que le mois affiché, grille complète comprise :
   // un évènement du 31 août visible sur la case de la première semaine de
   // septembre doit être chargé avec septembre.
@@ -1028,6 +1038,7 @@ function Evenements({ canCreate }: { canCreate: boolean }) {
 
       {openId ? (
         <CalendarEventDetail
+          canPublish={canPublish}
           event={
             [...(calendar ?? []), ...(undated ?? [])].find((item) => item.id === openId) ?? null
           }
@@ -1074,11 +1085,23 @@ function CalendarEventDetail({
   event,
   onClose,
   onDelete,
+  canPublish,
 }: {
   event: CalendarItem | null;
   onClose: () => void;
   onDelete?: (eventId: Id<"events">) => void;
+  canPublish: boolean;
 }) {
+  const [facebookOpen, setFacebookOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const posts = useQuery(
+    api.social.postsForEvent,
+    event
+      ? event.kind === "mesoutils"
+        ? { eventId: event.eventId as Id<"events"> }
+        : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }
+      : "skip",
+  );
   if (!event) return null;
   const details = (
     [
@@ -1193,9 +1216,39 @@ function CalendarEventDetail({
           </div>
         ) : null}
 
+        {notice ? (
+          <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-200">
+            {notice}
+          </p>
+        ) : null}
+
+        {posts && posts.length > 0 ? (
+          <div>
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+              Publié sur Facebook
+            </p>
+            <ul className="space-y-1.5 text-sm text-[var(--muted-foreground)]">
+              {posts.map((post) => (
+                <li key={post.id}>
+                  <span className="font-medium text-[var(--foreground)]">{post.pageName}</span>
+                  {post.scheduledFor
+                    ? ` · programmé pour le ${formatDateTime(post.scheduledFor)}`
+                    : ` · publié le ${formatDateTime(post.createdAt)}`}
+                  {` · par ${post.authorName}`}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
         <div className="flex items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
           <p className="text-sm text-[var(--muted-foreground)]">Proposé par {event.authorName}</p>
           <div className="flex gap-2">
+            {canPublish ? (
+              <Button variant="secondary" size="sm" onClick={() => setFacebookOpen(true)}>
+                <Share2 className="h-4 w-4" /> Publier sur Facebook
+              </Button>
+            ) : null}
             {/* Un évènement de la Recyclerie se modifie dans Recycapp : le
                 dupliquer ici ferait exister deux versions du même évènement. */}
             {event.kind === "mesoutils" && event.canManage && event.eventId && onDelete ? (
@@ -1207,9 +1260,174 @@ function CalendarEventDetail({
           </div>
         </div>
       </div>
+
+      {facebookOpen ? (
+        <FacebookPublishDialog
+          event={event}
+          onClose={() => setFacebookOpen(false)}
+          onPublished={setNotice}
+        />
+      ) : null}
     </Modal>
   );
 }
+
+/**
+ * Publication d'un évènement sur une Page Facebook.
+ *
+ * Facebook programme lui-même : on lui remet le post avec sa date et il le
+ * publie à l'heure dite. Rien à surveiller de notre côté, et rien à rejouer si
+ * le déploiement redémarre entre-temps.
+ */
+function FacebookPublishDialog({
+  event,
+  onClose,
+  onPublished,
+}: {
+  event: CalendarItem;
+  onClose: () => void;
+  onPublished: (message: string) => void;
+}) {
+  const pages = useQuery(api.social.listPages, {});
+  const publish = useAction(api.social.publishEvent);
+  const [pageId, setPageId] = useState("");
+  const [mode, setMode] = useState<"now" | "scheduled">("now");
+  const [scheduledFor, setScheduledFor] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Une seule Page configurée : inutile de faire choisir.
+    if (pages && pages.length === 1) setPageId(pages[0].pageId);
+  }, [pages]);
+
+  const pageName = pages?.find((page) => page.pageId === pageId)?.name;
+  const ready = Boolean(pageId) && (mode === "now" || scheduledFor !== null);
+
+  async function submit() {
+    if (!ready) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await publish({
+        ...(event.kind === "mesoutils"
+          ? { eventId: event.eventId as Id<"events"> }
+          : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }),
+        pageId,
+        ...(mode === "scheduled" && scheduledFor !== null
+          ? { scheduledFor }
+          : {}),
+      });
+      onPublished(
+        mode === "scheduled" && scheduledFor !== null
+          ? `Publication programmée sur ${pageName} pour le ${formatDateTime(scheduledFor)}.`
+          : `Publié sur ${pageName}.`,
+      );
+      onClose();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Publication impossible.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="Publier sur Facebook">
+      <div className="grid gap-4">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-4">
+          <p className="text-sm font-semibold text-[var(--foreground)]">{event.title}</p>
+          <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+            {event.start ? formatDateTime(event.start) : "Sans date"}
+            {event.location ? ` · ${event.location}` : ""}
+          </p>
+          {event.imageUrls.length > 0 ? (
+            <p className="mt-2 text-xs text-[var(--muted-foreground)]">
+              La première photo de l'évènement accompagnera la publication.
+            </p>
+          ) : null}
+        </div>
+
+        {pages === undefined ? (
+          <p className="text-sm text-[var(--muted-foreground)]">Chargement des Pages…</p>
+        ) : pages.length === 0 ? (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
+            Aucune Page Facebook n'est encore connectée. Les Pages et leurs jetons se
+            configurent sur le déploiement.
+          </p>
+        ) : (
+          <Field label="Page Facebook" required>
+            <Select value={pageId} onChange={(e) => setPageId(e.target.value)}>
+              <option value="">Choisir une Page…</option>
+              {pages.map((page) => (
+                <option key={page.pageId} value={page.pageId}>
+                  {page.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
+
+        <Field label="Quand publier ?" required>
+          <div className="flex gap-2">
+            {([
+              ["now", "Immédiatement"],
+              ["scheduled", "Programmer"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setMode(value)}
+                className={cn(
+                  "flex-1 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors",
+                  mode === value
+                    ? "border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-500/15 dark:text-brand-300"
+                    : "border-[var(--border)] bg-[var(--card)] text-[var(--muted-foreground)] hover:bg-[var(--accent)]",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </Field>
+
+        {mode === "scheduled" ? (
+          <Field
+            label="Date et heure de publication"
+            required
+            hint="Facebook exige au moins 10 minutes d'avance, et 6 mois au plus."
+          >
+            <DateTimePicker
+              value={scheduledFor}
+              onChange={setScheduledFor}
+              placeholder="Choisir la date de publication"
+            />
+          </Field>
+        ) : null}
+
+        {error ? (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
+          <Button variant="ghost" onClick={onClose} disabled={busy}>
+            Annuler
+          </Button>
+          <Button onClick={() => void submit()} disabled={busy || !ready}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {busy
+              ? "Envoi…"
+              : mode === "scheduled"
+                ? "Programmer la publication"
+                : "Publier maintenant"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 
 /* ─── Bons plans ─────────────────────────────────────────────────────────── */
 

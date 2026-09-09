@@ -1665,6 +1665,42 @@ export default defineSchema(
     .index("by_authorClerkId", ["authorClerkId"])
     .index("by_start", ["start"]),
 
+  /**
+   * Pages Facebook sur lesquelles Mes Outils peut publier.
+   *
+   * Le jeton de Page est un secret durable : il vit ici, dans le déploiement,
+   * et n'est jamais renvoyé au navigateur — seuls l'identifiant et le nom le
+   * sont. Même logique que la boîte Gmail de Klyd.
+   */
+  socialFacebookPages: defineTable({
+    pageId: v.string(),
+    name: v.string(),
+    accessToken: v.string(),
+    active: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.optional(v.number()),
+  }).index("by_pageId", ["pageId"]),
+
+  /** Publications Facebook émises depuis Mes Outils, pour le suivi. */
+  socialFacebookPosts: defineTable({
+    eventId: v.optional(v.id("events")),
+    /** Évènement du calendrier Recyclerie, quand la publication vient de là. */
+    recycappEventId: v.optional(v.id("recycappCalendarEvents")),
+    pageId: v.string(),
+    pageName: v.string(),
+    /** Identifiant du post renvoyé par Facebook (`{pageId}_{postId}`). */
+    postId: v.string(),
+    message: v.string(),
+    /** Date de publication programmée, absente pour une publication immédiate. */
+    scheduledFor: v.optional(v.number()),
+    withPhoto: v.boolean(),
+    authorClerkId: v.string(),
+    authorName: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_event", ["eventId"])
+    .index("by_recycappEvent", ["recycappEventId"]),
+
   /** Espace partage — bons plans internes (prêt, don, vente, échange). */
   dealPosts: defineTable({
     authorClerkId: v.string(),

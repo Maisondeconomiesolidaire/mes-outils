@@ -34,7 +34,8 @@ export type Action =
   | "checkout"
   | "print"
   | "analyze"
-  | "start";
+  | "start"
+  | "publish";
 
 export type Grant = {
   pageKey: string;
@@ -92,6 +93,7 @@ export const ACTION_LABELS: Record<Action, string> = {
   print: "Imprimer",
   analyze: "Analyse IA",
   start: "Demarrer",
+  publish: "Publier sur les reseaux",
 };
 
 export const RECYCAPP_PAGES: PermissionPage[] = [
@@ -221,8 +223,9 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
     app: "mesoutils",
     key: "mesoutils:actualites",
     label: "Espace partage",
-    description: "Posts internes, publications d'equipe, likes et commentaires.",
-    actions: ["read", "create", "manage"],
+    description:
+      "Posts internes, publications d'equipe, evenements, et publication sur les reseaux sociaux.",
+    actions: ["read", "create", "manage", "publish"],
   },
   {
     app: "mesoutils",
