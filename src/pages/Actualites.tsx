@@ -1225,18 +1225,18 @@ function CalendarEventDetail({
         ) : null}
 
         {posts && posts.length > 0 ? (
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-              Publié sur Facebook
-            </p>
-            <ul className="space-y-1.5 text-sm text-[var(--muted-foreground)]">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--muted)] p-4">
+            <ul className="space-y-2 text-sm">
               {posts.map((post) => (
-                <li key={post.id}>
-                  <span className="font-medium text-[var(--foreground)]">{post.pageName}</span>
-                  {post.scheduledFor
-                    ? ` · programmé pour le ${formatDateTime(post.scheduledFor)}`
-                    : ` · publié le ${formatDateTime(post.createdAt)}`}
-                  {` · par ${post.authorName}`}
+                <li key={post.id} className="flex items-start gap-2">
+                  <Share2 className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
+                  <span className="text-[var(--foreground)]">
+                    {/* Une publication programmée n'est pas encore parue : le
+                        dire évite de croire l'évènement déjà annoncé. */}
+                    {post.scheduledFor
+                      ? `Publication programmée sur Facebook (${post.pageName}) pour le ${formatDateTime(post.scheduledFor)} par ${post.authorName}`
+                      : `Publié sur Facebook (${post.pageName}) le ${formatDateTime(post.createdAt)} par ${post.authorName}`}
+                  </span>
                 </li>
               ))}
             </ul>

@@ -13,7 +13,7 @@ import { v } from "convex/values";
 import { action, internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { requireCrmPermission, requireUser } from "./lib";
+import { formatUserName, requireCrmPermission, requireUser } from "./lib";
 
 const PAGE_KEY = "mesoutils:actualites";
 const GRAPH_VERSION = "v26.0";
@@ -151,10 +151,9 @@ export const assertCanPublish = internalQuery({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "publish");
     const identity = await requireUser(ctx);
-    return {
-      clerkId: identity.subject,
-      name: (identity.name as string | undefined) ?? "Mes Outils",
-    };
+    // Le nom affiché est celui de la personne, pas celui de l'outil : la fiche
+    // d'un évènement dit qui a publié.
+    return { clerkId: identity.subject, name: formatUserName(identity) };
   },
 });
 
