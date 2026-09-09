@@ -502,3 +502,59 @@ textarea {
     @apply font-sans;
   }
 }
+
+/* >>> CLICKABLE-CURSOR >>> */
+/* ─── Curseur des éléments cliquables ────────────────────────────────────────
+ *
+ * Bloc identique dans toutes les apps de l'écosystème.
+ *
+ * Tailwind v4 a retiré le `cursor: pointer` que la v3 posait sur les boutons :
+ * survoler un bouton laissait la flèche par défaut, et l'interface paraissait
+ * inerte. On le rétablit pour tout ce qui se clique — y compris ce qui n'est
+ * pas un bouton mais en joue le rôle (`role="button"`) — et on marque ce qui
+ * est désactivé.
+ *
+ * Les sélecteurs restent volontairement de faible spécificité : une classe
+ * utilitaire (`cursor-default`, `cursor-grab`…) l'emporte toujours.
+ */
+button,
+[role="button"],
+[role="tab"],
+[role="option"],
+[role="menuitem"],
+[role="menuitemcheckbox"],
+[role="menuitemradio"],
+[role="checkbox"],
+[role="radio"],
+[role="switch"],
+a[href],
+summary,
+select,
+input[type="checkbox"],
+input[type="radio"],
+input[type="file"],
+input[type="submit"],
+input[type="button"],
+input[type="reset"],
+input[type="color"],
+input[type="range"] {
+  cursor: pointer;
+}
+
+/* Un label qui enveloppe sa case ou son bouton radio se clique aussi. Les
+   labels de champs texte, eux, gardent le curseur d'écriture. */
+label:has(> input[type="checkbox"]),
+label:has(> input[type="radio"]),
+label:has(> span > input[type="checkbox"]),
+label:has(> span > input[type="radio"]) {
+  cursor: pointer;
+}
+
+/* Rien à cliquer sur un élément désactivé : le curseur doit le dire. */
+button:disabled,
+select:disabled,
+input:disabled,
+[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+/* <<< CLICKABLE-CURSOR <<< */
