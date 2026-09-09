@@ -759,8 +759,15 @@ export const sendFeedbackResolvedEmail = internalAction({
   },
 });
 
-/** Destinataire des créations de maintenance (responsable de la flotte). */
-export const MAINTENANCE_NOTICE_EMAILS = ["f.henry@eco-solidaire.fr"];
+/**
+ * Destinataires des créations de maintenance.
+ *
+ * Vide pour l'instant : Franck Henry, seul destinataire jusqu'ici, ne souhaite
+ * plus être prévenu à chaque maintenance créée. Aucun email n'est donc envoyé
+ * tant que personne n'est ajouté ici — l'information reste consultable dans
+ * Gotravaux.
+ */
+export const MAINTENANCE_NOTICE_EMAILS: string[] = [];
 
 const MAINTENANCE_PRIORITY_LABELS: Record<string, string> = {
   low: "Basse",
@@ -790,6 +797,8 @@ export const sendMaintenanceCreatedEmail = internalAction({
     vehicleImageStorageId: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
+    // Sans destinataire, inutile de composer l'email ni d'appeler Resend.
+    if (MAINTENANCE_NOTICE_EMAILS.length === 0) return;
     const rows: Array<[string, string]> = [
       ["Véhicule", [args.vehicleName, args.vehiclePlate].filter(Boolean).join(" · ")],
       ["Intervention", args.title],
