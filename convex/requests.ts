@@ -2213,6 +2213,14 @@ export const advanceProcess = mutation({
     const steps = r.processSteps ?? [];
     const current = r.completedSteps ?? 0;
     if (current >= steps.length) return;
+    // Une prestation planifiée sans date ne veut rien dire : elle fait passer
+    // la demande en colonne « Prestation planifiée » et la sort des listes à
+    // programmer, sans que personne sache quand elle a lieu.
+    if (steps[current] === STEP.prestaPlanifiee && !r.scheduledDate) {
+      throw new Error(
+        "Programmez une date avant de cocher « Prestation planifiée ».",
+      );
+    }
     const completedSteps = current + 1;
     const done = completedSteps >= steps.length && completedSteps > 0;
     const log = (r.processLog ?? []).filter((e) => e.step < current);
