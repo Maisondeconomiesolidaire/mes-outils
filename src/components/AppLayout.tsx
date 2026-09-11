@@ -12,7 +12,7 @@ import { HelpButton } from "./HelpButton";
 import { Button } from "./ui/Button";
 import { Field, Input } from "./ui/Field";
 import { FullSpinner } from "./ui/Spinner";
-import { AuthSwitch } from "./ui/auth-switch";
+import { AuthServiceFallback, AuthSwitch } from "./ui/auth-switch";
 
 /** Style "bouton primaire" appliqué à l'élément de navigation actif. */
 const NAV_ACTIVE = "bg-brand-500 text-white shadow-[0_8px_18px_rgba(71,198,103,0.25)]";
@@ -23,6 +23,7 @@ export function AppLayout() {
 
   return (
     <>
+      <AuthServiceFallback />
       <SignedOut>
         <AuthPanel />
       </SignedOut>
@@ -34,20 +35,7 @@ export function AppLayout() {
   );
 }
 
-/**
- * Panneau d'authentification monté en pleine page.
- *
- * On monte À LA FOIS `<SignIn>` et `<SignUp>` (un seul visible à la fois) et on
- * bascule selon le hash. Sans `<SignUp>` local, le lien « m'inscrire » de
- * `<SignIn>` (signUpUrl="#/sign-up") pointait vers une page sans composant, et
- * Clerk retombait sur le Portail hébergé — d'où la page en anglais, aux
- * couleurs par défaut, où il fallait recliquer sur « inscription ».
- *
- * Les pages restent locales (`/sign-in` et `/sign-up`), mais les étapes
- * internes Clerk utilisent le routing hash. Ça évite un changement de route
- * React au passage vers la vérification email, qui remontait le composant et
- * pouvait déclencher un second envoi de code.
- */
+/** Portail partagé pleine page ; ses étapes Clerk restent en routing hash. */
 function AuthPanel() {
   const location = useLocation();
   return <AuthSwitch appName="Mes Outils" logoSrc="/mesoutils-light.png" initialMode={location.pathname.startsWith("/sign-up") ? "signup" : "signin"} />;

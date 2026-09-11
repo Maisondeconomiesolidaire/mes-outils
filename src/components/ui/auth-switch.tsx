@@ -1,284 +1,184 @@
-import { useEffect, useRef, useState, type FormEvent, type HTMLAttributes, type ReactNode } from "react";
-import { useSignIn, useSignUp } from "@clerk/clerk-react";
-import { ArrowLeft, KeyRound, Loader2, LockKeyhole, Mail, UserRound } from "lucide-react";
+import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { ClerkFailed, ClerkLoaded, ClerkLoading, SignIn, SignUp, useAuth } from "@clerk/clerk-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 
-type Mode = "signin" | "signup" | "code" | "reset-request" | "reset" | "mfa" | "signup-code";
-
+type Mode = "signin" | "signup";
 type AuthSwitchProps = {
-  initialMode?: "signin" | "signup";
-  /** Nom affiché dans les titres ("Bienvenue sur …"). */
+  initialMode?: Mode;
   appName?: string;
-  /** Libellés d'accueil propres à l'application, si le nom ne doit pas être affiché. */
   welcomeTitle?: string;
   signinSubtitle?: string;
   memberPanelDescription?: string;
   logoSrc?: string;
-  /**
-   * Page à rejoindre une fois connecté. À défaut, le `redirect_url` de l'URL,
-   * puis l'accueil. À renseigner quand le portail garde une page précise
-   * (`RequirePublicAccount`), sinon l'utilisateur est renvoyé à l'accueil.
-   */
   redirectUrl?: string;
-  /** Lien de retour affiché sous les panneaux ; absent = pas de lien. */
   homeHref?: string;
   homeLabel?: string;
-  /** Pages légales ; absentes = mention en texte simple, sans lien. */
   termsHref?: string;
   privacyHref?: string;
 };
 
-function message(error: unknown) {
-  if (typeof error === "object" && error && "errors" in error) {
-    const errors = (error as { errors?: Array<{ longMessage?: string; message?: string }> }).errors;
-    return errors?.[0]?.longMessage ?? errors?.[0]?.message ?? "Une erreur est survenue.";
+/** Only return to a page in this app; never redirect to a URL supplied by another site. */
+export function authReturnUrl(value: string | null | undefined, origin: string) {
+  if (!value) return "/";
+  try {
+    const target = new URL(value, origin);
+    if (target.origin !== origin || target.username || target.password || target.pathname.startsWith("//")) return "/";
+    if (/^\/(connexion|inscription|sign-in|sign-up)(\/|$)/i.test(decodeURIComponent(target.pathname))) return "/";
+    target.searchParams.delete("auth");
+    target.searchParams.delete("redirect_url");
+    return target.pathname + target.search + target.hash;
+  } catch {
+    return "/";
   }
-  return error instanceof Error ? error.message : "Une erreur est survenue.";
 }
 
-/**
- * Portail d'authentification COMMUN à toutes les apps de l'écosystème.
- *
- * Fichier canonique : `~/mesoutils/src/components/ui/auth-switch.tsx`, propagé
- * par `bash ~/mesoutils/scripts/sync-auth-portal.sh`. Ne l'édite que là.
- *
- * Les mots de passe, codes et sessions restent entièrement gérés par Clerk :
- * seul l'habillage est à nous. Volontairement SANS react-router (`<a>` et
- * `window.location`), parce que Klyde n'a pas de routeur — le composant doit
- * pouvoir être déposé tel quel dans les 7 apps web.
+/** Canonical shared portal. Clerk owns verification, captcha, recovery and session tasks.
+ * Keep ONE mounted auth component and hash routing: step changes must not remount it.
+ * No app router dependency: Klyde also uses this component without react-router.
  */
 export function AuthSwitch({
-  initialMode = "signin",
-  appName = "Votre espace",
-  welcomeTitle,
-  signinSubtitle,
-  memberPanelDescription,
-  logoSrc = "/logo-lsdb.png",
-  redirectUrl,
-  homeHref,
-  homeLabel = "Retour à l'accueil",
-  termsHref,
-  privacyHref,
+  initialMode = "signin", appName = "Votre espace", welcomeTitle, signinSubtitle,
+  memberPanelDescription, logoSrc = "/logo-lsdb.png", redirectUrl,
+  homeHref, homeLabel = "Retour à l'accueil", termsHref, privacyHref,
 }: AuthSwitchProps) {
-  const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn();
-  const { isLoaded: signUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
-  const [mode, setMode] = useState<Mode>(initialMode);
-  const [signUpSide, setSignUpSide] = useState(initialMode === "signup");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-  const [code, setCode] = useState("");
-  const [mfaStrategy, setMfaStrategy] = useState<"email_code" | "phone_code" | "totp" | "backup_code">("totp");
-  const [notice, setNotice] = useState<string | null>(null);
-  const [termsAccepted, setTermsAccepted] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const actionInProgress = useRef(false);
-  const switchTimer = useRef<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { isLoaded, isSignedIn } = useAuth();
+  const readMode = (): Mode => {
+    const requested = new URLSearchParams(window.location.search).get("auth");
+    return requested === "signin" || requested === "signup" ? requested : initialMode;
+  };
+  const [mode, setMode] = useState<Mode>(readMode);
+  const [hash, setHash] = useState(window.location.hash);
+  const container = useRef<HTMLElement>(null);
+  const form = useRef<HTMLDivElement>(null);
+  const entry = !hash || hash === "#/" || hash === "#";
+  const returnTo = authReturnUrl(redirectUrl ?? new URLSearchParams(window.location.search).get("redirect_url") ?? window.location.pathname + window.location.search, window.location.origin);
 
-  useEffect(() => () => {
-    if (switchTimer.current !== null) window.clearTimeout(switchTimer.current);
+  // Both links point to a real local portal even in apps without dedicated auth routes.
+  const modeUrl = (next: Mode) => {
+    const target = new URL(window.location.href);
+    target.hash = "";
+    target.searchParams.set("auth", next);
+    target.searchParams.set("redirect_url", returnTo);
+    return target.pathname + target.search;
+  };
+  const switchMode = (next: Mode) => {
+    window.history.replaceState(window.history.state, "", modeUrl(next));
+    setHash("");
+    setMode(next);
+  };
+
+  useEffect(() => {
+    if (isLoaded && isSignedIn) window.location.replace(returnTo);
+  }, [isLoaded, isSignedIn, returnTo]);
+
+  useEffect(() => {
+    const update = () => { setHash(window.location.hash); setMode(readMode()); };
+    window.addEventListener("hashchange", update);
+    window.addEventListener("popstate", update);
+    return () => {
+      window.removeEventListener("hashchange", update);
+      window.removeEventListener("popstate", update);
+    };
+  }, [initialMode]);
+
+  useEffect(() => {
+    if (!form.current || !container.current) return;
+    const resize = new ResizeObserver(([entry]) => {
+      // offsetHeight includes padding, unlike contentRect. Long verification/error
+      // screens must expand the desktop card instead of being clipped at 700px.
+      if (entry && form.current) container.current?.style.setProperty("--auth-content-height", `${form.current.offsetHeight + 32}px`);
+    });
+    resize.observe(form.current);
+    return () => resize.disconnect();
   }, []);
 
-  /**
-   * Ouvre la session puis rejoint la page demandée. On recharge la page au lieu
-   * de faire une navigation cliente : c'est le seul comportement identique dans
-   * les apps avec routeur et dans Klyde qui n'en a pas.
-   */
-  const go = async (sessionId: string | null, setActive: (args: { session: string | null }) => Promise<void>) => {
-    if (!sessionId) throw new Error("Session de connexion introuvable.");
-    await setActive({ session: sessionId });
-    const returnTo = redirectUrl || new URLSearchParams(window.location.search).get("redirect_url") || "/";
-    if (returnTo !== window.location.pathname + window.location.search) window.location.replace(returnTo);
+  const appearance: ComponentProps<typeof SignIn>["appearance"] = {
+    layout: { termsPageUrl: termsHref, privacyPageUrl: privacyHref },
+    variables: { fontFamily: "inherit", borderRadius: "0.75rem", colorText: "#18181b", colorBackground: "#ffffff" },
+    elements: {
+      rootBox: { width: "100%" },
+      cardBox: { width: "100%", boxShadow: "none", border: "none", borderRadius: "0", overflow: "visible" },
+      card: { padding: "0", boxShadow: "none", border: "none", background: "transparent", borderRadius: "0", overflow: "visible" },
+      header: entry ? { display: "none" } : {},
+      logoBox: { display: "none" },
+      // Our panels switch between the two local components. Keep legal notices,
+      // MFA alternatives, password recovery and all task controls visible.
+      footerAction: { display: "none" },
+      footer: { background: "transparent", padding: "1rem 0 0" },
+      formButtonPrimary: { background: "var(--auth-accent, var(--color-brand-600))", minHeight: "2.75rem" },
+      formFieldInput: { minHeight: "2.75rem" },
+    },
   };
-  const run = (action: () => Promise<void>) => async (event?: FormEvent) => {
-    event?.preventDefault();
-    if (actionInProgress.current) return;
-    actionInProgress.current = true;
-    setBusy(true); setError(null); setNotice(null);
-    try { await action(); } catch (caught) { setError(message(caught)); } finally { setBusy(false); }
-    actionInProgress.current = false;
-  };
-  /**
-   * Bascule immédiate, sans le délai calé sur l'animation : utilisée par la
-   * barre compacte des écrans étroits, où il n'y a plus rien à animer.
-   */
-  const switchFormNow = (nextMode: "signin" | "signup") => {
-    if (switchTimer.current !== null) {
-      window.clearTimeout(switchTimer.current);
-      switchTimer.current = null;
-    }
-    setSignUpSide(nextMode === "signup");
-    setMode(nextMode);
-    setError(null);
-  };
-  const switchForm = (nextMode: "signin" | "signup") => {
-    if (switchTimer.current !== null) window.clearTimeout(switchTimer.current);
-    setSignUpSide(nextMode === "signup");
-    setError(null);
-    switchTimer.current = window.setTimeout(() => {
-      setMode(nextMode);
-      switchTimer.current = null;
-    }, 600);
-  };
-  const sendLoginCode = async () => {
-    if (!signInLoaded || !signIn) return;
-    if (!email.trim()) throw new Error("Renseignez votre adresse email avant de demander un code de connexion.");
-    const result = await signIn.create({ identifier: email.trim() });
-    const factor = result.supportedFirstFactors?.find((item) => item.strategy === "email_code");
-    if (!factor || factor.strategy !== "email_code") throw new Error("La connexion par code n'est pas disponible pour cette adresse.");
-    await result.prepareFirstFactor({ strategy: "email_code", emailAddressId: factor.emailAddressId });
-    setCode("");
-    setMode("code");
-  };
-  const loginWithPassword = async () => {
-    if (!signInLoaded || !signIn) return;
-    const result = await signIn.create({ strategy: "password", identifier: email.trim(), password });
-    if (result.status === "complete") return go(result.createdSessionId, setSignInActive);
-    if ((result.status === "needs_second_factor" || String(result.status) === "needs_client_trust")) return prepareMfa(result);
-    throw new Error("Cette connexion nécessite une étape supplémentaire.");
-  };
-  const prepareMfa = async (result: NonNullable<typeof signIn>) => {
-    const factors = result.supportedSecondFactors ?? [];
-    const factor = factors.find((item) => item.strategy === "email_code")
-      ?? factors.find((item) => item.strategy === "totp")
-      ?? factors.find((item) => item.strategy === "phone_code")
-      ?? factors.find((item) => item.strategy === "backup_code");
-    if (!factor) throw new Error("Aucune méthode de vérification prise en charge n'est disponible.");
-    if (factor.strategy === "email_code") {
-      await result.prepareSecondFactor({ strategy: "email_code", emailAddressId: factor.emailAddressId });
-    } else if (factor.strategy === "phone_code") {
-      await result.prepareSecondFactor({ strategy: "phone_code", phoneNumberId: factor.phoneNumberId });
-    }
-    setCode("");
-    setMfaStrategy(factor.strategy); setMode("mfa");
-  };
-  const completeLoginCode = async () => {
-    if (!signIn) return;
-    const result = await signIn.attemptFirstFactor({ strategy: "email_code", code: code.replace(/\s/g, "") });
-    if (result.status === "complete") return go(result.createdSessionId, setSignInActive);
-    if ((result.status === "needs_second_factor" || String(result.status) === "needs_client_trust")) return prepareMfa(result);
-    throw new Error("Code incorrect ou expiré.");
-  };
-  const resetPassword = async () => {
-    if (!signInLoaded || !signIn) return;
-    if (!email.trim()) throw new Error("Renseignez votre adresse email avant de demander la réinitialisation.");
-    await signIn.create({ strategy: "reset_password_email_code", identifier: email.trim() });
-    setCode("");
-    setMode("reset");
-  };
-  const completeReset = async () => {
-    if (!signIn) return;
-    const result = await signIn.attemptFirstFactor({ strategy: "reset_password_email_code", code: code.replace(/\s/g, ""), password: newPassword });
-    if (result.status === "complete") return go(result.createdSessionId, setSignInActive);
-    if (result.status === "needs_second_factor" || String(result.status) === "needs_client_trust") return prepareMfa(result);
-    throw new Error("Le code ou le nouveau mot de passe est invalide.");
-  };
-  const createAccount = async () => {
-    if (!signUpLoaded || !signUp) return;
-    if (!termsAccepted) throw new Error("Vous devez accepter les conditions d'utilisation pour créer un compte.");
-    const result = await signUp.create({ emailAddress: email.trim(), password, firstName, lastName, legalAccepted: termsAccepted });
-    if (result.status === "complete") return go(result.createdSessionId, setSignUpActive);
-    if (result.unverifiedFields.includes("email_address")) {
-      await result.prepareEmailAddressVerification({ strategy: "email_code" });
-      setCode("");
-      setMode("signup-code");
-      return;
-    }
-    throw new Error("L'inscription n'a pas pu être finalisée. Vérifiez les informations saisies.");
-  };
-  const completeMfa = async () => {
-    if (!signIn) return;
-    const result = await signIn.attemptSecondFactor({ strategy: mfaStrategy, code: code.replace(/\s/g, "") });
-    if (result.status === "complete") return go(result.createdSessionId, setSignInActive);
-    throw new Error("Code incorrect ou expiré.");
-  };
-  const completeSignupCode = async () => {
-    if (!signUp) return;
-    const result = await signUp.attemptEmailAddressVerification({ code: code.replace(/\s/g, "") });
-    if (result.status === "complete") return go(result.createdSessionId, setSignUpActive);
-    throw new Error("Des informations supplémentaires sont nécessaires pour finaliser l'inscription.");
-  };
-  const resendCode = async () => {
-    if (mode === "mfa" && signIn) await prepareMfa(signIn);
-    else if (mode === "signup-code" && signUp) {
-      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
-      setCode("");
-    } else if (mode === "reset") await resetPassword();
-    else if (mode === "code") await sendLoginCode();
-    else return;
-    setNotice("Un nouveau code a été envoyé. Vérifiez aussi vos courriers indésirables.");
-  };
-  const mfaSubtitle = mfaStrategy === "totp" ? "Saisissez le code de votre application d'authentification."
-    : mfaStrategy === "backup_code" ? "Saisissez un code de secours."
-    : mfaStrategy === "phone_code" ? "Saisissez le code de sécurité envoyé par SMS."
-    : "Saisissez le code de sécurité envoyé par email.";
-  const title = mode === "signup" ? "Créer votre compte" : mode === "reset" ? "Nouveau mot de passe" : mode === "reset-request" ? "Réinitialiser le mot de passe" : welcomeTitle ?? `Bienvenue sur ${appName}`;
-  const subtitle = mode === "signup" ? "Créez votre espace en quelques instants." : mode === "reset" ? "Saisissez le code reçu et choisissez un nouveau mot de passe." : mode === "reset-request" ? "Nous vous enverrons un code de réinitialisation." : mode === "mfa" ? mfaSubtitle : mode === "code" || mode === "signup-code" ? "Saisissez le code de sécurité envoyé par email." : signinSubtitle ?? `Connectez-vous pour retrouver votre espace ${appName}.`;
-  const needsCode = mode === "code" || mode === "mfa" || mode === "signup-code";
-  const backLink = homeHref ? <a href={homeHref} className="auth-switch-back-link"><ArrowLeft className="h-4 w-4" /> {homeLabel}</a> : null;
-  return <main className="auth-switch-page"><section className={`auth-switch-container ${signUpSide ? "sign-up-mode" : ""}`}>
-    <div className="auth-switch-form">
-    {/* Écrans étroits : les panneaux qui se croisent laissent place à une
-        simple bascule, qui change de formulaire sans animation ni délai. */}
-    <div className="auth-switch-compact">
-      {backLink}
-      <p>
-        {signUpSide ? "Déjà un compte ?" : "Pas de compte ?"}{" "}
-        <button type="button" onClick={() => switchFormNow(signUpSide ? "signin" : "signup")}>
-          {signUpSide ? "Se connecter" : "Je m'inscris"}
-        </button>
-      </p>
-    </div>
-    <img src={logoSrc} alt={appName} className="mb-6 h-16 w-auto object-contain" />
-    <h1 className="text-3xl font-black tracking-tight text-zinc-950">{title}</h1><p className="mt-2 text-sm text-zinc-600">{subtitle}</p>
-    <form className="mt-7 space-y-4" onSubmit={run(needsCode ? mode === "mfa" ? completeMfa : mode === "signup-code" ? completeSignupCode : completeLoginCode : mode === "reset-request" ? resetPassword : mode === "reset" ? completeReset : mode === "signup" ? createAccount : loginWithPassword)}>
-      {mode === "signup" ? <div className="grid gap-4 sm:grid-cols-2"><Field label="Prénom" value={firstName} onChange={setFirstName} /><Field label="Nom" value={lastName} onChange={setLastName} /></div> : null}
-      {!needsCode && mode !== "reset" ? <Field label="Adresse email" value={email} onChange={setEmail} type="email" icon={<Mail className="h-4 w-4" />} /> : null}
-      {(mode === "signin" || mode === "signup") ? <Field label="Mot de passe" value={password} onChange={setPassword} type="password" icon={<LockKeyhole className="h-4 w-4" />} /> : null}
-      {mode === "signup" ? <div className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-3 text-sm leading-5 text-zinc-700"><input id="terms-acceptance" required checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-brand-600" /><label htmlFor="terms-acceptance">J'accepte les <LegalLink href={termsHref}>conditions générales d'utilisation</LegalLink> et la <LegalLink href={privacyHref}>politique de confidentialité</LegalLink>.</label></div> : null}
-      {needsCode || mode === "reset" ? <Field label="Code de confirmation" value={code} onChange={setCode} inputMode={mode === "mfa" && mfaStrategy === "backup_code" ? "text" : "numeric"} icon={<KeyRound className="h-4 w-4" />} /> : null}
-      {mode === "reset" ? <Field label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} type="password" icon={<LockKeyhole className="h-4 w-4" />} /> : null}
-      {error ? <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p> : null}
-      <button disabled={busy} className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-brand-600 px-4 text-sm font-bold text-white transition hover:bg-brand-700 disabled:opacity-60">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserRound className="h-4 w-4" />}{needsCode || mode === "reset" ? "Confirmer" : mode === "reset-request" ? "Envoyer le code" : mode === "signup" ? "Créer mon compte" : "Se connecter"}</button>
-    </form>
-    {notice ? <p role="status" className="mt-3 text-sm text-green-700">{notice}</p> : null}
-    {needsCode || mode === "reset" ? <div className="mt-5 flex flex-wrap gap-4 text-sm font-semibold text-brand-700">
-      {mode !== "mfa" || mfaStrategy === "email_code" || mfaStrategy === "phone_code" ? <button type="button" disabled={busy} onClick={() => void run(resendCode)()}>Renvoyer le code</button> : null}
-      <button type="button" disabled={busy} onClick={() => { setMode("signin"); setSignUpSide(false); setCode(""); setError(null); setNotice(null); }}>Retour à la connexion</button>
-    </div> : null}
-    {mode === "signin" ? <div className="mt-5 flex flex-wrap gap-x-6 gap-y-3 text-sm font-semibold text-brand-700"><button type="button" onClick={() => void run(sendLoginCode)()} disabled={busy}>Recevoir un code de connexion</button><button type="button" onClick={() => { setMode("reset-request"); setError(null); }}>Mot de passe oublié ?</button></div> : null}
-    </div>
-    <div className="auth-switch-panels">
-      <aside className="auth-switch-panel left-panel">
-        <div className="auth-switch-panel-content">
-          <h2>Nouveau ici ?</h2>
-          <p>Créez votre espace en quelques instants pour suivre vos démarches.</p>
-          <button type="button" onClick={() => switchForm("signup")}>Créer un compte</button>
+  const backLink = homeHref ? <a href={homeHref} className="auth-switch-back-link"><ArrowLeft className="h-4 w-4" />{homeLabel}</a> : null;
+
+  return <main className="auth-switch-page">
+    <section ref={container} className={`auth-switch-container ${mode === "signup" ? "sign-up-mode" : ""}`}>
+      <div ref={form} className="auth-switch-form">
+        <div className="auth-switch-compact">
           {backLink}
+          <p>{mode === "signup" ? "Déjà un compte ?" : "Pas de compte ?"}{" "}
+            <button type="button" onClick={() => switchMode(mode === "signup" ? "signin" : "signup")}>{mode === "signup" ? "Se connecter" : "Je m'inscris"}</button>
+          </p>
         </div>
-      </aside>
-      <aside className="auth-switch-panel right-panel">
-        <div className="auth-switch-panel-content">
-          <h2>Déjà membre ?</h2>
-          <p>{memberPanelDescription ?? <>Retrouvez votre espace {appName} et vos démarches en cours.</>}</p>
-          <button type="button" onClick={() => switchForm("signin")}>Se connecter</button>
-          {backLink}
-        </div>
-      </aside>
-    </div>
-  </section></main>;
+        <img src={logoSrc} alt={appName} className="mb-6 h-16 w-auto object-contain" />
+        {entry ? <div className="mb-6">
+          <h1 className="text-3xl font-black tracking-tight text-zinc-950">{mode === "signup" ? "Créer votre compte" : welcomeTitle ?? `Bienvenue sur ${appName}`}</h1>
+          <p className="mt-2 text-sm text-zinc-600">{mode === "signup" ? "Créez votre espace en quelques instants." : signinSubtitle ?? `Connectez-vous pour retrouver votre espace ${appName}.`}</p>
+        </div> : null}
+        <ClerkLoading><AuthLoading /></ClerkLoading>
+        <ClerkFailed><AuthUnavailable /></ClerkFailed>
+        <ClerkLoaded>
+          {isSignedIn ? <AuthLoading /> : mode === "signup" ? <SignUp
+            routing="hash" signInUrl={modeUrl("signin")}
+            forceRedirectUrl={returnTo} signInForceRedirectUrl={returnTo}
+            appearance={appearance} fallback={<AuthLoading />}
+          /> : <SignIn
+            routing="hash" withSignUp={false} signUpUrl={modeUrl("signup")}
+            forceRedirectUrl={returnTo} signUpForceRedirectUrl={returnTo}
+            appearance={appearance} fallback={<AuthLoading />}
+          />}
+        </ClerkLoaded>
+      </div>
+      <div className="auth-switch-panels">
+        <aside className="auth-switch-panel left-panel" aria-hidden={mode === "signup"} inert={mode === "signup"}>
+          <div className="auth-switch-panel-content">
+            <h2>Nouveau ici ?</h2><p>Créez votre espace en quelques instants pour suivre vos démarches.</p>
+            <button type="button" onClick={() => switchMode("signup")}>Créer un compte</button>{backLink}
+          </div>
+        </aside>
+        <aside className="auth-switch-panel right-panel" aria-hidden={mode !== "signup"} inert={mode !== "signup"}>
+          <div className="auth-switch-panel-content">
+            <h2>Déjà membre ?</h2><p>{memberPanelDescription ?? `Retrouvez votre espace ${appName} et vos démarches en cours.`}</p>
+            <button type="button" onClick={() => switchMode("signin")}>Se connecter</button>{backLink}
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>;
 }
 
-/** Mention légale : lien si l'app a la page, texte simple sinon. */
-function LegalLink({ href, children }: { href?: string; children: ReactNode }) {
-  if (!href) return <>{children}</>;
-  return <a href={href} className="font-medium text-brand-700 underline underline-offset-2 hover:text-brand-900">{children}</a>;
+/** Render outside SignedOut: otherwise Clerk failures leave an empty page. */
+export function AuthServiceFallback() {
+  const frame = (failed: boolean) => <main className="auth-switch-page">
+    <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-lg">
+      {failed ? <AuthUnavailable /> : <AuthLoading />}
+    </div>
+  </main>;
+  return <><ClerkLoading>{frame(false)}</ClerkLoading><ClerkFailed>{frame(true)}</ClerkFailed></>;
 }
 
-function Field({ label, value, onChange, type = "text", inputMode, icon }: { label: string; value: string; onChange: (value: string) => void; type?: string; inputMode?: HTMLAttributes<HTMLInputElement>["inputMode"]; icon?: ReactNode }) {
-  return <label className="block text-sm font-semibold text-zinc-800"><span>{label}</span><span className="relative mt-1.5 block">{icon ? <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-brand-600">{icon}</span> : null}<input required value={value} type={type} inputMode={inputMode} onChange={(event) => onChange(event.target.value)} className={`h-12 w-full rounded-xl border border-zinc-200 bg-white px-3 outline-none transition focus:border-brand-500 focus:ring-4 focus:ring-brand-100 ${icon ? "pl-10" : ""}`} /></span></label>;
+function AuthUnavailable() {
+  return <div role="alert" className="space-y-3 rounded-xl bg-red-50 p-4 text-sm text-red-800">
+    <p>Le service de connexion ne répond pas. Vérifiez votre connexion internet puis réessayez.</p>
+    <button type="button" className="font-semibold underline" onClick={() => window.location.reload()}>Réessayer</button>
+  </div>;
+}
+
+function AuthLoading() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => { const timer = window.setTimeout(() => setSlow(true), 12000); return () => window.clearTimeout(timer); }, []);
+  if (slow) return <AuthUnavailable />;
+  return <p role="status" className="flex items-center gap-2 py-6 text-sm text-zinc-600"><Loader2 className="h-4 w-4 animate-spin" />Chargement du formulaire sécurisé…</p>;
 }
 
 export default AuthSwitch;
