@@ -1952,6 +1952,11 @@ export default defineSchema(
    * n'en vient pas : une vente de la main à la main, un contact pris en
    * boutique, ou un complément (téléphone, note) sur un acheteur connu.
    */
+  klydeDeletedCustomers: defineTable({
+    key: v.string(),
+    deletedAt: v.number(),
+  }).index("by_key", ["key"]),
+
   klydeCustomers: defineTable({
     name: v.string(),
     email: v.optional(v.string()),

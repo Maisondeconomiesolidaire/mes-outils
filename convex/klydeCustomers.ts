@@ -73,9 +73,10 @@ export type CustomerRow = {
 };
 
 async function buildCustomers(ctx: QueryCtx): Promise<CustomerRow[]> {
-  const [emails, manuals] = await Promise.all([
+  const [emails, manuals, deleted] = await Promise.all([
     ctx.db.query("klydeVintedEmails").collect(),
     ctx.db.query("klydeCustomers").collect(),
+    ctx.db.query("klydeDeletedCustomers").collect(),
   ]);
 
   const rows = new Map<string, CustomerRow>();
@@ -168,7 +169,9 @@ async function buildCustomers(ctx: QueryCtx): Promise<CustomerRow[]> {
     });
   }
 
+  const deletedKeys = new Set(deleted.map((row) => row.key));
   return [...rows.values()]
+    .filter((row) => !deletedKeys.has(row.key))
     .map((row) => ({
       ...row,
       spent: Math.round(row.spent * 100) / 100,
@@ -259,5 +262,19 @@ export const remove = mutation({
   handler: async (ctx, { id }) => {
     await requireCrmPermission(ctx, PAGE_KEY, "delete");
     await ctx.db.delete(id);
+  },
+});
+
+/** Retire aussi les clients dérivés des emails, sans toucher aux ventes. */
+export const removeCustomer = mutation({
+  args: { key: v.string() },
+  handler: async (ctx, { key }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "delete");
+    const existing = await ctx.db.query("klydeDeletedCustomers")
+      .withIndex("by_key", (q) => q.eq("key", key)).unique();
+    if (!existing) {
+      await ctx.db.insert("klydeDeletedCustomers", { key, deletedAt: Date.now() });
+    }
+    return null;
   },
 });
