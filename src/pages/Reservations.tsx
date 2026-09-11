@@ -4,7 +4,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Boxes, CalendarCheck, CarFront, Check, ChevronDown, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
+import { Dialog } from "radix-ui";
+import { Boxes, CalendarCheck, CarFront, Check, ChevronDown, CirclePlay, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -100,6 +101,40 @@ export function Reservations() {
     <div className="space-y-6">
       <SectionHeader title="Réservations" />
       <SectionTabs />
+      {tab === "rooms" && (
+        <Dialog.Root>
+          <Dialog.Trigger asChild>
+            <Button type="button" variant="secondary">
+              <CirclePlay className="h-4 w-4" aria-hidden="true" />
+              Comment réserver
+            </Button>
+          </Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
+            <Dialog.Content
+              aria-describedby={undefined}
+              className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] h-[80svh] w-[calc(100%-1rem)] max-w-6xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-strong)] sm:w-[90vw]"
+            >
+              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
+                <Dialog.Title className="text-lg font-semibold">Comment réserver une salle</Dialog.Title>
+                <Dialog.Close asChild>
+                  <Button type="button" variant="ghost" size="sm" aria-label="Fermer le tutoriel">
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </Dialog.Close>
+              </div>
+              <iframe
+                src="https://app.supademo.com/embed/cmtwx2ybg1sceqm7x2fvv213r?embed_v=2&utm_source=embed"
+                loading="lazy"
+                title="Réservation de salles MESOUTILS"
+                allow="clipboard-write"
+                allowFullScreen
+                className="min-h-0 w-full flex-1 border-0"
+              />
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
       {tab === "mine" ? (
         <MyReservations />
       ) : tab === "equipment" ? (
