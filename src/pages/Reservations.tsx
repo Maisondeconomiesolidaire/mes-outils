@@ -113,23 +113,21 @@ export function Reservations() {
             <Dialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
             <Dialog.Content
               aria-describedby={undefined}
-              className="fixed left-1/2 top-1/2 z-50 flex h-[80vh] h-[80svh] w-[calc(100%-1rem)] max-w-6xl -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-strong)] sm:w-[90vw]"
+              className="fixed left-1/2 top-1/2 z-50 aspect-[1.8] w-[min(90vw,144svh)] max-w-6xl -translate-x-1/2 -translate-y-1/2 outline-none"
             >
-              <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
-                <Dialog.Title className="text-lg font-semibold">Comment réserver une salle</Dialog.Title>
-                <Dialog.Close asChild>
-                  <Button type="button" variant="ghost" size="sm" aria-label="Fermer le tutoriel">
-                    <X className="h-4 w-4" aria-hidden="true" />
-                  </Button>
-                </Dialog.Close>
-              </div>
+              <Dialog.Title className="sr-only">Tutoriel de réservation</Dialog.Title>
+              <Dialog.Close asChild>
+                <Button type="button" variant="secondary" size="sm" className="absolute bottom-full right-0 mb-2">
+                  Fermer
+                </Button>
+              </Dialog.Close>
               <iframe
                 src="https://app.supademo.com/embed/cmtwx2ybg1sceqm7x2fvv213r?embed_v=2&utm_source=embed"
                 loading="lazy"
                 title="Réservation de salles MESOUTILS"
                 allow="clipboard-write"
                 allowFullScreen
-                className="min-h-0 w-full flex-1 border-0"
+                className="absolute inset-0 block h-full w-full border-0"
               />
             </Dialog.Content>
           </Dialog.Portal>
