@@ -149,7 +149,7 @@ export function Reservations() {
           />
         )
       ) : (
-        <BrowseAndBook tab={tab} />
+        <BrowseAndBook key={tab} tab={tab} />
       )}
     </div>
   );
@@ -176,10 +176,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const blockedByReturns = (overdueReturns?.length ?? 0) > 0;
 
   // Sélection sur le calendrier : double-clic = début/jour unique, clic suivant = fin.
-  const [days, setDays] = useState<DaySelection>(() => {
-    const today = startOfDayMs(Date.now());
-    return { start: today, end: today };
-  });
+  const [days, setDays] = useState<DaySelection | null>(null);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("10:00");
   const [fullDay, setFullDay] = useState(false);
@@ -193,7 +190,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   function handleDayClick(day: Date) {
     const clicked = startOfDayMs(day);
     setDays((current) => {
-      if (current.start !== current.end || clicked <= current.start) {
+      if (!current || current.start !== current.end || clicked <= current.start) {
         return { start: clicked, end: clicked };
       }
       return { start: current.start, end: clicked };
@@ -206,14 +203,15 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   }
 
   const range = useMemo(() => {
+    if (!days) return null;
     const start = withTime(days.start, startTime);
     const end = withTime(days.end, endTime);
     return { start, end };
   }, [days, startTime, endTime]);
-  const rangeValid = range.start < range.end;
+  const rangeValid = range !== null && range.start < range.end;
 
-  const durationDays = Math.round((days.end - days.start) / 86_400_000) + 1;
-  const summary =
+  const durationDays = days ? Math.round((days.end - days.start) / 86_400_000) + 1 : 0;
+  const summary = !days ? "Sélectionnez un jour" :
     days.start === days.end
       ? format(new Date(days.start), "EEEE d MMMM yyyy", { locale: fr })
       : `${format(new Date(days.start), "EEE d MMM", { locale: fr })} → ${format(new Date(days.end), "EEE d MMM yyyy", { locale: fr })}`;
@@ -282,7 +280,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     (!bookingVehicle || !willTransport || Boolean(transportDetails.trim()));
 
   async function submitBooking() {
-    if (!rangeValid || !canSubmit) return;
+    if (!range || !rangeValid || !canSubmit) return;
     setSubmitting(true); setError(null);
     try {
       if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
@@ -353,7 +351,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                 {summary}
               </span>
               <span className="rounded-full bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
-                {durationDays} jour{durationDays > 1 ? "s" : ""}
+                {days ? `${durationDays} jour${durationDays > 1 ? "s" : ""}` : "Aucune date sélectionnée"}
               </span>
             </div>
             <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
@@ -361,16 +359,16 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
             </p>
             <div className="space-y-3">
               <FilterField label="Heure de début">
-                <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
+                <TimeSelect value={startTime} onChange={setStartTime} disabled={!days || fullDay} />
               </FilterField>
               <FilterField label="Heure de fin">
-                <TimeSelect value={endTime} onChange={setEndTime} disabled={fullDay} />
+                <TimeSelect value={endTime} onChange={setEndTime} disabled={!days || fullDay} />
               </FilterField>
             </div>
             <div className="border-t border-[var(--border)] pt-3">
               <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
             </div>
-            {!rangeValid ? (
+            {days && !rangeValid ? (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
                 L'heure de fin doit être après l'heure de début.
               </p>
@@ -407,12 +405,14 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                 </select>
               </FilterField>
             )}
-            <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{freeCount} disponible{freeCount > 1 ? "s" : ""}</span>
+            <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{rangeValid ? `${freeCount} disponible${freeCount > 1 ? "s" : ""}` : ""}</span>
           </div>
         </div>
       </Agenda>
 
-      {!rangeValid ? (
+      {!days ? (
+        <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Sélectionnez un jour" description="Choisissez une date dans le calendrier pour voir les disponibilités et réserver." />
+      ) : !rangeValid ? (
         <EmptyState icon={<Clock className="h-8 w-8" />} title="Créneau invalide" description="Corrigez les heures de début et de fin pour voir les disponibilités." />
       ) : loading ? (
         <FullSpinner label="Recherche des disponibilités..." />
@@ -644,7 +644,7 @@ function Agenda({
   children,
 }: {
   tab: "rooms" | "vehicles";
-  days: DaySelection;
+  days: DaySelection | null;
   onDayClick: (day: Date) => void;
   onDayDoubleClick: (day: Date) => void;
   timeControls: ReactNode;
@@ -659,7 +659,7 @@ function Agenda({
   const cancelVehicle = useMutation(api.reservations.cancelVehicleReservation);
   const [detailId, setDetailId] = useState<string | null>(null);
 
-  const dayStart = days.start;
+  const dayStart = days?.start ?? startOfDayMs(Date.now());
 
   // Fenêtre large autour de la date sélectionnée : l'agenda affiche **toutes**
   // les réservations (de tous les utilisateurs) sur les jours du calendrier, et
@@ -743,8 +743,8 @@ function Agenda({
       </div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-start">
         <CalendarBoard
-          rangeStart={days.start}
-          rangeEnd={days.end}
+          rangeStart={days?.start}
+          rangeEnd={days?.end}
           events={calendarEvents}
           onSelect={onDayClick}
           onDoubleSelect={onDayDoubleClick}

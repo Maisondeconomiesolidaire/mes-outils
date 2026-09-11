@@ -145,10 +145,7 @@ export function BookEquipment() {
   const access = usePermissionsAccess();
   const canCreate = canAccess(access, "mesoutils:equipements", "create");
 
-  const [days, setDays] = useState<DaySelection>(() => {
-    const today = startOfDayMs(Date.now());
-    return { start: today, end: today };
-  });
+  const [days, setDays] = useState<DaySelection | null>(null);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("10:00");
   const [fullDay, setFullDay] = useState(false);
@@ -162,7 +159,7 @@ export function BookEquipment() {
   function handleDayClick(day: Date) {
     const clicked = startOfDayMs(day);
     setDays((current) => {
-      if (current.start !== current.end || clicked <= current.start) {
+      if (!current || current.start !== current.end || clicked <= current.start) {
         return { start: clicked, end: clicked };
       }
       return { start: current.start, end: clicked };
@@ -174,12 +171,13 @@ export function BookEquipment() {
   }
 
   const range = useMemo(() => {
+    if (!days) return null;
     return { start: withTime(days.start, startTime), end: withTime(days.end, endTime) };
   }, [days, startTime, endTime]);
-  const rangeValid = range.start < range.end;
+  const rangeValid = range !== null && range.start < range.end;
 
-  const durationDays = Math.round((days.end - days.start) / 86_400_000) + 1;
-  const summary =
+  const durationDays = days ? Math.round((days.end - days.start) / 86_400_000) + 1 : 0;
+  const summary = !days ? "Sélectionnez un jour" :
     days.start === days.end
       ? format(new Date(days.start), "EEEE d MMMM yyyy", { locale: fr })
       : `${format(new Date(days.start), "EEE d MMM", { locale: fr })} → ${format(new Date(days.end), "EEE d MMM yyyy", { locale: fr })}`;
@@ -192,8 +190,8 @@ export function BookEquipment() {
 
   const YEAR_MS = 365 * 86_400_000;
   const reservations = useQuery(api.equipements.listEquipmentReservations, {
-    start: days.start - YEAR_MS,
-    end: days.start + YEAR_MS,
+    start: (days?.start ?? startOfDayMs(Date.now())) - YEAR_MS,
+    end: (days?.start ?? startOfDayMs(Date.now())) + YEAR_MS,
   }) as EquipmentReservation[] | undefined;
   const allEquipments = useQuery(api.equipements.listEquipments) as Equipment[] | undefined;
   const equipmentName = useMemo(
@@ -244,7 +242,7 @@ export function BookEquipment() {
   const canSubmit = rangeValid && Boolean(label.trim());
 
   async function submitBooking() {
-    if (!booking || !canSubmit) return;
+    if (!booking || !range || !canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -297,8 +295,8 @@ export function BookEquipment() {
           </p>
         </div>
         <CalendarBoard
-          rangeStart={days.start}
-          rangeEnd={days.end}
+          rangeStart={days?.start}
+          rangeEnd={days?.end}
           events={calendarEvents}
           onSelect={handleDayClick}
           onDoubleSelect={handleDayDoubleClick}
@@ -312,20 +310,20 @@ export function BookEquipment() {
               {summary}
             </span>
             <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
-              {durationDays} jour{durationDays > 1 ? "s" : ""}
+              {days ? `${durationDays} jour${durationDays > 1 ? "s" : ""}` : "Aucune date sélectionnée"}
             </span>
           </div>
           <div className="flex flex-wrap items-end gap-3">
             <FilterField label="Heure de début">
-              <TimeSelect value={startTime} onChange={setStartTime} disabled={fullDay} />
+              <TimeSelect value={startTime} onChange={setStartTime} disabled={!days || fullDay} />
             </FilterField>
             <FilterField label="Heure de fin">
-              <TimeSelect value={endTime} onChange={setEndTime} disabled={fullDay} />
+              <TimeSelect value={endTime} onChange={setEndTime} disabled={!days || fullDay} />
             </FilterField>
             <div className="pb-2">
               <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
             </div>
-            {!rangeValid ? (
+            {days && !rangeValid ? (
               <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
                 L'heure de fin doit être après l'heure de début.
               </p>
@@ -342,13 +340,15 @@ export function BookEquipment() {
               />
             </label>
             <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">
-              {freeCount} disponible{freeCount > 1 ? "s" : ""}
+              {rangeValid ? `${freeCount} disponible${freeCount > 1 ? "s" : ""}` : ""}
             </span>
           </div>
         </div>
       </div>
 
-      {!rangeValid ? (
+      {!days ? (
+        <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Sélectionnez un jour" description="Choisissez une date dans le calendrier pour voir les disponibilités et réserver." />
+      ) : !rangeValid ? (
         <EmptyState icon={<Clock className="h-8 w-8" />} title="Créneau invalide" description="Corrigez les heures de début et de fin pour voir les disponibilités." />
       ) : equipments === undefined ? (
         <FullSpinner label="Recherche des disponibilités..." />
