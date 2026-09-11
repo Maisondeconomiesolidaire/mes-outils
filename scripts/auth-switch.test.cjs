@@ -245,6 +245,15 @@ test('Clerk loading and failure states provide fallback components', () => {
   assert.ok(ui.form().props.fallback);
 });
 
+test('native Clerk alternate-method controls remain available at entry and during MFA', () => {
+  const ui = portal();
+  for (const hash of ['', '#/factor-two']) {
+    if (hash) ui.navigate(hash, 'hashchange');
+    const footerAction = ui.form().props.appearance.elements.footerAction;
+    assert.equal(footerAction, undefined, `${hash || 'entry'}: leave Clerk footer actions unmodified so Use another method remains accessible`);
+  }
+});
+
 test('session loading does not redirect; an already signed-in visitor returns safely after loading', () => {
   const ui = portal({ url: 'https://app.example/connexion?redirect_url=%2Fclients%3Ftab%3Dventes',
     auth: { isLoaded: false, isSignedIn: undefined } });

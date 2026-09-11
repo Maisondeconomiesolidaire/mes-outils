@@ -101,9 +101,7 @@ export function AuthSwitch({
       card: { padding: "0", boxShadow: "none", border: "none", background: "transparent", borderRadius: "0", overflow: "visible" },
       header: entry ? { display: "none" } : {},
       logoBox: { display: "none" },
-      // Our panels switch between the two local components. Keep legal notices,
-      // MFA alternatives, password recovery and all task controls visible.
-      footerAction: { display: "none" },
+      // Keep footerAction visible: Clerk also uses it for MFA recovery links.
       footer: { background: "transparent", padding: "1rem 0 0" },
       formButtonPrimary: { background: "var(--auth-accent, var(--color-brand-600))", minHeight: "2.75rem" },
       formFieldInput: { minHeight: "2.75rem" },
