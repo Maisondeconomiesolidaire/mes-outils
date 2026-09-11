@@ -101,8 +101,8 @@ export function Reservations() {
     <div className="space-y-6">
       <SectionHeader title="Réservations" />
       <SectionTabs />
-      {tab === "rooms" && (
-        <Dialog.Root>
+      {(tab === "rooms" || tab === "vehicles") && (
+        <Dialog.Root key={tab}>
           <Dialog.Trigger asChild>
             <Button type="button" variant="secondary">
               <CirclePlay className="h-4 w-4" aria-hidden="true" />
@@ -122,9 +122,9 @@ export function Reservations() {
                 </Button>
               </Dialog.Close>
               <iframe
-                src="https://app.supademo.com/embed/cmtwx2ybg1sceqm7x2fvv213r?embed_v=2&utm_source=embed"
+                src={`https://app.supademo.com/embed/${tab === "vehicles" ? "cmtwy2kpe1v2jqm7xm504th6s" : "cmtwx2ybg1sceqm7x2fvv213r"}?embed_v=2&utm_source=embed`}
                 loading="lazy"
-                title="Réservation de salles MESOUTILS"
+                title={tab === "vehicles" ? "Comment réserver un véhicule sur MESOUTILS" : "Réservation de salles MESOUTILS"}
                 allow="clipboard-write"
                 allowFullScreen
                 className="absolute inset-0 block h-full w-full border-0"
