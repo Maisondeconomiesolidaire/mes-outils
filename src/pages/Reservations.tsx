@@ -102,7 +102,10 @@ export function Reservations() {
       <SectionHeader title="Réservations" />
       <SectionTabs />
       {(tab === "rooms" || tab === "vehicles") && (
-        <Dialog.Root key={tab}>
+        // Clé préfixée : `BrowseAndBook` est un frère portant déjà `key={tab}`.
+        // Deux clés identiques font dupliquer le bouton à chaque changement
+        // d'onglet.
+        <Dialog.Root key={`tutorial-${tab}`}>
           <Dialog.Trigger asChild>
             <Button type="button" variant="secondary">
               <CirclePlay className="h-4 w-4" aria-hidden="true" />
