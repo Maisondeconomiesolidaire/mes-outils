@@ -1927,6 +1927,16 @@ export default defineSchema(
    * dans les rapports. Une semaine est identifiée par son rang dans le mois
    * (1 à 4), qui est la maille de relevé de l'équipe — pas la semaine ISO.
    */
+  /** Totaux annuels historiques, sans répartition mensuelle inventée. */
+  klydeStoreAnnualRevenues: defineTable({
+    site: v.union(v.literal("60"), v.literal("76")),
+    year: v.number(),
+    amount: v.number(),
+    note: v.optional(v.string()),
+    source: v.string(),
+    createdAt: v.number(),
+  }).index("by_site_and_year", ["site", "year"]),
+
   klydeStoreRevenues: defineTable({
     site: v.union(v.literal("60"), v.literal("76")),
     year: v.number(),

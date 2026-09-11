@@ -12,6 +12,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { requireCrmPermission } from "./lib";
+import { summarizeStoreRevenue } from "./lib/klydeStoreRevenue";
 import { klydeAverageWeightKg } from "./klydeTaxonomy";
 import { bytesToBase64, esc, resendSend } from "./emails";
 import { buildPdf, CONTENT_WIDTH, type PdfColor, type PdfElement } from "./pdf";
@@ -693,6 +694,12 @@ export const storeReport = query({
       .query("klydeStoreRevenues")
       .withIndex("by_period", (q) => q.eq("year", year))
       .collect();
+    const annualRows = await Promise.all((["60", "76"] as const).map((storeSite) =>
+      ctx.db.query("klydeStoreAnnualRevenues")
+        .withIndex("by_site_and_year", (q) => q.eq("site", storeSite).eq("year", year))
+        .unique(),
+    ));
+    const annualTotals = annualRows.filter((entry) => entry !== null).filter((entry) => !site || entry.site === site);
     const scoped = all.filter((entry) => !site || entry.site === site);
 
     // Totaux par mois : la vue annuelle se lit d'un coup d'œil, et la vue
@@ -707,15 +714,14 @@ export const storeReport = query({
     const weekly = STORE_WEEKS.map((week) =>
       entries.filter((entry) => entry.week === week).reduce((total, entry) => total + entry.amount, 0),
     );
-    const revenue = entries.reduce((total, entry) => total + entry.amount, 0);
-    const bySite = {
-      "60": entries.filter((entry) => entry.site === "60").reduce((total, entry) => total + entry.amount, 0),
-      "76": entries.filter((entry) => entry.site === "76").reduce((total, entry) => total + entry.amount, 0),
-    };
+    const { revenue, bySite } = summarizeStoreRevenue(entries, annualTotals, month);
+    const monthlyHasDetail = monthly.map((_, index) => scoped.some((entry) => entry.month === index));
 
     return {
       label: month === null ? String(year) : `${MONTHS[month]} ${year}`,
       revenue,
+      annualTotals: annualTotals.map(({ site, year, amount, note }) => ({ site, year, amount, note })),
+      monthlyHasDetail,
       monthly,
       weekly,
       bySite,

@@ -1,0 +1,18 @@
+[
+  {
+    "site": "76",
+    "year": 2025,
+    "amount": 31112,
+    "note": "Total annuel 2025, détail mensuel non disponible.",
+    "source": "Import administratif demandé par l’utilisateur dans Codex",
+    "createdAt": 1789128818852
+  },
+  {
+    "site": "60",
+    "year": 2025,
+    "amount": 36910,
+    "note": "Total annuel 2025, détail mensuel non disponible.",
+    "source": "Import administratif demandé par l’utilisateur dans Codex",
+    "createdAt": 1789128818852
+  }
+]

@@ -47,6 +47,7 @@ import type * as klydeReports from "../klydeReports.js";
 import type * as klydeTaxonomy from "../klydeTaxonomy.js";
 import type * as leaves from "../leaves.js";
 import type * as lib from "../lib.js";
+import type * as lib_klydeStoreRevenue from "../lib/klydeStoreRevenue.js";
 import type * as livraison from "../livraison.js";
 import type * as mesoutilsEmails from "../mesoutilsEmails.js";
 import type * as mesoutilsNotifications from "../mesoutilsNotifications.js";
@@ -122,6 +123,7 @@ declare const fullApi: ApiFromModules<{
   klydeTaxonomy: typeof klydeTaxonomy;
   leaves: typeof leaves;
   lib: typeof lib;
+  "lib/klydeStoreRevenue": typeof lib_klydeStoreRevenue;
   livraison: typeof livraison;
   mesoutilsEmails: typeof mesoutilsEmails;
   mesoutilsNotifications: typeof mesoutilsNotifications;
