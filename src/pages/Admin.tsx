@@ -562,7 +562,7 @@ function AccessManager() {
                 <div>
                   <p className="font-semibold text-brand-900">Accès total</p>
                   <p className="text-sm text-brand-800/80">
-                    Un administrateur a tous les droits sur Mes Outils, la Recyclerie et Klyde.
+                    Un administrateur a tous les droits sur Mes Outils, la Recyclerie et Klyd.
                     Les permissions fines ci-dessous ne sont pas nécessaires.
                   </p>
                 </div>
@@ -1177,8 +1177,8 @@ function RevenueDashboard() {
   if (stats === undefined) return <FullSpinner label="Chargement du chiffre d'affaires..." />;
 
   const shares = [
-    { key: "recyclerie", label: "Recyclerie", revenue: stats.recyclerie.revenue, tint: "bg-brand-500" },
-    { key: "klyde", label: "Klyde", revenue: stats.klyde.revenue, tint: "bg-indigo-500" },
+    { key: "recyclerie", label: "Recyclerie", revenue: stats.recyclerie.revenue, tint: "bg-orange-500" },
+    { key: "klyde", label: "Klyd", revenue: stats.klyde.revenue, tint: "bg-pink-500" },
     { key: "cycle", label: "Cycle en Bray", revenue: stats.cycle.revenue, tint: "bg-emerald-500" },
   ];
   const denom = stats.totalRevenue || 1;
@@ -1227,7 +1227,7 @@ function RevenueDashboard() {
         />
         <AppBlock
           logo="/klyd-logo.png"
-          label="Klyde"
+          label="Klyd"
           caption={`${num(stats.klyde.salesCount)} ventes Vinted · toutes périodes`}
           revenue={stats.klyde.revenue}
           lines={[
