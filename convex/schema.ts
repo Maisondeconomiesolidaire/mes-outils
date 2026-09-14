@@ -1689,6 +1689,14 @@ export default defineSchema(
   }).index("by_pageId", ["pageId"]),
 
   /** Publications Facebook émises depuis Mes Outils, pour le suivi. */
+  socialAiDrafts: defineTable({
+    authorClerkId: v.string(), keywords: v.string(), networks: v.array(v.string()),
+    pageNames: v.array(v.string()), model: v.string(), createdAt: v.number(),
+    status: v.union(v.literal("generating"), v.literal("ready"), v.literal("failed")),
+    text: v.optional(v.string()), error: v.optional(v.string()),
+    inputTokens: v.optional(v.number()), outputTokens: v.optional(v.number()),
+  }).index("by_author", ["authorClerkId", "createdAt"]),
+
   socialCompositions: defineTable({
     requestKey: v.string(),
     message: v.string(),
@@ -1735,7 +1743,8 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_event", ["eventId"])
-    .index("by_recycappEvent", ["recycappEventId"]),
+    .index("by_recycappEvent", ["recycappEventId"])
+    .index("by_composer", ["composerId"]),
 
   /** Espace partage — bons plans internes (prêt, don, vente, échange). */
   dealPosts: defineTable({

@@ -1,7 +1,10 @@
+import { PublicationConfetti } from "./PublicationConfetti";
+import { PublishedPostEmbed } from "./PublishedPostEmbed";
+import { SocialAiAssistant } from "./SocialAiAssistant";
 import { FacebookIcon } from "../icons/FacebookIcon";
 import { InstagramIcon } from "../icons/InstagramIcon";
 import { FacebookPostPreview, InstagramPostPreview } from "./PostPreview";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { addMonths, endOfMonth, endOfWeek, startOfMonth, startOfWeek } from "date-fns";
 import { Plus } from "lucide-react";
@@ -21,6 +24,17 @@ const dateLabel = (date: number) => new Date(date).toLocaleString("fr-FR", { dat
 
 export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean; canCreate: boolean }) {
   const [month, setMonth] = useState(() => startOfMonth(new Date()).getTime());
+  const [pendingPublication, setPendingPublication] = useState<Id<"socialCompositions"> | null>(null);
+  const [burst, setBurst] = useState(0);
+  const publication = useQuery(api.socialEnhancements.publicationStatus, pendingPublication ? { id: pendingPublication } : "skip");
+  useEffect(() => {
+    if (!publication || publication.pending || !publication.total) return;
+    if (publication.published === publication.total) {
+      setBurst(value => value + 1);
+      setNotice("Votre post a été publié sur toutes les pages sélectionnées !");
+    } else { setNotice(`${publication.published} publication(s) réussie(s), ${publication.failed} en échec ou annulée(s). Consultez le détail dans le calendrier.`); }
+    setPendingPublication(null);
+  }, [publication]);
   const [creating, setCreating] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
@@ -34,6 +48,7 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
   const detail = entries?.find(entry => entry.id === selected);
   const history = entries?.filter(entry => entry.date >= startOfMonth(month).getTime() && entry.date < startOfMonth(addMonths(month, 1)).getTime());
   return <div className="space-y-6">
+    <PublicationConfetti burst={burst} />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="text-xl font-semibold">Publications sur les réseaux</h2><p className="mt-1 text-sm text-[var(--muted-foreground)]">Facebook et Instagram · calendrier et historique</p></div>
       {canPublish && <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Nouveau post</Button>}
@@ -49,15 +64,14 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
         </button>)}
       </div>}
     </section>
-    {creating && <SocialComposer canCreate={canCreate} onClose={() => setCreating(false)} onCreated={scheduled => { setCreating(false); if (scheduled) setMonth(startOfMonth(scheduled).getTime()); setNotice(scheduled ? "Publication programmée. Retrouvez le suivi de chaque page dans le calendrier." : "Publication enregistrée. Les envois sont en cours et leur résultat apparaît ci-dessous."); }} />}
+    {creating && <SocialComposer canCreate={canCreate} onClose={() => setCreating(false)} onCreated={(id, scheduled) => { setPendingPublication(id); setCreating(false); if (scheduled) setMonth(startOfMonth(scheduled).getTime()); setNotice(scheduled ? "Publication programmée. Retrouvez le suivi de chaque page dans le calendrier." : "Publication enregistrée. Les envois sont en cours et leur résultat apparaît ci-dessous."); }} />}
     <Modal open={Boolean(detail)} onClose={() => setSelected(null)} title="Détail de la publication">
       {detail && <div className="space-y-4">
         <p className="font-semibold">{detail.network === "facebook" ? "Facebook" : "Instagram"} · {detail.targetName}</p>
         <p className="text-sm">{statuses[detail.status]} · {dateLabel(detail.date)} · {detail.authorName}</p>
-        <p className="whitespace-pre-wrap">{detail.message || "Publication photo"}</p>
+        {detail.status === "published" ? <PublishedPostEmbed key={detail.id} id={detail.id} /> : <p className="whitespace-pre-wrap">{detail.message || "Publication photo"}</p>}
         {detail.mesoutils && <p className="text-sm text-brand-700">Également publié sur Mes Outils.</p>}
         {detail.error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-red-800">{detail.error}</p>}
-        {detail.network === "facebook" && detail.postId && detail.status === "published" && <a href={`https://www.facebook.com/${encodeURIComponent(detail.postId)}`} target="_blank" rel="noreferrer" className="text-brand-700 underline">Voir sur Facebook</a>}
         {canPublish && detail.deliveryId && detail.status === "scheduled" && <Button disabled={cancelling} variant="secondary" onClick={async () => {
           setCancelling(true); setError("");
           try { await cancel({ id: detail.deliveryId! }); } catch (err) { setError(err instanceof Error ? err.message : "Annulation impossible."); } finally { setCancelling(false); }
@@ -72,7 +86,7 @@ function Choice({ selected, children, onClick, disabled = false }: { selected: b
   return <button type="button" aria-pressed={selected} disabled={disabled} onClick={onClick} className={cn("inline-flex items-center justify-center gap-2.5 rounded-xl border px-5 py-3 text-sm font-medium transition disabled:opacity-40", selected ? "border-brand-500 bg-brand-500/10 text-brand-700" : "border-[var(--border)] hover:bg-[var(--accent)]")}>{children}</button>;
 }
 
-function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean; onClose: () => void; onCreated: (date?: number) => void }) {
+function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean; onClose: () => void; onCreated: (id: Id<"socialCompositions">, date?: number) => void }) {
   const pages = useQuery(api.social.listPages, {});
   const accounts = useQuery(api.social.listInstagramAccounts, {});
   const create = useMutation(api.socialComposer.create);
@@ -121,6 +135,7 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
       <div className={step > 0 ? "grid items-start gap-8 lg:grid-cols-2" : ""}>
       <div className="min-w-0 space-y-5" hidden={step === 0}>
       <div hidden={step !== 1} className="space-y-5">
+        {step === 1 && <SocialAiAssistant networks={[...(facebook ? ["facebook" as const] : []), ...(instagram ? ["instagram" as const] : [])]} pageNames={[...selectedPages.map(page => page.name), ...selectedAccounts.map(account => account.pageName)]} onApply={setMessage} />}
         <Field label="Texte du post"><Textarea aria-label="Texte du post" rows={7} value={message} maxLength={instagram ? 2200 : 63206} onChange={event => setMessage(event.target.value)} placeholder="Que souhaitez-vous partager ?" /></Field>
         <div><p className="mb-2 text-sm font-medium">Photos · 10 maximum{instagram ? " · JPEG pour Instagram" : ""}</p><PhotoUpload jpeg value={images} onChange={setImages} onUploadingChange={setUploading} onPreviewsChange={setPreviews} /></div>
         <div className="flex flex-wrap gap-3"><Choice selected={!scheduled} onClick={() => setScheduled(false)}>Publier maintenant</Choice><Choice selected={scheduled} onClick={() => setScheduled(true)}>Programmer</Choice></div>
@@ -146,8 +161,8 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
         {step < 2 ? <Button disabled={uploading} onClick={next}>{uploading ? "Photos en cours…" : "Continuer"}</Button> : <Button disabled={busy || mesoutils === null || !validTargets} onClick={async () => {
           setBusy(true); setError("");
           try {
-            await create({ requestKey, message, images, facebookIds: selectedPages.map(page => page.pageId), instagramIds: selectedAccounts.map(account => account.instagramId), scheduledFor: scheduled ? date ?? undefined : undefined, publishOnMesoutils: mesoutils === true });
-            onCreated(scheduled ? date ?? undefined : undefined);
+            const id = await create({ requestKey, message, images, facebookIds: selectedPages.map(page => page.pageId), instagramIds: selectedAccounts.map(account => account.instagramId), scheduledFor: scheduled ? date ?? undefined : undefined, publishOnMesoutils: mesoutils === true });
+            onCreated(id, scheduled ? date ?? undefined : undefined);
           } catch (err) { setError(err instanceof Error ? err.message : "Impossible d'enregistrer la publication."); } finally { setBusy(false); }
         }}>{busy ? "Enregistrement…" : scheduled ? "Confirmer la programmation" : "Publier"}</Button>}
       </div>
