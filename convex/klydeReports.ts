@@ -12,6 +12,7 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { requireCrmPermission } from "./lib";
+import { isRecordedKlydeSale as isRecordedSale, klydeSaleAmount as saleAmount } from "./lib/klydeSalesRevenue";
 import { summarizeStoreRevenue } from "./lib/klydeStoreRevenue";
 import { klydeAverageWeightKg } from "./klydeTaxonomy";
 import { bytesToBase64, esc, resendSend } from "./emails";
@@ -102,27 +103,11 @@ function saleWeight(item: Doc<"klydeItems">) {
 }
 
 /**
- * Prix encaissé : le prix réel prime sur le prix affiché.
- *
- * Un `actualSalePrice` à 0 vaut « non renseigné » : le formulaire de Klyd en a
- * longtemps posé un dès qu'un article était enregistré sans passer par ce
- * champ, et ces articles pesaient alors 0 € au chiffre d'affaires.
- */
-function saleAmount(item: Doc<"klydeItems">) {
-  return item.actualSalePrice || item.price || 0;
-}
-
-/**
  * Date de vente : celle du passage en « Vendu ». Les anciens articles, qui ne
  * disposent pas encore de cette date, gardent leur date historique de gain.
  */
 function saleDate(item: Doc<"klydeItems">) {
   return item.saleRecordedAt ?? item.soldAt ?? item.updatedAt;
-}
-
-/** Une vente reste comptée après l'expédition ou la confirmation « Gagné ». */
-function isRecordedSale(item: Doc<"klydeItems">) {
-  return item.saleRecordedAt !== undefined || ["en_cours_envoi", "envoye", "gagne", "vendu"].includes(item.status);
 }
 
 function inParis(ms: number) {

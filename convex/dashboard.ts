@@ -1,3 +1,4 @@
+import { summarizeKlydeSales } from "./lib/klydeSalesRevenue";
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { requireAdmin, requireCrmPermission } from "./lib";
@@ -221,10 +222,16 @@ export const globalStats = query({
     };
     const recyclerieRevenue = collecte.revenue + aerogommage.revenue + boutique.revenue;
 
-    // — Klyde : commandes boutique payées —
+    // — Klyde : uniquement les ventes Vinted des deux enseignes. —
+    // Une commande boutique peut marquer un article vendu dès sa création,
+    // même avant paiement : elle ne constitue pas une vente Vinted.
+    const boutiqueItemIds = new Set(klydeOrders.flatMap((order) => order.itemIds));
+    const klydeSales = summarizeKlydeSales(klydeItems.filter((item) => item.vinted === true && !boutiqueItemIds.has(item._id)));
     const paidKlyde = klydeOrders.filter((order) => order.status === "payee");
     const klyde = {
-      revenue: paidKlyde.reduce((sum, order) => sum + order.total, 0),
+      revenue: klydeSales.revenue,
+      salesCount: klydeSales.salesCount,
+      byOutlet: klydeSales.byOutlet,
       orders: klydeOrders.length,
       paidOrders: paidKlyde.length,
       pendingOrders: klydeOrders.length - paidKlyde.length,

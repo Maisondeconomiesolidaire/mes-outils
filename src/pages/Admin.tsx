@@ -1228,11 +1228,11 @@ function RevenueDashboard() {
         <AppBlock
           logo="/klyd-logo.png"
           label="Klyde"
-          caption={`${num(stats.klyde.orders)} commandes · ${num(stats.klyde.items)} articles`}
+          caption={`${num(stats.klyde.salesCount)} ventes Vinted · toutes périodes`}
           revenue={stats.klyde.revenue}
           lines={[
-            { label: "Commandes payées", detail: `${num(stats.klyde.pendingOrders)} en attente de paiement`, value: num(stats.klyde.paidOrders) },
-            { label: "Catalogue", detail: "articles en ligne", value: num(stats.klyde.items) },
+            { label: "Vinted · Klyd", detail: "Ventes enregistrées dans Klyd", value: eur(stats.klyde.byOutlet.klyd) },
+            { label: "Vinted · Mobifrip", detail: "Ventes enregistrées dans Klyd", value: eur(stats.klyde.byOutlet.mobifrip) },
           ]}
         />
         <AppBlock
