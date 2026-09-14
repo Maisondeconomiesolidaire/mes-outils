@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
-import { Dialog } from "radix-ui";
+import { useId, useRef, useState } from "react";
+import { Dialog, Select } from "radix-ui";
 import { addMonths, eachDayOfInterval, endOfMonth, format, startOfDay, startOfMonth } from "date-fns";
 import { fr } from "date-fns/locale";
-import { BriefcaseBusiness, CalendarDays, Check, ChevronLeft, ChevronRight, Search, UserRound, X } from "lucide-react";
+import { BriefcaseBusiness, CalendarDays, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Search, UserRound, X } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Button } from "../ui/Button";
 
@@ -39,8 +39,8 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
   }
   function selectDate(value: string, field = activeDate) {
     setDraft((current) => {
-      if (field === "start") return { ...current, start: value, end: current.end && current.end < value ? "" : current.end };
-      return { ...current, end: value };
+      if (field === "start") return { ...current, start: value, end: value };
+      return { ...current, start: current.start || value, end: value };
     });
     if (value && field === "start") setActiveDate("end");
   }
@@ -89,10 +89,11 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
                     <span className="mb-1 block text-xs font-semibold text-[var(--muted-foreground)]">Date de {field === "start" ? "début" : "fin"}</span>
                     <input aria-label={field === "start" ? "Date de début" : "Date de fin"} type="date" value={draft[field]} min={field === "end" ? draft.start || today : today} onFocus={() => setActiveDate(field)} onChange={(e) => selectDate(e.target.value, field)} className="w-full min-w-0 bg-transparent py-1 text-base font-semibold outline-none" />
                   </label>
-                  <label className="rounded-2xl border border-[var(--border)] px-2 py-2">
-                    <span className="mb-1 block text-xs text-[var(--muted-foreground)]">Heure de {field === "start" ? "début" : "fin"}</span>
-                    <select value={draft[field === "start" ? "startTime" : "endTime"]} onChange={(e) => setDraft({ ...draft, [field === "start" ? "startTime" : "endTime"]: e.target.value })} className="w-full bg-[var(--card)] py-1 text-base font-semibold outline-none">{HOURS.map((hour) => <option key={hour}>{hour}</option>)}</select>
-                  </label>
+                  <ReservationTimeSelect
+                    label={field === "start" ? "Heure de début" : "Heure de fin"}
+                    value={draft[field === "start" ? "startTime" : "endTime"]}
+                    onChange={(value) => setDraft((current) => ({ ...current, [field === "start" ? "startTime" : "endTime"]: value }))}
+                  />
                 </div>)}
               </div>
               <div className="my-5 flex items-center justify-between gap-2">
@@ -137,5 +138,38 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+
+function ReservationTimeSelect({ label, value, onChange }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const labelId = useId();
+  return (
+    <div className="rounded-2xl border border-[var(--border)] px-2 py-2 focus-within:border-brand-500">
+      <span id={labelId} className="mb-1 block text-xs text-[var(--muted-foreground)]">{label}</span>
+      <Select.Root value={value} onValueChange={onChange}>
+        <Select.Trigger aria-labelledby={labelId} className="flex w-full items-center justify-between gap-1 rounded-lg py-1 text-base font-semibold outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+          <Select.Value />
+          <Select.Icon><ChevronDown className="h-4 w-4" /></Select.Icon>
+        </Select.Trigger>
+        <Select.Portal>
+          <Select.Content position="popper" sideOffset={8} collisionPadding={12} className="z-[60] max-h-[min(18rem,var(--radix-select-content-available-height))] min-w-[8rem] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] text-[var(--foreground)] shadow-xl">
+            <Select.ScrollUpButton className="flex items-center justify-center py-1"><ChevronUp className="h-4 w-4" /></Select.ScrollUpButton>
+            <Select.Viewport className="p-1.5">
+              {HOURS.map((hour) => (
+                <Select.Item key={hour} value={hour} className="relative flex cursor-pointer select-none items-center rounded-lg py-2.5 pl-3 pr-8 text-sm outline-none data-[highlighted]:bg-[var(--accent)] data-[state=checked]:bg-brand-500/10 data-[state=checked]:font-semibold data-[state=checked]:text-brand-700">
+                  <Select.ItemText>{hour}</Select.ItemText>
+                  <Select.ItemIndicator className="absolute right-2"><Check className="h-4 w-4" /></Select.ItemIndicator>
+                </Select.Item>
+              ))}
+            </Select.Viewport>
+            <Select.ScrollDownButton className="flex items-center justify-center py-1"><ChevronDown className="h-4 w-4" /></Select.ScrollDownButton>
+          </Select.Content>
+        </Select.Portal>
+      </Select.Root>
+    </div>
   );
 }
