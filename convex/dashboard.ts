@@ -189,11 +189,13 @@ export const appAudience = query({
  * faible fréquence) — à dénormaliser via compteurs si le volume explose.
  */
 export const globalStats = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { year: v.optional(v.number()), month: v.optional(v.number()) },
+  handler: async (ctx, { year, month }) => {
+    if (year !== undefined && (!Number.isInteger(year) || year < 1900 || year > 9999)) throw new Error("Année invalide");
+    if (month !== undefined && (year === undefined || !Number.isInteger(month) || month < 1 || month > 12)) throw new Error("Mois invalide");
     await requireAdmin(ctx);
 
-    const [requests, ventes, klydeOrders, klydeItems, bikes, cycleRequests] =
+    const [allRequests, allVentes, klydeOrders, klydeItems, bikes, allCycleRequests] =
       await Promise.all([
         ctx.db.query("requests").collect(),
         ctx.db.query("ventes").collect(),
@@ -202,6 +204,36 @@ export const globalStats = query({
         ctx.db.query("bikes").collect(),
         ctx.db.query("cycleRequests").collect(),
       ]);
+
+    const parisDate = new Intl.DateTimeFormat("fr-FR", {
+      timeZone: "Europe/Paris", year: "numeric", month: "numeric",
+    });
+    const parts = (date: number) => {
+      const values = parisDate.formatToParts(date);
+      return { year: Number(values.find(p => p.type === "year")?.value), month: Number(values.find(p => p.type === "month")?.value) };
+    };
+    const inPeriod = (date: number) => {
+      if (year === undefined) return true;
+      if (!Number.isFinite(date)) return false;
+      const value = parts(date);
+      return value.year === year && (month === undefined || value.month === month);
+    };
+    // Older records do not always carry an explicit sale timestamp.
+    const requestDate = (request: Doc<"requests">) => request.fieldEdits?.outcome?.at ?? request.scheduledDate ?? request.createdAt;
+    const saleDate = (item: Doc<"klydeItems">) => item.saleRecordedAt ?? item.soldAt ?? item.updatedAt;
+    const dates = [
+      ...allRequests.map(requestDate), ...allVentes.map(v => v.date),
+      ...klydeItems.map(saleDate), ...bikes.map(b => b.updatedAt),
+      ...allCycleRequests.map(r => r.createdAt),
+    ];
+    const currentYear = parts(Date.now()).year;
+    const datedYears = dates.filter(Number.isFinite).map(date => parts(date).year).filter(value => value >= 1900 && value <= 9999);
+    const earliestYear = Math.min(currentYear - 1, ...datedYears);
+    const latestYear = Math.max(currentYear, ...datedYears);
+    const availableYears = Array.from({ length: latestYear - earliestYear + 1 }, (_, index) => latestYear - index);
+    const requests = allRequests.filter(r => inPeriod(requestDate(r)));
+    const ventes = allVentes.filter(v => inPeriod(v.date));
+    const cycleRequests = allCycleRequests.filter(r => inPeriod(r.createdAt));
 
     // — Recyclerie : collecte + aérogommage (devis gagnés) + boutique (caisse) —
     const recyclerieSegment = (type: "collecte" | "aerogommage") => {
@@ -226,7 +258,7 @@ export const globalStats = query({
     // Une commande boutique peut marquer un article vendu dès sa création,
     // même avant paiement : elle ne constitue pas une vente Vinted.
     const boutiqueItemIds = new Set(klydeOrders.flatMap((order) => order.itemIds));
-    const klydeSales = summarizeKlydeSales(klydeItems.filter((item) => item.vinted === true && !boutiqueItemIds.has(item._id)));
+    const klydeSales = summarizeKlydeSales(klydeItems.filter((item) => item.vinted === true && !boutiqueItemIds.has(item._id) && inPeriod(saleDate(item))));
     const paidKlyde = klydeOrders.filter((order) => order.status === "payee");
     const klyde = {
       revenue: klydeSales.revenue,
@@ -240,7 +272,7 @@ export const globalStats = query({
 
     // — Cycle en Bray : vélos vendus + pipeline des demandes —
     const cycleOpenStatuses = ["nouveau", "validation", "en_cours"];
-    const soldBikes = bikes.filter((bike) => bike.status === "sold");
+    const soldBikes = bikes.filter((bike) => bike.status === "sold" && inPeriod(bike.updatedAt));
     const cycle = {
       revenue: soldBikes.reduce((sum, bike) => sum + (bike.price ?? 0), 0),
       requests: cycleRequests.length,
@@ -254,6 +286,7 @@ export const globalStats = query({
     };
 
     return {
+      availableYears,
       totalRevenue: recyclerieRevenue + klyde.revenue + cycle.revenue,
       recyclerie: {
         revenue: recyclerieRevenue,

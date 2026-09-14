@@ -1,3 +1,4 @@
+import { PeriodDropdown } from "../components/ui/PeriodDropdown";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { CalendarDays, Check, CircleDashed, CircleDollarSign, Clock, Info, Layers, LayoutDashboard, LogIn, Mail, MapPin, Save, Search, ShieldCheck, ShieldOff, Trash2, UserRound } from "lucide-react";
@@ -1173,8 +1174,27 @@ function GlobalDashboard() {
 }
 
 function RevenueDashboard() {
-  const stats = useQuery(api.dashboard.globalStats);
-  if (stats === undefined) return <FullSpinner label="Chargement du chiffre d'affaires..." />;
+  const [year, setYear] = useState(() => Number(new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", year: "numeric" }).format(new Date())));
+  const [month, setMonth] = useState("all");
+  const stats = useQuery(api.dashboard.globalStats, { year, month: month === "all" ? undefined : Number(month) });
+  const [availableYears, setAvailableYears] = useState([year, year - 1]);
+  useEffect(() => {
+    if (stats) setAvailableYears(stats.availableYears);
+  }, [stats]);
+  const months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+  const periodLabel = month === "all" ? `Année ${year}` : `${months[Number(month) - 1]} ${year}`;
+  return (
+    <div className="space-y-7">
+      <div className="flex flex-wrap gap-4">
+        <PeriodDropdown label="Année" value={String(year)} onValueChange={value => setYear(Number(value))} options={availableYears.map(value => ({ value: String(value), label: String(value) }))} />
+        <PeriodDropdown label="Mois" value={month} onValueChange={setMonth} options={[{ value: "all", label: "Toute l'année" }, ...months.map((label, index) => ({ value: String(index + 1), label }))]} />
+      </div>
+      {stats === undefined ? <FullSpinner label="Chargement du chiffre d'affaires..." /> : <RevenueResults stats={stats} periodLabel={periodLabel} />}
+    </div>
+  );
+}
+
+function RevenueResults({ stats, periodLabel }: { stats: NonNullable<ReturnType<typeof useQuery<typeof api.dashboard.globalStats>>>; periodLabel: string }) {
 
   const shares = [
     { key: "recyclerie", label: "Recyclerie", revenue: stats.recyclerie.revenue, tint: "bg-orange-500" },
@@ -1187,7 +1207,7 @@ function RevenueDashboard() {
     <div className="space-y-9">
       {/* Chiffre d'affaires total + répartition par application. */}
       <div>
-        <p className="text-sm font-medium text-[var(--muted-foreground)]">Chiffre d'affaires total · toutes applications</p>
+        <p className="text-sm font-medium text-[var(--muted-foreground)]">Chiffre d'affaires total · {periodLabel}</p>
         <p className="mt-1 text-5xl font-bold tracking-tight text-[var(--foreground)]">{eur(stats.totalRevenue)}</p>
         <div className="mt-6 flex h-2.5 overflow-hidden rounded-full bg-[var(--accent)]">
           {shares.map((share) =>
@@ -1228,7 +1248,7 @@ function RevenueDashboard() {
         <AppBlock
           logo="/klyd-logo.png"
           label="Klyd"
-          caption={`${num(stats.klyde.salesCount)} ventes Vinted · toutes périodes`}
+          caption={`${num(stats.klyde.salesCount)} ventes Vinted · ${periodLabel}`}
           revenue={stats.klyde.revenue}
           lines={[
             { label: "Vinted · Klyd", detail: "Ventes enregistrées dans Klyd", value: eur(stats.klyde.byOutlet.klyd) },

@@ -38,3 +38,31 @@ test('group total counts only Vinted sales, excluding stores and boutique orders
  assert.equal(result.klyde.revenue,50);assert.equal(result.totalRevenue,50);
  assert.equal(result.klyde.paidOrders,1);
 });
+test('filters all revenue sources by Paris year/month and retains year choices', async () => {
+ const dashboard=load('convex/dashboard.ts',{
+  'convex/values':{v:new Proxy({},{get:()=>()=>({})})},
+  './_generated/server':{query:definition=>definition},
+  './lib':{requireAdmin:async()=>{}},'./processes':{STEP:{}},
+  './lib/klydeSalesRevenue':sales,
+ });
+ const jan=Date.parse('2025-12-31T23:30:00Z'); // January in Paris
+ const feb=Date.parse('2026-02-10T12:00:00Z');
+ const old=Date.parse('2025-06-10T12:00:00Z');
+ const tables={
+  requests:[{type:'collecte',outcome:'gagnee',quoteAmount:100,createdAt:old,fieldEdits:{outcome:{at:jan}}}],
+  ventes:[{total:20,date:jan},{total:50,date:feb}],
+  bikes:[{status:'sold',price:200,updatedAt:jan}],cycleRequests:[],klydeOrders:[],
+  klydeItems:[{_id:'a',vinted:true,status:'gagne',price:30,saleRecordedAt:jan,updatedAt:feb},
+   {_id:'b',vinted:true,status:'envoye',price:40,soldAt:feb},
+   {_id:'c',vinted:true,status:'vendu',price:10,updatedAt:old}],
+ };
+ const ctx={db:{query:name=>({collect:async()=>tables[name]})}};
+ const january=await dashboard.globalStats.handler(ctx,{year:2026,month:1});
+ assert.equal(january.totalRevenue,350);
+ assert.equal(january.klyde.salesCount,1);
+ assert.ok(january.availableYears.includes(2025));
+ assert.equal((await dashboard.globalStats.handler(ctx,{year:2026})).totalRevenue,440);
+ assert.equal((await dashboard.globalStats.handler(ctx,{year:2025})).totalRevenue,10);
+ assert.equal((await dashboard.globalStats.handler(ctx,{year:2026,month:3})).totalRevenue,0);
+ await assert.rejects(dashboard.globalStats.handler(ctx,{year:2026,month:13}),/Mois invalide/);
+});
