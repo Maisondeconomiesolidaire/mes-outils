@@ -22,15 +22,30 @@ import { cn } from "../../lib/cn";
 const statuses: Record<string, string> = { scheduled: "Programmée", publishing: "En cours d'envoi", published: "Publiée", failed: "Échec", cancelled: "Annulée" };
 const dateLabel = (date: number) => new Date(date).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 
+/** Remis à zéro par un vrai rechargement de page, pas par une navigation interne. */
+let syncedThisPageLoad = false;
+
 export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean; canCreate: boolean }) {
   const refresh = useAction(api.socialSync.refresh);
   const syncStatus = useQuery(api.socialSync.status, {});
   const [refreshing, setRefreshing] = useState(false);
+  // Un clic pendant la synchronisation automatique ne relance rien côté
+  // serveur : le bouton tourne alors jusqu'à la fin du passage en cours.
+  const [awaitingSync, setAwaitingSync] = useState(false);
   const [syncError, setSyncError] = useState("");
+  const busy = refreshing || awaitingSync;
   useEffect(() => {
+    if (!refreshing && awaitingSync && syncStatus && !syncStatus.running) setAwaitingSync(false);
+  }, [refreshing, awaitingSync, syncStatus]);
+  useEffect(() => {
+    // Une seule synchronisation automatique par chargement de page : revenir
+    // sur l'onglet remonte ce composant, et relancer un passage de ~1 min à
+    // chaque fois n'apporte rien. Elle reste silencieuse (le bouton ne tourne
+    // que sur clic) ; son avancement est visible dans la ligne d'état.
+    if (syncedThisPageLoad) return;
+    syncedThisPageLoad = true;
     let mounted = true;
-    setRefreshing(true);
-    refresh({}).catch(() => { if (mounted) setSyncError("Impossible de joindre les réseaux. Les publications sont conservées."); }).finally(() => { if (mounted) setRefreshing(false); });
+    refresh({}).catch(() => { if (mounted) setSyncError("Impossible de joindre les réseaux. Les publications sont conservées."); });
     return () => { mounted = false; };
   }, [refresh]);
   const [month, setMonth] = useState(() => startOfMonth(new Date()).getTime());
@@ -61,14 +76,14 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
     <PublicationConfetti burst={burst} />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="text-xl font-semibold">Publications sur les réseaux</h2><p className="mt-1 text-sm text-[var(--muted-foreground)]">Facebook et Instagram · calendrier et historique</p></div>
-      <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={refreshing || syncStatus?.running} onClick={async () => {
-        setRefreshing(true); setSyncError("");
+      <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={busy} onClick={async () => {
+        setRefreshing(true); setAwaitingSync(true); setSyncError("");
         try { await refresh({}); } catch { setSyncError("Impossible de joindre les réseaux. Les publications sont conservées."); } finally { setRefreshing(false); }
-      }}><RefreshCw className={cn("h-4 w-4", (refreshing || syncStatus?.running) && "animate-spin")} />Actualiser</Button>
+      }}><RefreshCw className={cn("h-4 w-4", busy && "animate-spin")} />Actualiser</Button>
       {canPublish && <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Nouveau post</Button>}</div>
     </div>
     <div className="space-y-1 text-xs text-[var(--muted-foreground)]">
-      <p>{refreshing || syncStatus?.running ? "Synchronisation avec les réseaux…" : syncStatus?.finishedAt ? `Dernière synchronisation : ${dateLabel(syncStatus.finishedAt)}` : "Synchronisation à l’ouverture de cette page."}</p>
+      <p>{busy || syncStatus?.running ? "Synchronisation avec les réseaux…" : syncStatus?.finishedAt ? `Dernière synchronisation : ${dateLabel(syncStatus.finishedAt)}` : "Synchronisation à l’ouverture de cette page."}</p>
       {(syncError || Boolean(syncStatus?.errors.length)) && <p role="alert" className="text-amber-700">{syncError || syncStatus?.errors.join(" ")}</p>}
     </div>
     {notice && <p role="status" className="rounded-xl bg-brand-500/10 p-3 text-sm">{notice}</p>}
