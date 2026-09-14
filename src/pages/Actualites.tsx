@@ -104,7 +104,7 @@ export function Actualites() {
     <div className="space-y-6">
       <SectionHeader title="Espace partage" />
       <SectionTabs />
-      {sub === "publications" ? <Publications canCreate={canCreate} canManage={canManage} /> : null}
+      {sub === "publications" ? <Publications canCreate={canCreate} canManage={canManage} canPublish={canPublish} /> : null}
       {sub === "evenements" ? (
         <Evenements canCreate={canCreate} canPublish={canPublish} />
       ) : null}
@@ -140,7 +140,7 @@ type Post = {
 type PostMedia = { kind: "image" | "video"; url: string };
 type PostLike = { _id: Id<"postLikes">; name: string; imageUrl?: string; createdAt: number };
 
-function Publications({ canCreate, canManage }: { canCreate: boolean; canManage: boolean }) {
+function Publications({ canCreate, canManage, canPublish }: { canCreate: boolean; canManage: boolean; canPublish: boolean }) {
   const { user } = useUser();
   const posts = useQuery(api.posts.list, { limit: 60 }) as Post[] | undefined;
   const createPost = useMutation(api.posts.create);
@@ -151,6 +151,15 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
   const pinPost = useMutation(api.posts.pin);
   const updatePost = useMutation(api.posts.update);
   const emailPost = useAction(api.posts.emailToInternalUsers);
+  const [sharing, setSharing] = useState<{ post: Post; network: "facebook" | "instagram" } | null>(null);
+  const [shareNotice, setShareNotice] = useState<string | null>(null);
+  const shareSource: SocialPublishItem | null = sharing ? {
+    kind: "post", id: sharing.post._id, sourcePostId: sharing.post._id,
+    title: sharing.post.title ?? "",
+    description: [sharing.post.body, sharing.post.externalLink].filter(Boolean).join("\n\n"),
+    imageIds: sharing.post.images, imageUrls: sharing.post.imageUrls,
+    authorName: sharing.post.authorName, canManage: false,
+  } : null;
 
   const [body, setBody] = useState("");
   const [title, setTitle] = useState("");
@@ -272,21 +281,29 @@ function Publications({ canCreate, canManage }: { canCreate: boolean; canManage:
             onRemove={() => removePostWithConfirmation(post._id)}
             onUpdate={(next) => updatePost({ postId: post._id, ...next })}
             onEmail={() => emailPost({ postId: post._id })}
+            onShareFacebook={canPublish ? () => setSharing({ post, network: "facebook" }) : undefined}
+            onShareInstagram={canPublish ? () => setSharing({ post, network: "instagram" }) : undefined}
             onAddComment={(text) => addComment({ postId: post._id, body: text })}
             onRemoveComment={removeCommentWithConfirmation}
           />
         ))
       )}
+      {shareNotice && <p role="status" className="rounded-xl bg-brand-500/10 p-3 text-sm text-brand-700">{shareNotice}</p>}
+      {canPublish && sharing && shareSource && (sharing.network === "facebook"
+        ? <FacebookPublishDialog event={shareSource} onClose={() => setSharing(null)} onPublished={setShareNotice} />
+        : <InstagramPublishDialog event={shareSource} onClose={() => setSharing(null)} onPublished={setShareNotice} />)}
     </div>
   );
 }
 
 function PostCard({
-  post, currentName, currentImage, canManage, canCreate, onToggleLike, onPin, onRemove, onUpdate, onEmail, onAddComment, onRemoveComment,
+  post, currentName, currentImage, canManage, canCreate, onShareFacebook, onShareInstagram, onToggleLike, onPin, onRemove, onUpdate, onEmail, onAddComment, onRemoveComment,
 }: {
   post: Post; currentName: string; currentImage?: string; canManage: boolean; canCreate: boolean;
   onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (next: { title?: string; body: string; externalLink?: string; images: Id<"_storage">[] }) => Promise<unknown>;
   onEmail: () => Promise<{ recipients: number }>;
+  onShareFacebook?: () => void;
+  onShareInstagram?: () => void;
   onAddComment: (text: string) => Promise<unknown>; onRemoveComment: (commentId: Id<"postComments">) => void;
 }) {
   const [showComments, setShowComments] = useState(false);
@@ -507,6 +524,11 @@ function PostCard({
           ) : null}
         </div>
       ) : null}
+
+      {(onShareFacebook || onShareInstagram) && <div className="flex flex-wrap gap-2 border-t border-[var(--border)] px-4 py-3">
+        {onShareFacebook && <Button variant="secondary" size="sm" onClick={onShareFacebook}><FacebookIcon className="h-4 w-4" />Partager sur Facebook</Button>}
+        {onShareInstagram && <Button variant="secondary" size="sm" onClick={onShareInstagram}><InstagramIcon className="h-4 w-4" />Partager sur Instagram</Button>}
+      </div>}
 
       {canCreate ? (
         <div className={cn("mx-2 grid border-t border-[var(--border)]", post.canEmail ? "grid-cols-3" : "grid-cols-2")}>
@@ -1325,12 +1347,19 @@ function CalendarEventDetail({
  * publie à l'heure dite. Rien à surveiller de notre côté, et rien à rejouer si
  * le déploiement redémarre entre-temps.
  */
+type SocialPublishItem = CalendarItem | (Omit<CalendarItem, "kind"> & { kind: "post"; sourcePostId: Id<"posts"> });
+
+function socialSourceArgs(item: SocialPublishItem) {
+  if (item.kind === "post") return { sourcePostId: item.sourcePostId };
+  return item.kind === "mesoutils" ? { eventId: item.eventId as Id<"events"> } : { recycappEventId: item.id as Id<"recycappCalendarEvents"> };
+}
+
 function FacebookPublishDialog({
   event,
   onClose,
   onPublished,
 }: {
-  event: CalendarItem;
+  event: SocialPublishItem;
   onClose: () => void;
   onPublished: (message: string) => void;
 }) {
@@ -1388,9 +1417,7 @@ function FacebookPublishDialog({
     setResults((current) => Object.fromEntries(Object.entries(current).filter(([, result]) => result.status === "success")));
     try {
       const batch = await publishToPages(pendingPages, (pageId) => publish({
-        ...(event.kind === "mesoutils"
-          ? { eventId: event.eventId as Id<"events"> }
-          : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }),
+        ...socialSourceArgs(event),
         pageId,
         message,
         photoStorageIds: allPhotos,
@@ -1436,7 +1463,7 @@ function FacebookPublishDialog({
         </Field>
 
         {event.imageUrls.length > 0 && (event.imageIds?.length ?? 0) > 0 ? (
-          <Field label="Photos de l'évènement" hint="Cliquez pour retirer ou remettre.">
+          <Field label={event.kind === "post" ? "Photos du post" : "Photos de l'évènement"} hint="Cliquez pour retirer ou remettre.">
             <div className="flex flex-wrap gap-2">
               {event.imageIds!.map((id, index) => {
                 const selected = photos.includes(id);
@@ -1588,7 +1615,7 @@ function InstagramPublishDialog({
   onClose,
   onPublished,
 }: {
-  event: CalendarItem;
+  event: SocialPublishItem;
   onClose: () => void;
   onPublished: (message: string) => void;
 }) {
@@ -1626,9 +1653,7 @@ function InstagramPublishDialog({
     setError(null);
     try {
       const result = await publish({
-        ...(event.kind === "mesoutils"
-          ? { eventId: event.eventId as Id<"events"> }
-          : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }),
+        ...socialSourceArgs(event),
         instagramIds: selected,
         message,
         photoStorageIds: allPhotos,
@@ -1716,7 +1741,7 @@ function InstagramPublishDialog({
         </Field>
 
         {event.imageUrls.length > 0 && (event.imageIds?.length ?? 0) > 0 ? (
-          <Field label="Photos de l'évènement" hint="Cliquez pour retirer ou remettre.">
+          <Field label={event.kind === "post" ? "Photos du post" : "Photos de l'évènement"} hint="Cliquez pour retirer ou remettre.">
             <div className="flex flex-wrap gap-2">
               {event.imageIds!.map((id, index) => {
                 const kept = photos.includes(id);
@@ -1818,7 +1843,7 @@ function InstagramPublishDialog({
 }
 
 /** Corps pré-rempli : la date, le lieu, puis la description de l'évènement. */
-function defaultFacebookBody(event: CalendarItem) {
+function defaultFacebookBody(event: SocialPublishItem) {
   const lines: string[] = [];
   if (event.start) {
     lines.push(

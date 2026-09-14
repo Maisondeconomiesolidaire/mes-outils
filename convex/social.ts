@@ -84,6 +84,7 @@ export const postsForEvent = query({
 
 export const eventPayload = internalQuery({
   args: {
+    sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
     pageId: v.string(),
@@ -99,6 +100,25 @@ export const eventPayload = internalQuery({
           .unique();
     if (!page || ("active" in page && !page.active)) {
       throw new Error("Page Facebook inconnue ou désactivée.");
+    }
+
+    if ([args.eventId, args.recycappEventId, args.sourcePostId].filter(Boolean).length !== 1) {
+      throw new Error("Choisissez un seul post ou événement à partager.");
+    }
+    if (args.sourcePostId) {
+      await requireCrmPermission(ctx, PAGE_KEY, "read");
+      const post = await ctx.db.get(args.sourcePostId);
+      if (!post) throw new Error("Post introuvable.");
+      return {
+        page: { pageId: page.pageId, name: page.name, accessToken: page.accessToken },
+        event: {
+          title: post.title ?? "",
+          description: [post.body, post.externalLink].filter(Boolean).join("\n\n"),
+          location: undefined,
+          start: undefined,
+          photoUrl: post.images?.[0] ? await ctx.storage.getUrl(post.images[0]) : null,
+        },
+      };
     }
 
     if (args.eventId) {
@@ -143,6 +163,7 @@ export const eventPayload = internalQuery({
 
 export const recordPost = internalMutation({
   args: {
+    sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
     network: v.optional(v.union(v.literal("facebook"), v.literal("instagram"))),
@@ -200,6 +221,7 @@ function buildMessage(event: {
 
 export const publishEvent = action({
   args: {
+    sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
     pageId: v.string(),
@@ -229,6 +251,7 @@ export const publishEvent = action({
     }
 
     const payload = await ctx.runQuery(internal.social.eventPayload, {
+      sourcePostId: args.sourcePostId,
       eventId: args.eventId,
       recycappEventId: args.recycappEventId,
       pageId: args.pageId,
@@ -237,7 +260,7 @@ export const publishEvent = action({
     const message = args.message?.trim() || buildMessage(payload.event);
 
     // Photos choisies dans le formulaire ; à défaut, celle de l'évènement.
-    const photoUrls: string[] = args.photoStorageIds?.length
+    const photoUrls: string[] = args.photoStorageIds !== undefined
       ? (
           await Promise.all(
             args.photoStorageIds.map((id) => ctx.storage.getUrl(id as Id<"_storage">)),
@@ -309,6 +332,7 @@ export const publishEvent = action({
     if (!postId) throw new Error("Facebook n'a pas renvoyé d'identifiant de publication.");
 
     await ctx.runMutation(internal.social.recordPost, {
+      sourcePostId: args.sourcePostId,
       eventId: args.eventId,
       recycappEventId: args.recycappEventId,
       pageId: payload.page.pageId,
@@ -666,6 +690,7 @@ export const pageTokens = internalQuery({
  */
 export const publishEventToInstagram = action({
   args: {
+    sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
     instagramIds: v.array(v.string()),
@@ -698,6 +723,7 @@ export const publishEventToInstagram = action({
       });
 
     const payload = await ctx.runQuery(internal.social.eventPayload, {
+      sourcePostId: args.sourcePostId,
       eventId: args.eventId,
       recycappEventId: args.recycappEventId,
       pageId: "",
@@ -771,6 +797,7 @@ export const publishEventToInstagram = action({
         );
 
         await ctx.runMutation(internal.social.recordPost, {
+          sourcePostId: args.sourcePostId,
           eventId: args.eventId,
           recycappEventId: args.recycappEventId,
           network: "instagram",

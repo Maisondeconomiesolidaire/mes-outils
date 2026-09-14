@@ -1690,6 +1690,7 @@ export default defineSchema(
 
   /** Publications Facebook émises depuis Mes Outils, pour le suivi. */
   socialFacebookPosts: defineTable({
+    sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     /** Évènement du calendrier Recyclerie, quand la publication vient de là. */
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
