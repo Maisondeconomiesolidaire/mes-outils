@@ -36,9 +36,21 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
   const [awaitingSync, setAwaitingSync] = useState(false);
   const [syncError, setSyncError] = useState("");
   const busy = refreshing || awaitingSync;
+  // Le bail de synchronisation expire avec le temps, pas avec une écriture :
+  // on le réévalue nous-mêmes tant qu'il court, sinon l'attente d'un passage
+  // déjà mort ne se terminerait jamais.
+  const leaseUntil = syncStatus?.leaseUntil ?? 0;
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    if (!refreshing && awaitingSync && syncStatus && !syncStatus.running) setAwaitingSync(false);
-  }, [refreshing, awaitingSync, syncStatus]);
+    setNow(Date.now());
+    if (leaseUntil <= Date.now()) return;
+    const timer = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(timer);
+  }, [leaseUntil]);
+  const running = leaseUntil > now;
+  useEffect(() => {
+    if (!refreshing && awaitingSync && !running) setAwaitingSync(false);
+  }, [refreshing, awaitingSync, running]);
   useEffect(() => {
     // Une seule synchronisation automatique par chargement de page : revenir
     // sur l'onglet remonte ce composant, et relancer un passage de ~1 min à
@@ -93,7 +105,10 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
       {canPublish && <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Nouveau post</Button>}</div>
     </div>
     <div className="space-y-1 text-xs text-[var(--muted-foreground)]">
-      <p>{busy || syncStatus?.running ? "Synchronisation avec les réseaux…" : syncStatus?.finishedAt ? `Dernière synchronisation : ${dateLabel(syncStatus.finishedAt)}` : "Synchronisation à l’ouverture de cette page."}</p>
+      {/* Les points de suspension ne s'affichent que pour un passage demandé
+          ici : une synchronisation de fond (ouverture de page, autre
+          utilisateur) n'a pas à faire mouliner l'écran de tout le monde. */}
+      <p>{busy ? "Synchronisation avec les réseaux…" : syncStatus?.finishedAt ? `Dernière synchronisation : ${dateLabel(syncStatus.finishedAt)}${running ? " · un autre passage est en cours" : ""}` : "Les publications se synchronisent en arrière-plan."}</p>
       {(syncError || Boolean(syncStatus?.errors.length)) && <p role="alert" className="text-amber-700">{syncError || syncStatus?.errors.join(" ")}</p>}
     </div>
     {notice && <p role="status" className="rounded-xl bg-brand-500/10 p-3 text-sm">{notice}</p>}

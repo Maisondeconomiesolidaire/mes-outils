@@ -171,7 +171,12 @@ export const status = query({
   handler: async ctx => {
     await requireCrmPermission(ctx, "mesoutils:actualites", "read");
     const state = await ctx.db.query("socialSyncState").withIndex("by_key", q => q.eq("key", "global")).unique();
-    return state ? { finishedAt: state.finishedAt, errors: state.errors ?? [], running: state.leaseUntil > Date.now() } : null;
+    // `leaseUntil` est renvoyé brut : une requête Convex ne se réexécute que
+    // sur changement de données, jamais au passage du temps. Un « en cours »
+    // calculé ici resterait vrai indéfiniment si une synchronisation mourait
+    // sans écrire sa fin (déploiement pendant un passage, action interrompue).
+    // C'est au client de comparer le bail à l'heure courante.
+    return state ? { finishedAt: state.finishedAt, errors: state.errors ?? [], leaseUntil: state.leaseUntil } : null;
   },
 });
 
