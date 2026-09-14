@@ -1673,6 +1673,10 @@ export default defineSchema(
    * sont. Même logique que la boîte Gmail de Klyd.
    */
   socialFacebookPages: defineTable({
+    profileImageUrl: v.optional(v.string()),
+    profileCheckedAt: v.optional(v.number()),
+    instagramProfileImageUrl: v.optional(v.string()),
+    instagramProfileCheckedAt: v.optional(v.number()),
     pageId: v.string(),
     name: v.string(),
     accessToken: v.string(),
@@ -1697,6 +1701,12 @@ export default defineSchema(
     inputTokens: v.optional(v.number()), outputTokens: v.optional(v.number()),
   }).index("by_author", ["authorClerkId", "createdAt"]),
 
+  socialSyncState: defineTable({
+    key: v.string(), startedAt: v.number(), leaseUntil: v.number(),
+    finishedAt: v.optional(v.number()), lastSuccessAt: v.optional(v.number()),
+    errors: v.optional(v.array(v.string())), imported: v.optional(v.number()), removed: v.optional(v.number()),
+  }).index("by_key", ["key"]),
+
   socialCompositions: defineTable({
     requestKey: v.string(),
     message: v.string(),
@@ -1719,9 +1729,11 @@ export default defineSchema(
     postId: v.optional(v.string()),
     error: v.optional(v.string()),
     publishedAt: v.optional(v.number()),
-  }).index("by_composition", ["compositionId"]).index("by_date", ["scheduledFor"]),
+  }).index("by_composition", ["compositionId"]).index("by_date", ["scheduledFor"]).index("by_target", ["targetId"]),
 
   socialFacebookPosts: defineTable({
+    remotePermalink: v.optional(v.string()),
+    importedFromNetwork: v.optional(v.boolean()),
     composerId: v.optional(v.id("socialCompositions")),
     sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
@@ -1744,7 +1756,11 @@ export default defineSchema(
   })
     .index("by_event", ["eventId"])
     .index("by_recycappEvent", ["recycappEventId"])
-    .index("by_composer", ["composerId"]),
+    .index("by_composer", ["composerId"])
+    .index("by_pageId", ["pageId"])
+    .index("by_postId", ["postId"])
+    .index("by_createdAt", ["createdAt"])
+    .index("by_scheduledFor", ["scheduledFor"]),
 
   /** Espace partage — bons plans internes (prêt, don, vente, échange). */
   dealPosts: defineTable({

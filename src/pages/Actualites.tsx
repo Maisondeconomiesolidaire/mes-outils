@@ -1568,6 +1568,7 @@ function FacebookPublishDialog({
           </p>
           <FacebookPostPreview
             accountName={pageName ?? "Nom du compte"}
+            accountImageUrl={selectedPages[0]?.profileImageUrl}
             message={message}
             photoUrls={previewUrls}
             scheduledFor={mode === "scheduled" ? scheduledFor : null}
@@ -1803,6 +1804,7 @@ function InstagramPublishDialog({
             Aperçu
           </p>
           <InstagramPostPreview
+            accountImageUrl={selected.length === 1 ? accounts?.find(account => account.instagramId === selected[0])?.profileImageUrl : undefined}
             accountName={
               // Un seul compte coché : on montre le sien. Plusieurs : un nom
               // générique, l'aperçu valant pour tous.

@@ -84,13 +84,21 @@ export const list = query({
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || end - start > 370 * 86400_000) throw new Error("Période invalide.");
     const deliveries = await ctx.db.query("socialDeliveries").withIndex("by_date", q => q.gte("scheduledFor", start).lt("scheduledFor", end)).collect();
     const compositions = new Map(await Promise.all([...new Set(deliveries.map(d => d.compositionId))].map(async id => [id, await ctx.db.get(id)] as const)));
+    const [publishedRecords, scheduledRecords, compositionRecords] = await Promise.all([
+      ctx.db.query("socialFacebookPosts").withIndex("by_createdAt", q => q.gte("createdAt", start).lt("createdAt", end)).collect(),
+      ctx.db.query("socialFacebookPosts").withIndex("by_scheduledFor", q => q.gte("scheduledFor", start).lt("scheduledFor", end)).collect(),
+      Promise.all([...compositions.keys()].map(id => ctx.db.query("socialFacebookPosts").withIndex("by_composer", q => q.eq("composerId", id)).collect())),
+    ]);
+    const records = [...new Map([...publishedRecords, ...scheduledRecords, ...compositionRecords.flat()].map(p => [p._id, p])).values()];
+    const remoteByTarget = new Map(records.filter(p => p.composerId).map(p => [`${p.composerId}:${p.network ?? "facebook"}:${p.pageId}`, p]));
     const current = deliveries.map(d => {
       const post = compositions.get(d.compositionId);
-      return { id: d._id as string, deliveryId: d._id, network: d.network, targetName: d.targetName, date: d.scheduledFor, status: d.status as string, message: post?.message ?? "", authorName: post?.authorName ?? "", error: d.error, mesoutils: Boolean(post?.mesoutilsPostId), postId: d.postId };
+      const remote = remoteByTarget.get(`${d.compositionId}:${d.network}:${d.targetId}`);
+      return { id: d._id as string, deliveryId: d._id, network: d.network, targetName: d.targetName, date: d.scheduledFor, status: d.status as string, message: remote?.message ?? post?.message ?? "", authorName: post?.authorName ?? "", error: d.error, mesoutils: Boolean(post?.mesoutilsPostId), postId: d.postId ?? remote?.postId };
     });
     // Include the existing event/post shares, without duplicating composer deliveries.
     const recordedIds = new Set(deliveries.map(d => d.postId).filter(Boolean));
-    const legacy = (await ctx.db.query("socialFacebookPosts").collect()).filter(p => {
+    const legacy = records.filter(p => {
       const date = p.scheduledFor ?? p.createdAt;
       return date >= start && date < end && !p.composerId && !recordedIds.has(p.postId);
     }).map(p => ({ id: p._id as string, deliveryId: undefined, network: p.network ?? "facebook", targetName: p.pageName, date: p.scheduledFor ?? p.createdAt, status: p.scheduledFor && p.scheduledFor > Date.now() ? "scheduled" : "published", message: p.message, authorName: p.authorName, error: undefined, mesoutils: Boolean(p.sourcePostId), postId: p.postId }));

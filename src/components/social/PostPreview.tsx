@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Globe2, Heart, MessageCircle, MoreHorizontal, Send, ThumbsUp } from "lucide-react";
 import { FacebookIcon } from "../icons/FacebookIcon";
 import { InstagramIcon } from "../icons/InstagramIcon";
@@ -21,15 +22,18 @@ function AccountLine({
   name,
   subtitle,
   network,
+  imageUrl,
 }: {
   name: string;
   subtitle: string;
   network: "facebook" | "instagram";
+  imageUrl?: string;
 }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const initial = name.replace(/^@/, "").charAt(0).toUpperCase() || "?";
   return (
     <div className="flex items-center gap-2.5">
-      <span
+      {imageUrl && failedUrl !== imageUrl ? <img src={imageUrl} alt="" referrerPolicy="no-referrer" onError={() => setFailedUrl(imageUrl)} className="h-9 w-9 shrink-0 rounded-full object-cover" /> : <span
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white",
           network === "facebook"
@@ -38,7 +42,7 @@ function AccountLine({
         )}
       >
         {initial}
-      </span>
+      </span>}
       <span className="min-w-0">
         <span className="block truncate text-[13px] font-semibold text-zinc-900">{name}</span>
         <span className="flex items-center gap-1 text-[11px] text-zinc-500">
@@ -88,11 +92,13 @@ function PhotoGrid({ urls }: { urls: string[] }) {
 
 export function FacebookPostPreview({
   accountName,
+  accountImageUrl,
   message,
   photoUrls,
   scheduledFor,
 }: {
   accountName: string;
+  accountImageUrl?: string;
   message: string;
   photoUrls: string[];
   scheduledFor?: number | null;
@@ -108,7 +114,7 @@ export function FacebookPostPreview({
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
       <div className="flex items-start justify-between gap-3 p-3">
-        <AccountLine name={accountName} subtitle={when} network="facebook" />
+        <AccountLine name={accountName} subtitle={when} network="facebook" imageUrl={accountImageUrl} />
         <MoreHorizontal className="h-4 w-4 shrink-0 text-zinc-400" />
       </div>
 
@@ -139,10 +145,12 @@ export function FacebookPostPreview({
 
 export function InstagramPostPreview({
   accountName,
+  accountImageUrl,
   caption,
   photoUrls,
 }: {
   accountName: string;
+  accountImageUrl?: string;
   caption: string;
   photoUrls: string[];
 }) {
@@ -150,7 +158,7 @@ export function InstagramPostPreview({
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
       <div className="flex items-center justify-between gap-3 p-3">
-        <AccountLine name={handle} subtitle="Publication" network="instagram" />
+        <AccountLine name={handle} subtitle="Publication" network="instagram" imageUrl={accountImageUrl} />
         <MoreHorizontal className="h-4 w-4 shrink-0 text-zinc-400" />
       </div>
 

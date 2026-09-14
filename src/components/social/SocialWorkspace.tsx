@@ -5,9 +5,9 @@ import { FacebookIcon } from "../icons/FacebookIcon";
 import { InstagramIcon } from "../icons/InstagramIcon";
 import { FacebookPostPreview, InstagramPostPreview } from "./PostPreview";
 import { useEffect, useState } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useAction, useMutation, useQuery } from "convex/react";
 import { addMonths, endOfMonth, endOfWeek, startOfMonth, startOfWeek } from "date-fns";
-import { Plus } from "lucide-react";
+import { Plus, RefreshCw } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { Button } from "../ui/Button";
@@ -23,6 +23,16 @@ const statuses: Record<string, string> = { scheduled: "Programmée", publishing:
 const dateLabel = (date: number) => new Date(date).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 
 export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean; canCreate: boolean }) {
+  const refresh = useAction(api.socialSync.refresh);
+  const syncStatus = useQuery(api.socialSync.status, {});
+  const [refreshing, setRefreshing] = useState(false);
+  const [syncError, setSyncError] = useState("");
+  useEffect(() => {
+    let mounted = true;
+    setRefreshing(true);
+    refresh({}).catch(() => { if (mounted) setSyncError("Impossible de joindre les réseaux. Les publications sont conservées."); }).finally(() => { if (mounted) setRefreshing(false); });
+    return () => { mounted = false; };
+  }, [refresh]);
   const [month, setMonth] = useState(() => startOfMonth(new Date()).getTime());
   const [pendingPublication, setPendingPublication] = useState<Id<"socialCompositions"> | null>(null);
   const [burst, setBurst] = useState(0);
@@ -51,7 +61,15 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
     <PublicationConfetti burst={burst} />
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div><h2 className="text-xl font-semibold">Publications sur les réseaux</h2><p className="mt-1 text-sm text-[var(--muted-foreground)]">Facebook et Instagram · calendrier et historique</p></div>
-      {canPublish && <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Nouveau post</Button>}
+      <div className="flex flex-wrap gap-2"><Button variant="secondary" disabled={refreshing || syncStatus?.running} onClick={async () => {
+        setRefreshing(true); setSyncError("");
+        try { await refresh({}); } catch { setSyncError("Impossible de joindre les réseaux. Les publications sont conservées."); } finally { setRefreshing(false); }
+      }}><RefreshCw className={cn("h-4 w-4", (refreshing || syncStatus?.running) && "animate-spin")} />Actualiser</Button>
+      {canPublish && <Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> Nouveau post</Button>}</div>
+    </div>
+    <div className="space-y-1 text-xs text-[var(--muted-foreground)]">
+      <p>{refreshing || syncStatus?.running ? "Synchronisation avec les réseaux…" : syncStatus?.finishedAt ? `Dernière synchronisation : ${dateLabel(syncStatus.finishedAt)}` : "Synchronisation à l’ouverture de cette page."}</p>
+      {(syncError || Boolean(syncStatus?.errors.length)) && <p role="alert" className="text-amber-700">{syncError || syncStatus?.errors.join(" ")}</p>}
     </div>
     {notice && <p role="status" className="rounded-xl bg-brand-500/10 p-3 text-sm">{notice}</p>}
     <CalendarBoard month={month} onMonthChange={date => setMonth(date.getTime())} events={(entries ?? []).filter(entry => entry.status !== "cancelled").map(entry => ({ id: entry.id, start: entry.date, title: `${entry.targetName} · ${statuses[entry.status]}`, subtitle: entry.message, tone: entry.status === "failed" ? "rose" : entry.status === "scheduled" ? "amber" : "brand" }))} onEventClick={id => { setSelected(id); setError(""); }} />
@@ -151,8 +169,8 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
       </div>
       {step > 0 && <aside className="min-w-0 space-y-5" aria-label="Aperçus des publications">
         <h3 className="text-lg font-semibold">Aperçu des posts</h3>
-        {selectedPages.map(page => <section key={page.pageId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><FacebookIcon className="h-5 w-5" />Facebook · {page.name}</h4><FacebookPostPreview accountName={page.name} message={message} photoUrls={photoUrls} scheduledFor={scheduled ? date : undefined} /></section>)}
-        {selectedAccounts.map(account => <section key={account.instagramId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><InstagramIcon className="h-5 w-5" />Instagram · @{account.username}</h4><InstagramPostPreview accountName={account.username} caption={message} photoUrls={photoUrls} /></section>)}
+        {selectedPages.map(page => <section key={page.pageId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><FacebookIcon className="h-5 w-5" />Facebook · {page.name}</h4><FacebookPostPreview accountName={page.name} accountImageUrl={page.profileImageUrl} message={message} photoUrls={photoUrls} scheduledFor={scheduled ? date : undefined} /></section>)}
+        {selectedAccounts.map(account => <section key={account.instagramId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><InstagramIcon className="h-5 w-5" />Instagram · @{account.username}</h4><InstagramPostPreview accountName={account.username} accountImageUrl={account.profileImageUrl} caption={message} photoUrls={photoUrls} /></section>)}
       </aside>}
       </div>
       {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}

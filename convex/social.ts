@@ -1,3 +1,4 @@
+import { removeSocialRecord } from "./socialSync";
 /**
  * Publication sur les réseaux sociaux depuis Mes Outils.
  *
@@ -41,7 +42,7 @@ export const listPages = query({
     const pages = await ctx.db.query("socialFacebookPages").collect();
     return pages
       .filter((page) => page.active)
-      .map((page) => ({ pageId: page.pageId, name: page.name }))
+      .map((page) => ({ pageId: page.pageId, name: page.name, profileImageUrl: page.profileImageUrl }))
       .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
@@ -188,7 +189,9 @@ export const recordPost = internalMutation({
     authorName: v.string(),
   },
   handler: async (ctx, args) => {
-    await ctx.db.insert("socialFacebookPosts", { ...args, createdAt: Date.now() });
+    const existing = (await ctx.db.query("socialFacebookPosts").withIndex("by_postId", q => q.eq("postId", args.postId)).collect()).find(p => p.pageId === args.pageId && (p.network ?? "facebook") === (args.network ?? "facebook"));
+    if (existing) await ctx.db.patch(existing._id, { ...args, importedFromNetwork: false });
+    else await ctx.db.insert("socialFacebookPosts", { ...args, createdAt: Date.now() });
   },
 });
 
@@ -454,111 +457,22 @@ export const recordedPosts = internalQuery({
 export const forgetPost = internalMutation({
   args: { id: v.id("socialFacebookPosts") },
   handler: async (ctx, { id }) => {
-    await ctx.db.delete(id);
+    await removeSocialRecord(ctx, id);
   },
 });
 
-/** Identifiants d'une liste Graph, en suivant la pagination. */
-async function collectIds(url: string, max = 300) {
-  const ids = new Set<string>();
-  let oldest: number | undefined;
-  let next: string | undefined = url;
-  while (next && ids.size < max) {
-    const response = await fetch(next);
-    const result = (await response.json()) as {
-      data?: Array<{ id: string; created_time?: string }>;
-      paging?: { next?: string };
-      error?: { message?: string };
-    };
-    if (result.error || !result.data) break;
-    for (const item of result.data) {
-      ids.add(item.id);
-      if (item.created_time) {
-        const time = Date.parse(item.created_time);
-        if (Number.isFinite(time)) oldest = Math.min(oldest ?? time, time);
-      }
-    }
-    next = result.paging?.next;
-  }
-  return { ids, oldest };
-}
-
-/**
- * Retire les publications qui n'existent plus sur Facebook.
- *
- * Une publication supprimée depuis Facebook ou Meta Business Suite — ou une
- * programmation annulée — laissait une ligne « Publié le… » sur la fiche de
- * l'évènement, qui affirmait une annonce qui n'existe plus.
- *
- * La vérification passe par les listes de la Page (`feed` et `scheduled_posts`)
- * et non par l'identifiant du post : interroger `/{postId}?fields=id` renvoie
- * l'identifiant même pour un objet disparu, ce qui ne prouvait rien.
- *
- * En cas de doute, la ligne est conservée : une liste illisible (jeton
- * invalide, panne réseau) ou une publication plus ancienne que la fenêtre
- * consultée ne prouvent pas une suppression.
- */
+/** Compatibility entry point used by event details; both networks share one sync. */
 export const reconcilePosts = internalAction({
-  args: {
-    eventId: v.optional(v.id("events")),
-    recycappEventId: v.optional(v.id("recycappCalendarEvents")),
-  },
-  handler: async (ctx, args): Promise<{ checked: number; forgotten: number }> => {
-    const posts: Array<{
-      id: Id<"socialFacebookPosts">;
-      postId: string;
-      pageId: string;
-      createdAt: number;
-      accessToken: string;
-    }> = await ctx.runQuery(internal.social.recordedPosts, {
-      eventId: args.eventId,
-      recycappEventId: args.recycappEventId,
-    });
-
-    const byPage = new Map<string, typeof posts>();
-    for (const post of posts) {
-      byPage.set(post.pageId, [...(byPage.get(post.pageId) ?? []), post]);
-    }
-
-    let forgotten = 0;
-    for (const [pageId, pagePosts] of byPage) {
-      const token = encodeURIComponent(pagePosts[0].accessToken);
-      const base = `https://graph.facebook.com/${GRAPH_VERSION}/${pageId}`;
-      try {
-        const [published, scheduled] = await Promise.all([
-          collectIds(`${base}/feed?fields=id,created_time&limit=100&access_token=${token}`),
-          collectIds(`${base}/scheduled_posts?fields=id&limit=100&access_token=${token}`),
-        ]);
-        // Aucune liste lisible : on ne conclut rien pour cette Page.
-        if (published.ids.size === 0 && scheduled.ids.size === 0 && published.oldest === undefined) {
-          continue;
-        }
-        for (const post of pagePosts) {
-          if (published.ids.has(post.postId) || scheduled.ids.has(post.postId)) continue;
-          // Publication antérieure à la fenêtre consultée : son absence de la
-          // liste ne dit pas qu'elle a été supprimée.
-          if (published.oldest !== undefined && post.createdAt < published.oldest) continue;
-          await ctx.runMutation(internal.social.forgetPost, { id: post.id });
-          forgotten += 1;
-        }
-      } catch (error) {
-        // Réseau indisponible : on retentera à la prochaine passe.
-        console.warn(
-          `Vérification des publications de la Page ${pageId} impossible :`,
-          error instanceof Error ? error.message : String(error),
-        );
-      }
-    }
-    return { checked: posts.length, forgotten };
+  args: { eventId: v.optional(v.id("events")), recycappEventId: v.optional(v.id("recycappCalendarEvents")) },
+  handler: async (ctx): Promise<{ checked: number; forgotten: number }> => {
+    return await ctx.runAction(internal.socialSync.run, {});
   },
 });
 
 /**
  * Vérifie les publications d'un seul évènement, à l'ouverture de sa fiche.
  *
- * La repasse horaire suffit à tenir la liste à jour, mais pas à ce qu'on voie
- * juste après avoir supprimé un post depuis Facebook : cet appel comble
- * l'attente sans rien changer à la logique.
+ * Cette vérification est déclenchée à l’ouverture de la fiche, sans polling.
  */
 export const verifyEventPosts = action({
   args: {
@@ -602,6 +516,7 @@ export const listInstagramAccounts = query({
         instagramId: page.instagramId!,
         username: page.instagramUsername ?? page.name,
         pageName: page.name,
+        profileImageUrl: page.instagramProfileImageUrl,
       }))
       .sort((a, b) => a.username.localeCompare(b.username, "fr"));
   },
