@@ -9,6 +9,7 @@ export function Modal({
   title,
   children,
   className,
+  headerContent,
 }: {
   open: boolean;
   onClose: () => void;
@@ -16,6 +17,8 @@ export function Modal({
   children: ReactNode;
   /** Classes optionnelles pour ajustements ponctuels. La taille de base reste 80vw × 80vh. */
   className?: string;
+  /** Content pinned below the title, outside the scrolling body. */
+  headerContent?: ReactNode;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -54,6 +57,7 @@ export function Modal({
             <X className="h-4 w-4" />
           </button>
         </div>
+        {headerContent && <div className="shrink-0 border-b border-[var(--border)] bg-[var(--card)] px-4 py-3 sm:px-5">{headerContent}</div>}
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-5">{children}</div>
       </div>
     </div>,
