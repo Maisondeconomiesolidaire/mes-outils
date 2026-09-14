@@ -94,14 +94,14 @@ export const list = query({
     const current = deliveries.map(d => {
       const post = compositions.get(d.compositionId);
       const remote = remoteByTarget.get(`${d.compositionId}:${d.network}:${d.targetId}`);
-      return { id: d._id as string, deliveryId: d._id, network: d.network, targetName: d.targetName, date: d.scheduledFor, status: d.status as string, message: remote?.message ?? post?.message ?? "", authorName: post?.authorName ?? "", error: d.error, mesoutils: Boolean(post?.mesoutilsPostId), postId: d.postId ?? remote?.postId };
+      return { id: d._id as string, deliveryId: d._id, network: d.network, targetId: d.targetId, targetName: d.targetName, date: d.scheduledFor, status: d.status as string, message: remote?.message ?? post?.message ?? "", authorName: post?.authorName ?? "", error: d.error, mesoutils: Boolean(post?.mesoutilsPostId), postId: d.postId ?? remote?.postId };
     });
     // Include the existing event/post shares, without duplicating composer deliveries.
     const recordedIds = new Set(deliveries.map(d => d.postId).filter(Boolean));
     const legacy = records.filter(p => {
       const date = p.scheduledFor ?? p.createdAt;
       return date >= start && date < end && !p.composerId && !recordedIds.has(p.postId);
-    }).map(p => ({ id: p._id as string, deliveryId: undefined, network: p.network ?? "facebook", targetName: p.pageName, date: p.scheduledFor ?? p.createdAt, status: p.scheduledFor && p.scheduledFor > Date.now() ? "scheduled" : "published", message: p.message, authorName: p.authorName, error: undefined, mesoutils: Boolean(p.sourcePostId), postId: p.postId }));
+    }).map(p => ({ id: p._id as string, deliveryId: undefined, network: p.network ?? "facebook", targetId: p.pageId, targetName: p.pageName, date: p.scheduledFor ?? p.createdAt, status: p.scheduledFor && p.scheduledFor > Date.now() ? "scheduled" : "published", message: p.message, authorName: p.authorName, error: undefined, mesoutils: Boolean(p.sourcePostId), postId: p.postId }));
     return [...current, ...legacy].sort((a, b) => b.date - a.date);
   },
 });

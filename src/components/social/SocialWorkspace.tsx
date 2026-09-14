@@ -19,6 +19,7 @@ import { Field, Textarea } from "../ui/Field";
 import { FacebookPageMultiSelect } from "./FacebookPageMultiSelect";
 import { cn } from "../../lib/cn";
 import { confirmPermanentDelete } from "../../lib/confirm";
+import { ALL_TARGETS, SocialTargetFilter, type SocialTarget } from "./SocialTargetFilter";
 
 const statuses: Record<string, string> = { scheduled: "Programmée", publishing: "En cours d'envoi", published: "Publiée", failed: "Échec", cancelled: "Annulée" };
 const dateLabel = (date: number) => new Date(date).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
@@ -46,7 +47,7 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
     if (syncedThisPageLoad) return;
     syncedThisPageLoad = true;
     let mounted = true;
-    refresh({}).catch(() => { if (mounted) setSyncError("Impossible de joindre les réseaux. Les publications sont conservées."); });
+    refresh({ auto: true }).catch(() => { if (mounted) setSyncError("Impossible de joindre les réseaux. Les publications sont conservées."); });
     return () => { mounted = false; };
   }, [refresh]);
   const [month, setMonth] = useState(() => startOfMonth(new Date()).getTime());
@@ -66,13 +67,21 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [target, setTarget] = useState<SocialTarget | null>(null);
   const cancel = useMutation(api.socialComposer.cancel);
   const entries = useQuery(api.socialComposer.list, {
     start: startOfWeek(startOfMonth(month), { weekStartsOn: 1 }).getTime(),
     end: endOfWeek(endOfMonth(month), { weekStartsOn: 1 }).getTime() + 1,
   });
   const detail = entries?.find(entry => entry.id === selected);
-  const history = entries?.filter(entry => entry.date >= startOfMonth(month).getTime() && entry.date < startOfMonth(addMonths(month, 1)).getTime());
+  // Pages proposées au filtre : celles qui publient ce mois-ci, plus celle déjà
+  // sélectionnée — sans quoi le filtre perdrait sa valeur en changeant de mois.
+  const targets: SocialTarget[] = [...new Map([
+    ...(entries ?? []).map(entry => [entry.targetId, { id: entry.targetId, name: entry.targetName, network: entry.network }] as const),
+    ...(target ? [[target.id, target] as const] : []),
+  ]).values()].sort((a, b) => a.name.localeCompare(b.name, "fr"));
+  const visible = (entries ?? []).filter(entry => !target || entry.targetId === target.id);
+  const history = visible.filter(entry => entry.date >= startOfMonth(month).getTime() && entry.date < startOfMonth(addMonths(month, 1)).getTime());
   return <div className="space-y-6">
     <PublicationConfetti burst={burst} />
     <div className="flex flex-wrap items-center justify-between gap-3">
@@ -88,10 +97,13 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
       {(syncError || Boolean(syncStatus?.errors.length)) && <p role="alert" className="text-amber-700">{syncError || syncStatus?.errors.join(" ")}</p>}
     </div>
     {notice && <p role="status" className="rounded-xl bg-brand-500/10 p-3 text-sm">{notice}</p>}
-    <CalendarBoard month={month} onMonthChange={date => setMonth(date.getTime())} events={(entries ?? []).filter(entry => entry.status !== "cancelled").map(entry => ({ id: entry.id, start: entry.date, title: `${entry.targetName} · ${statuses[entry.status]}`, subtitle: entry.message, tone: entry.status === "failed" ? "rose" : entry.status === "scheduled" ? "amber" : "brand" }))} onEventClick={id => { setSelected(id); setError(""); }} />
+    <CalendarBoard month={month} onMonthChange={date => setMonth(date.getTime())} events={visible.filter(entry => entry.status !== "cancelled").map(entry => ({ id: entry.id, start: entry.date, title: `${entry.targetName} · ${statuses[entry.status]}`, subtitle: entry.message, tone: entry.status === "failed" ? "rose" : entry.status === "scheduled" ? "amber" : "brand" }))} onEventClick={id => { setSelected(id); setError(""); }} />
     <section className="space-y-3">
-      <h3 className="font-semibold">Historique et programmations · {new Date(month).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</h3>
-      {entries === undefined ? <p role="status">Chargement des publications…</p> : history?.length === 0 ? <p className="text-sm text-[var(--muted-foreground)]">Aucune publication ce mois-ci. Parcourez le calendrier pour consulter les autres mois.</p> : <div className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)]">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h3 className="font-semibold">Historique et programmations · {new Date(month).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</h3>
+        <SocialTargetFilter targets={targets} value={target?.id ?? ALL_TARGETS} onChange={id => setTarget(targets.find(item => item.id === id) ?? null)} />
+      </div>
+      {entries === undefined ? <p role="status">Chargement des publications…</p> : history.length === 0 ? <p className="text-sm text-[var(--muted-foreground)]">{target ? `Aucune publication de ${target.name} ce mois-ci.` : "Aucune publication ce mois-ci."} Parcourez le calendrier pour consulter les autres mois.</p> : <div className="divide-y divide-[var(--border)] rounded-2xl border border-[var(--border)]">
         {history?.map(entry => <button key={entry.id} onClick={() => { setSelected(entry.id); setError(""); }} className="flex w-full flex-wrap items-center justify-between gap-3 p-4 text-left hover:bg-[var(--accent)]">
           <div className="min-w-0 flex-1"><p className="text-sm font-semibold">{entry.network === "facebook" ? "Facebook" : "Instagram"} · {entry.targetName}</p><p className="mt-1 truncate text-sm text-[var(--muted-foreground)]">{entry.message || "Publication photo"}</p><p className="mt-1 text-xs text-[var(--muted-foreground)]">{dateLabel(entry.date)} · {entry.authorName}</p></div>
           <span className={cn("rounded-full px-3 py-1 text-xs font-medium", entry.status === "failed" ? "bg-red-100 text-red-800" : entry.status === "scheduled" ? "bg-amber-100 text-amber-900" : "bg-[var(--accent)]")}>{statuses[entry.status]}</span>

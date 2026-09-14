@@ -20,12 +20,24 @@ export async function removeSocialRecord(ctx: MutationCtx, id: Id<"socialFaceboo
   await ctx.db.delete(id);
 }
 
+/**
+ * Intervalle minimal entre deux synchronisations automatiques.
+ *
+ * Un passage complet dure près d'une minute de temps d'exécution Convex et
+ * plusieurs dizaines d'appels Graph. Lancé à chaque ouverture de la page par
+ * chaque utilisateur, il coûterait bien plus qu'il ne rapporte : les réseaux ne
+ * changent pas d'une minute à l'autre. Le bouton « Actualiser » reste, lui,
+ * toujours honoré.
+ */
+const AUTO_MIN_INTERVAL_MS = 15 * 60 * 1000;
+
 export const reserve = internalMutation({
-  args: {},
-  handler: async ctx => {
+  args: { minIntervalMs: v.optional(v.number()) },
+  handler: async (ctx, { minIntervalMs }) => {
     const state = await ctx.db.query("socialSyncState").withIndex("by_key", q => q.eq("key", "global")).unique();
     const now = Date.now();
     if (state && (state.leaseUntil > now)) return null;
+    if (minIntervalMs !== undefined && state?.finishedAt !== undefined && now - state.finishedAt < minIntervalMs) return null;
     const data = { key: "global", startedAt: now, leaseUntil: now + 300_000 };
     if (state) { await ctx.db.patch(state._id, data); return now; }
     await ctx.db.insert("socialSyncState", data);
@@ -98,9 +110,10 @@ export const finish = internalMutation({
 });
 
 export const run = internalAction({
-  args: {},
-  handler: async (ctx): Promise<{ checked: number; forgotten: number; imported: number }> => {
-    const startedAt: number | null = await ctx.runMutation(internal.socialSync.reserve, {});
+  // `auto` : passage déclenché par l'ouverture de la page, donc espacé.
+  args: { auto: v.optional(v.boolean()) },
+  handler: async (ctx, { auto }): Promise<{ checked: number; forgotten: number; imported: number }> => {
+    const startedAt: number | null = await ctx.runMutation(internal.socialSync.reserve, auto ? { minIntervalMs: AUTO_MIN_INTERVAL_MS } : {});
     if (startedAt === null) return { checked: 0, forgotten: 0, imported: 0 };
     const errors: string[] = [];
     let imported = 0, forgotten = 0, checked = 0;
@@ -146,10 +159,10 @@ export const run = internalAction({
 });
 
 export const refresh = action({
-  args: {},
-  handler: async (ctx): Promise<{ checked: number; forgotten: number; imported: number }> => {
+  args: { auto: v.optional(v.boolean()) },
+  handler: async (ctx, { auto }): Promise<{ checked: number; forgotten: number; imported: number }> => {
     await ctx.runQuery(internal.social.assertCanRead, {});
-    return await ctx.runAction(internal.socialSync.run, {});
+    return await ctx.runAction(internal.socialSync.run, { auto });
   },
 });
 
