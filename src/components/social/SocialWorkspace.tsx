@@ -140,7 +140,22 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
   }
   return <Modal open onClose={() => { if (!busy) onClose(); }} title="Nouveau post sur les réseaux"
     className="sm:h-[94vh] sm:w-[96vw] sm:max-w-[96vw]"
-    headerContent={<ol aria-label="Étapes de publication" className="mx-auto flex max-w-6xl gap-2 text-sm">{["Réseaux et pages", "Votre post", "Mes Outils"].map((label, index) => <li key={label} aria-current={step === index ? "step" : undefined} className={cn("flex-1 rounded-full px-3 py-2 text-center", step === index ? "bg-brand-500 text-white" : "bg-[var(--accent)]")}>{index + 1}. {label}</li>)}</ol>}
+    headerContent={<ol aria-label="Étapes de publication" className="mx-auto flex max-w-6xl gap-2 text-sm">
+      {["Réseaux et pages", "Votre post", "Mes Outils"].map((label, index) => <li key={label} className="min-w-0 flex-1">
+        <button
+          type="button"
+          aria-current={step === index ? "step" : undefined}
+          disabled={index >= step || busy}
+          onClick={() => {
+            if (index < step && !busy) {
+              setError("");
+              setStep(index);
+            }
+          }}
+          className={cn("w-full rounded-full px-3 py-2 text-center transition-colors disabled:cursor-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2", step === index ? "bg-brand-500 text-white" : "bg-[var(--accent)]", index < step && !busy && "cursor-pointer hover:bg-brand-100 hover:text-brand-700")}
+        >{index + 1}. {label}</button>
+      </li>)}
+    </ol>}
   >
     <div className="mx-auto max-w-6xl space-y-6">
       {step === 0 && <div className="space-y-5">
