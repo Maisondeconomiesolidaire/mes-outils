@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
@@ -31,6 +31,8 @@ import { endOfMonth, endOfWeek, startOfMonth, startOfWeek } from "date-fns";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useSearchParams } from "react-router-dom";
+import { FacebookPageMultiSelect } from "../components/social/FacebookPageMultiSelect";
+import { publishToPages, type PagePublishResult } from "../lib/publishToPages";
 import { FacebookIcon } from "../components/icons/FacebookIcon";
 import { InstagramIcon } from "../components/icons/InstagramIcon";
 import {
@@ -1334,7 +1336,10 @@ function FacebookPublishDialog({
 }) {
   const pages = useQuery(api.social.listPages, {});
   const publish = useAction(api.social.publishEvent);
-  const [pageId, setPageId] = useState("");
+  const [pageIds, setPageIds] = useState<string[]>([]);
+  const sending = useRef(false);
+  const [results, setResults] = useState<Record<string, PagePublishResult>>({});
+  const [attempted, setAttempted] = useState(false);
   const [title, setTitle] = useState(event.title);
   const [body, setBody] = useState(() => defaultFacebookBody(event));
   // Les photos de l'évènement sont proposées cochées ; on peut en retirer et
@@ -1347,14 +1352,15 @@ function FacebookPublishDialog({
   const [mode, setMode] = useState<"now" | "scheduled">("now");
   const [scheduledFor, setScheduledFor] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     // Une seule Page configurée : inutile de faire choisir.
-    if (pages && pages.length === 1) setPageId(pages[0].pageId);
-  }, [pages]);
+    if (!attempted && pages && pages.length === 1) setPageIds([pages[0].pageId]);
+  }, [pages, attempted]);
 
-  const pageName = pages?.find((page) => page.pageId === pageId)?.name;
+  const selectedPages = (pages ?? []).filter((page) => pageIds.includes(page.pageId));
+  const pendingPages = selectedPages.filter((page) => results[page.pageId]?.status !== "success");
+  const pageName = selectedPages[0]?.name;
   const message = [title.trim(), body.trim()].filter(Boolean).join("\n\n");
   const allPhotos = [...photos, ...extraPhotos];
   const previewUrls = [
@@ -1364,7 +1370,7 @@ function FacebookPublishDialog({
     ...extraPreviews,
   ];
   const ready =
-    Boolean(pageId) &&
+    pendingPages.length > 0 &&
     Boolean(message) &&
     (mode === "now" || scheduledFor !== null);
 
@@ -1375,11 +1381,13 @@ function FacebookPublishDialog({
   }
 
   async function submit() {
-    if (!ready) return;
+    if (!ready || sending.current) return;
+    sending.current = true;
     setBusy(true);
-    setError(null);
+    setAttempted(true);
+    setResults((current) => Object.fromEntries(Object.entries(current).filter(([, result]) => result.status === "success")));
     try {
-      await publish({
+      const batch = await publishToPages(pendingPages, (pageId) => publish({
         ...(event.kind === "mesoutils"
           ? { eventId: event.eventId as Id<"events"> }
           : { recycappEventId: event.id as Id<"recycappCalendarEvents"> }),
@@ -1387,22 +1395,17 @@ function FacebookPublishDialog({
         message,
         photoStorageIds: allPhotos,
         ...(mode === "scheduled" && scheduledFor !== null ? { scheduledFor } : {}),
-      });
-      onPublished(
-        mode === "scheduled" && scheduledFor !== null
-          ? `Publication programmée sur ${pageName} pour le ${formatDateTime(scheduledFor)}.`
-          : `Publié sur ${pageName}.`,
-      );
-      onClose();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Publication impossible.");
+      }), (result) => setResults((current) => ({ ...current, [result.pageId]: result })));
+      const succeeded = batch.filter((result) => result.status === "success");
+      if (succeeded.length) onPublished(`${mode === "scheduled" ? "Publication programmée" : "Publié"} sur ${succeeded.map((result) => result.name).join(", ")}.`);
     } finally {
+      sending.current = false;
       setBusy(false);
     }
   }
 
   return (
-    <Modal open onClose={onClose} title="Publier sur Facebook" className="max-w-5xl">
+    <Modal open onClose={() => { if (!sending.current) onClose(); }} title="Publier sur Facebook" className="max-w-5xl">
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="grid gap-4">
         {pages === undefined ? (
@@ -1413,18 +1416,12 @@ function FacebookPublishDialog({
             configurent sur le déploiement.
           </p>
         ) : (
-          <Field label="Page Facebook" required>
-            <Select value={pageId} onChange={(e) => setPageId(e.target.value)}>
-              <option value="">Choisir une Page…</option>
-              {pages.map((page) => (
-                <option key={page.pageId} value={page.pageId}>
-                  {page.name}
-                </option>
-              ))}
-            </Select>
+          <Field label="Pages Facebook" required>
+            <FacebookPageMultiSelect pages={pages} value={pageIds} onChange={setPageIds} disabled={busy || attempted} />
           </Field>
         )}
 
+        <fieldset disabled={busy || attempted} className="grid min-w-0 gap-4 disabled:opacity-70">
         <Field label="Titre" hint="Première ligne du post.">
           <Input value={title} onChange={(e) => setTitle(e.target.value)} />
         </Field>
@@ -1519,11 +1516,18 @@ function FacebookPublishDialog({
           </Field>
         ) : null}
 
-        {error ? (
-          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">
-            {error}
-          </p>
-        ) : null}
+        </fieldset>
+        {attempted && (
+          <div className="space-y-2" aria-live="polite">
+            {selectedPages.map((page) => {
+              const result = results[page.pageId];
+              return <p key={page.pageId} className={cn("rounded-lg px-3 py-2 text-sm", result?.status === "success" ? "bg-brand-500/10 text-brand-700" : result?.status === "error" ? "bg-red-50 text-red-700" : "bg-[var(--accent)]")}>
+                <strong>{page.name}</strong> · {result?.status === "success" ? mode === "scheduled" ? "Programmée" : "Publiée" : result?.status === "error" ? result.error : "En attente…"}
+              </p>;
+            })}
+            {Object.values(results).some((result) => result.status === "error") && <p className="text-xs text-[var(--muted-foreground)]">Seules les Pages en échec seront retentées. En cas de coupure réseau, vérifiez la Page avant de réessayer.</p>}
+          </div>
+        )}
 
         </div>
 
@@ -1534,13 +1538,13 @@ function FacebookPublishDialog({
             Aperçu
           </p>
           <FacebookPostPreview
-            accountName={pages && pageId && pageName ? pageName : "Nom du compte"}
+            accountName={pageName ?? "Nom du compte"}
             message={message}
             photoUrls={previewUrls}
             scheduledFor={mode === "scheduled" ? scheduledFor : null}
           />
           <p className="mt-2 text-xs text-[var(--muted-foreground)]">
-            Rendu approché : Facebook n'expose pas d'aperçu réel.
+            {selectedPages.length > 1 ? `Même contenu pour les ${selectedPages.length} Pages sélectionnées. ` : ""}Rendu approché : Facebook n'expose pas d'aperçu réel.
           </p>
         </aside>
       </div>
@@ -1553,15 +1557,17 @@ function FacebookPublishDialog({
           </p>
           <div className="flex gap-2">
             <Button variant="ghost" onClick={onClose} disabled={busy}>
-              Annuler
+              {attempted ? "Terminer" : "Annuler"}
             </Button>
             <Button onClick={() => void submit()} disabled={busy || !ready}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {busy
                 ? "Envoi…"
-                : mode === "scheduled"
-                  ? "Programmer la publication"
-                  : "Publier maintenant"}
+                : attempted
+                  ? pendingPages.length ? `Réessayer sur ${pendingPages.length} Page(s)` : "Publication terminée"
+                  : mode === "scheduled"
+                    ? `Programmer sur ${selectedPages.length} Page(s)`
+                    : `Publier sur ${selectedPages.length} Page(s)`}
             </Button>
           </div>
       </div>
