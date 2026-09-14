@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import { Dialog } from "radix-ui";
-import { Boxes, CalendarCheck, CarFront, Check, ChevronDown, CirclePlay, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
+import { Boxes, CalendarCheck, CarFront, CirclePlay, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -24,6 +24,7 @@ import { SectionTabs } from "../components/ui/SectionTabs";
 import { confirmPermanentDelete, alertDialog } from "../lib/confirm";
 import { useUpload } from "../lib/useUpload";
 import { BookEquipment } from "./Equipements";
+import { ReservationSearch, type ReservationSearchValue } from "../components/reservations/ReservationSearch";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -40,21 +41,6 @@ const ROOM_USAGES = [
 /** Pièces jointes d'un retour véhicule : quelques photos ou une courte vidéo. */
 const MAX_FEEDBACK_MEDIA = 6;
 const MAX_FEEDBACK_MEDIA_BYTES = 50 * 1024 * 1024;
-
-const FULL_DAY_START_TIME = "08:00";
-const FULL_DAY_END_TIME = "18:00";
-
-/** Heures proposées : journée entière + pas de 30 min, 06:00 → 22:00. */
-const TIME_OPTIONS = [
-  FULL_DAY_START_TIME,
-  ...Array.from({ length: 33 }, (_, index) => {
-  const minutes = 6 * 60 + index * 30;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }),
-  FULL_DAY_END_TIME,
-];
 
 type Occupied = { userName: string; start: number; end: number; returnRequired?: boolean } | null;
 type Room = { _id: Id<"rooms">; name: string; site?: "60" | "76"; siteLabel?: string; buildingLabel?: string; capacity?: number; photoUrl?: string | null; occupiedBy?: Occupied };
@@ -77,13 +63,6 @@ type DaySelection = { start: number; end: number };
 function startOfDayMs(input: number | Date): number {
   const date = new Date(input);
   date.setHours(0, 0, 0, 0);
-  return date.getTime();
-}
-
-function withTime(dayMs: number, time: string): number {
-  const [h, m] = time.split(":").map(Number);
-  const date = new Date(dayMs);
-  date.setHours(h, m, 0, 0);
   return date.getTime();
 }
 
@@ -178,50 +157,14 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     | undefined;
   const blockedByReturns = (overdueReturns?.length ?? 0) > 0;
 
-  // Sélection sur le calendrier : double-clic = début/jour unique, clic suivant = fin.
-  const [days, setDays] = useState<DaySelection | null>(null);
-  const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("10:00");
-  const [fullDay, setFullDay] = useState(false);
-
-  useEffect(() => {
-    if (!fullDay) return;
-    setStartTime(FULL_DAY_START_TIME);
-    setEndTime(FULL_DAY_END_TIME);
-  }, [fullDay]);
-
-  function handleDayClick(day: Date) {
-    const clicked = startOfDayMs(day);
-    setDays((current) => {
-      if (!current || current.start !== current.end || clicked <= current.start) {
-        return { start: clicked, end: clicked };
-      }
-      return { start: current.start, end: clicked };
-    });
-  }
-
-  function handleDayDoubleClick(day: Date) {
-    const clicked = startOfDayMs(day);
-    setDays({ start: clicked, end: clicked });
-  }
-
-  const range = useMemo(() => {
-    if (!days) return null;
-    const start = withTime(days.start, startTime);
-    const end = withTime(days.end, endTime);
-    return { start, end };
-  }, [days, startTime, endTime]);
+  const [search, setSearch] = useState<ReservationSearchValue | null>(null);
+  const days: DaySelection | null = search ? { start: startOfDayMs(search.start), end: startOfDayMs(search.end) } : null;
+  const range = search;
   const rangeValid = range !== null && range.start < range.end;
-
-  const durationDays = days ? Math.round((days.end - days.start) / 86_400_000) + 1 : 0;
-  const summary = !days ? "Sélectionnez un jour" :
-    days.start === days.end
-      ? format(new Date(days.start), "EEEE d MMMM yyyy", { locale: fr })
-      : `${format(new Date(days.start), "EEE d MMM", { locale: fr })} → ${format(new Date(days.end), "EEE d MMM yyyy", { locale: fr })}`;
+  const usage = search?.usage ?? null;
 
   const [query, setQuery] = useState("");
   const [minSeats, setMinSeats] = useState("");
-  const [usage, setUsage] = useState<"all" | "pro" | "personal">("all");
   const [minCapacity, setMinCapacity] = useState("");
 
   const rooms = useQuery(api.reservations.listRoomsForSlot, rangeValid && tab === "rooms" ? { start: range.start, end: range.end } : "skip") as Room[] | undefined;
@@ -267,10 +210,10 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   function openBooking(room: Room | null, vehicle: Vehicle | null) {
     setBookingRoom(room); setBookingVehicle(vehicle);
     setLabel(""); setNotes(""); setForUser(null); setError(null);
-    setRoomUsage(ROOM_USAGES[0]); setAttendees("");
+    setRoomUsage(usage === "personal" ? "Evenement personnel" : ROOM_USAGES[0]); setAttendees("");
     setExpectedKm("");
     setWillTransport(false); setTransportDetails("");
-    setVehicleUsage(vehicle && vehicle.reservablePro === false && vehicle.reservablePersonal === true ? "personal" : "pro");
+    setVehicleUsage(usage ?? "pro");
   }
   function closeBooking() { setBookingRoom(null); setBookingVehicle(null); }
 
@@ -307,7 +250,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     if (!isVehicleReservable(vehicle)) return false;
     const matchesQuery = [vehicle.name, vehicle.brand, vehicle.model, vehicle.plate, vehicle.kind].filter(Boolean).join(" ").toLowerCase().includes(needle);
     const matchesSeats = minSeatsValue === 0 || (vehicle.seats ?? 0) >= minSeatsValue;
-    const matchesUsage = usage === "all" || (usage === "pro" && vehicle.reservablePro !== false) || (usage === "personal" && vehicle.reservablePersonal === true);
+    const matchesUsage = (usage === "pro" && vehicle.reservablePro !== false) || (usage === "personal" && vehicle.reservablePersonal === true);
     return matchesQuery && matchesSeats && matchesUsage;
   });
 
@@ -341,44 +284,12 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           </Button>
         </div>
       ) : null}
-      <Agenda
-        tab={tab}
-        days={days}
-        onDayClick={handleDayClick}
-        onDayDoubleClick={handleDayDoubleClick}
-        timeControls={
-          <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] pb-3">
-              <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
-                <CalendarCheck className="h-4 w-4" />
-                {summary}
-              </span>
-              <span className="rounded-full bg-[var(--card)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
-                {days ? `${durationDays} jour${durationDays > 1 ? "s" : ""}` : "Aucune date sélectionnée"}
-              </span>
-            </div>
-            <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">
-              Créneau horaire
-            </p>
-            <div className="space-y-3">
-              <FilterField label="Heure de début">
-                <TimeSelect value={startTime} onChange={setStartTime} disabled={!days || fullDay} />
-              </FilterField>
-              <FilterField label="Heure de fin">
-                <TimeSelect value={endTime} onChange={setEndTime} disabled={!days || fullDay} />
-              </FilterField>
-            </div>
-            <div className="border-t border-[var(--border)] pt-3">
-              <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
-            </div>
-            {days && !rangeValid ? (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
-                L'heure de fin doit être après l'heure de début.
-              </p>
-            ) : null}
-          </div>
-        }
-      >
+      <ReservationSearch onSearch={setSearch} />
+      <details className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Consulter le planning des réservations</summary>
+        <div className="mt-4"><Agenda tab={tab} days={days} /></div>
+      </details>
+      {search && <p className="text-sm text-[var(--muted-foreground)]">{formatDateTime(search.start)} → {formatDateTime(search.end)} · Usage {usage === "personal" ? "personnel" : "professionnel"}</p>}
         {/* Créneau sélectionné et filtres, sous le calendrier. */}
         <div className="space-y-4 border-t border-[var(--border)] pt-4">
           <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
@@ -393,13 +304,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                     <option value="">Toutes</option>{[2, 3, 5, 7, 9].map((n) => <option key={n} value={n}>{n}+</option>)}
                   </select>
                 </FilterField>
-                <FilterField label="Usage">
-                  <div className="inline-flex rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
-                    {([{ key: "all", label: "Tous" }, { key: "pro", label: "Pro" }, { key: "personal", label: "Perso" }] as const).map((o) => (
-                      <button key={o.key} type="button" onClick={() => setUsage(o.key)} className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${usage === o.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}>{o.label}</button>
-                    ))}
-                  </div>
-                </FilterField>
+
               </>
             ) : (
               <FilterField label="Capacité min.">
@@ -411,10 +316,9 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
             <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">{rangeValid ? `${freeCount} disponible${freeCount > 1 ? "s" : ""}` : ""}</span>
           </div>
         </div>
-      </Agenda>
 
       {!days ? (
-        <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Sélectionnez un jour" description="Choisissez une date dans le calendrier pour voir les disponibilités et réserver." />
+        <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Préparez votre réservation" description="Choisissez vos dates et horaires, puis un usage professionnel ou personnel pour rechercher les disponibilités." />
       ) : !rangeValid ? (
         <EmptyState icon={<Clock className="h-8 w-8" />} title="Créneau invalide" description="Corrigez les heures de début et de fin pour voir les disponibilités." />
       ) : loading ? (
@@ -487,7 +391,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
             <>
               <Field label="Type d'usage" required>
                 <Select value={roomUsage} onChange={(e) => setRoomUsage(e.target.value)}>
-                  {ROOM_USAGES.map((usage) => <option key={usage} value={usage}>{usage}</option>)}
+                  {ROOM_USAGES.filter((value) => usage === "personal" ? value === "Evenement personnel" : value !== "Evenement personnel").map((value) => <option key={value} value={value}>{value}</option>)}
                 </Select>
               </Field>
               <Field
@@ -509,24 +413,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
             </>
           ) : bookingVehicle ? (
             <>
-              <Field label="Type d'usage" required>
-                <div className="inline-flex w-full rounded-lg border border-[var(--border)] bg-[var(--card)] p-1">
-                  {([
-                    { key: "pro" as const, label: "Professionnel", allowed: bookingVehicle.reservablePro !== false },
-                    { key: "personal" as const, label: "Personnel", allowed: bookingVehicle.reservablePersonal === true },
-                  ]).map((opt) => (
-                    <button
-                      key={opt.key}
-                      type="button"
-                      disabled={!opt.allowed}
-                      onClick={() => setVehicleUsage(opt.key)}
-                      className={`flex-1 rounded-md px-3 py-1.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${vehicleUsage === opt.key ? "bg-brand-500 text-white" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </Field>
+              <p className="text-sm font-semibold">Usage {vehicleUsage === "personal" ? "personnel" : "professionnel"}</p>
               <Field label="Kilométrage estimé" hint="Nombre de kilomètres que vous pensez réaliser.">
                 <div className="flex items-center gap-2">
                   <Input type="number" min={0} value={expectedKm} onChange={(e) => setExpectedKm(e.target.value)} placeholder="0" />
@@ -567,60 +454,6 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   );
 }
 
-function TimeSelect({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
-
-  return (
-    <div ref={rootRef} className="relative">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen((current) => !current)}
-        className="flex h-11 w-full items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--input)] px-3 text-sm font-semibold text-[var(--foreground)] shadow-sm transition hover:border-brand-500/60 disabled:cursor-not-allowed disabled:opacity-50"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-      >
-        <span className="flex items-center gap-2"><Clock className="h-4 w-4 text-brand-600" />{value}</span>
-        <ChevronDown className={`h-4 w-4 text-[var(--muted-foreground)] transition-transform ${open ? "rotate-180" : ""}`} />
-      </button>
-      {open ? (
-        <div className="absolute z-30 mt-2 max-h-64 w-full overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--card)] p-1 shadow-xl" role="listbox">
-          {TIME_OPTIONS.map((time) => (
-            <button
-              key={time}
-              type="button"
-              role="option"
-              aria-selected={time === value}
-              onClick={() => {
-                onChange(time);
-                setOpen(false);
-              }}
-              className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition ${time === value ? "bg-brand-500/10 font-semibold text-brand-700 dark:text-brand-300" : "text-[var(--foreground)] hover:bg-[var(--accent)]"}`}
-            >
-              {time}
-              {time === value ? <Check className="h-4 w-4" /> : null}
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 type ReservationDetail = {
   id: string;
   date: number;
@@ -641,17 +474,9 @@ type ReservationDetail = {
 function Agenda({
   tab,
   days,
-  onDayClick,
-  onDayDoubleClick,
-  timeControls,
-  children,
 }: {
   tab: "rooms" | "vehicles";
   days: DaySelection | null;
-  onDayClick: (day: Date) => void;
-  onDayDoubleClick: (day: Date) => void;
-  timeControls: ReactNode;
-  children?: ReactNode;
 }) {
   const navigate = useNavigate();
   const { user } = useUser();
@@ -741,25 +566,19 @@ function Agenda({
           </p>
         </div>
         <p className="text-sm font-medium leading-6 text-[var(--foreground)] sm:text-base">
-          Double cliquez sur un jour du calendrier (début), puis un seul clic sur le second (fin). Double clic sur un jour = ce jour uniquement.
+          Consultez les réservations existantes. Cliquez sur une réservation pour afficher son détail.
         </p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px] lg:items-start">
+      <div className="grid gap-4">
         <CalendarBoard
           rangeStart={days?.start}
           rangeEnd={days?.end}
           events={calendarEvents}
-          onSelect={onDayClick}
-          onDoubleSelect={onDayDoubleClick}
           onEventClick={(id) => setDetailId(id)}
           disabledBefore={Date.now()}
           compact
         />
-        <aside className="rounded-2xl border border-[var(--border)] bg-[var(--accent)] p-4 lg:sticky lg:top-4">
-          {timeControls}
-        </aside>
       </div>
-      {children}
 
       <Modal open={Boolean(active)} onClose={() => setDetailId(null)} title="Détail de la réservation">
         {active ? (
