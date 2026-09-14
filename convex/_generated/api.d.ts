@@ -72,6 +72,7 @@ import type * as social from "../social.js";
 import type * as socialAi from "../socialAi.js";
 import type * as socialComposer from "../socialComposer.js";
 import type * as socialEnhancements from "../socialEnhancements.js";
+import type * as socialManage from "../socialManage.js";
 import type * as socialSync from "../socialSync.js";
 import type * as sorties from "../sorties.js";
 import type * as stripe from "../stripe.js";
@@ -154,6 +155,7 @@ declare const fullApi: ApiFromModules<{
   socialAi: typeof socialAi;
   socialComposer: typeof socialComposer;
   socialEnhancements: typeof socialEnhancements;
+  socialManage: typeof socialManage;
   socialSync: typeof socialSync;
   sorties: typeof sorties;
   stripe: typeof stripe;

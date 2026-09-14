@@ -7,7 +7,7 @@ import { FacebookPostPreview, InstagramPostPreview } from "./PostPreview";
 import { useEffect, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { addMonths, endOfMonth, endOfWeek, startOfMonth, startOfWeek } from "date-fns";
-import { Plus, RefreshCw } from "lucide-react";
+import { Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { Button } from "../ui/Button";
@@ -18,6 +18,7 @@ import { PhotoUpload } from "../ui/PhotoUpload";
 import { Field, Textarea } from "../ui/Field";
 import { FacebookPageMultiSelect } from "./FacebookPageMultiSelect";
 import { cn } from "../../lib/cn";
+import { confirmPermanentDelete } from "../../lib/confirm";
 
 const statuses: Record<string, string> = { scheduled: "Programmée", publishing: "En cours d'envoi", published: "Publiée", failed: "Échec", cancelled: "Annulée" };
 const dateLabel = (date: number) => new Date(date).toLocaleString("fr-FR", { dateStyle: "medium", timeStyle: "short" });
@@ -105,6 +106,13 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
         {detail.status === "published" ? <PublishedPostEmbed key={detail.id} id={detail.id} /> : <p className="whitespace-pre-wrap">{detail.message || "Publication photo"}</p>}
         {detail.mesoutils && <p className="text-sm text-brand-700">Également publié sur Mes Outils.</p>}
         {detail.error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-red-800">{detail.error}</p>}
+        {canPublish && detail.network === "facebook" && detail.status === "published" && <FacebookPostActions
+          key={detail.id}
+          id={detail.id}
+          message={detail.message}
+          onDeleted={() => { setSelected(null); setNotice("Publication supprimée de Facebook."); }}
+          onUpdated={() => setNotice("Texte modifié sur Facebook.")}
+        />}
         {canPublish && detail.deliveryId && detail.status === "scheduled" && <Button disabled={cancelling} variant="secondary" onClick={async () => {
           setCancelling(true); setError("");
           try { await cancel({ id: detail.deliveryId! }); } catch (err) { setError(err instanceof Error ? err.message : "Annulation impossible."); } finally { setCancelling(false); }
@@ -112,6 +120,44 @@ export function SocialWorkspace({ canPublish, canCreate }: { canPublish: boolean
         {error && <p role="alert" className="text-red-700">{error}</p>}
       </div>}
     </Modal>
+  </div>;
+}
+
+/**
+ * Gestion d'un post Facebook déjà en ligne. Facebook n'accepte de réécrire que
+ * le texte : les photos d'un post publié ne peuvent plus changer.
+ */
+function FacebookPostActions({ id, message, onDeleted, onUpdated }: { id: string; message: string; onDeleted: () => void; onUpdated: () => void }) {
+  const updatePost = useAction(api.socialManage.updatePost);
+  const deletePost = useAction(api.socialManage.deletePost);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(message);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <div className="space-y-3 border-t border-[var(--border)] pt-4">
+    {editing ? <>
+      <Field label="Texte de la publication" hint="Les photos d'un post déjà publié ne peuvent pas être remplacées.">
+        <Textarea rows={6} value={draft} onChange={event => setDraft(event.target.value)} />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={busy || !draft.trim() || draft === message} onClick={async () => {
+          setBusy(true); setError("");
+          try { await updatePost({ id, message: draft }); setEditing(false); onUpdated(); }
+          catch (err) { setError(err instanceof Error ? err.message : "Modification impossible."); }
+          finally { setBusy(false); }
+        }}>{busy ? "Enregistrement…" : "Enregistrer sur Facebook"}</Button>
+        <Button variant="ghost" disabled={busy} onClick={() => { setEditing(false); setDraft(message); setError(""); }}>Annuler</Button>
+      </div>
+    </> : <div className="flex flex-wrap gap-2">
+      <Button variant="secondary" disabled={busy} onClick={() => { setDraft(message); setError(""); setEditing(true); }}><Pencil className="h-4 w-4" />Modifier le texte</Button>
+      <Button variant="danger" disabled={busy} onClick={async () => {
+        if (!(await confirmPermanentDelete("Supprimer définitivement cette publication de Facebook ? Elle disparaîtra aussi de Mes Outils."))) return;
+        setBusy(true); setError("");
+        try { await deletePost({ id }); onDeleted(); }
+        catch (err) { setError(err instanceof Error ? err.message : "Suppression impossible."); setBusy(false); }
+      }}><Trash2 className="h-4 w-4" />{busy ? "Suppression…" : "Supprimer de Facebook"}</Button>
+    </div>}
+    {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
   </div>;
 }
 
