@@ -1,3 +1,4 @@
+import { SocialWorkspace } from "../components/social/SocialWorkspace";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useNavigate } from "react-router-dom";
@@ -108,6 +109,7 @@ export function Actualites() {
       {sub === "evenements" ? (
         <Evenements canCreate={canCreate} canPublish={canPublish} />
       ) : null}
+      {sub === "reseaux" ? <SocialWorkspace canPublish={canPublish} canCreate={canCreate} /> : null}
       {sub === "bonsplans" ? <BonsPlans canCreate={canCreate} /> : null}
     </div>
   );

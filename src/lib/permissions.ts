@@ -615,6 +615,7 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
     { key: "publications", label: "Publications", icon: Newspaper },
     { key: "evenements", label: "Événements", icon: PartyPopper },
     { key: "bonsplans", label: "Bons plans", icon: Tag },
+    { key: "reseaux", label: "Réseaux", icon: Newspaper },
   ],
   "/reservations": [
     { key: "rooms", label: "Salles", icon: DoorOpen },

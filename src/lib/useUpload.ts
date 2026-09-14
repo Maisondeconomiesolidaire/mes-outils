@@ -5,8 +5,8 @@ import type { Id } from "../../convex/_generated/dataModel";
 const MAX_DIMENSION = 1600;
 const WEBP_QUALITY = 0.82;
 
-async function compressImage(file: File): Promise<File> {
-  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+async function compressImage(file: File, jpeg = false): Promise<File> {
+  if (!file.type.startsWith("image/") || (!jpeg && file.type === "image/gif")) return file;
   if (typeof createImageBitmap !== "function" || typeof document === "undefined") {
     return file;
   }
@@ -24,26 +24,27 @@ async function compressImage(file: File): Promise<File> {
       bitmap.close?.();
       return file;
     }
+    if (jpeg) { ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, width, height); }
     ctx.drawImage(bitmap, 0, 0, width, height);
     bitmap.close?.();
 
     const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/webp", WEBP_QUALITY),
+      canvas.toBlob(resolve, jpeg ? "image/jpeg" : "image/webp", WEBP_QUALITY),
     );
-    if (!blob || blob.size >= file.size) return file;
-    return new File([blob], file.name.replace(/\.[^.]+$/, "") + ".webp", {
-      type: "image/webp",
+    if (!blob || (!jpeg && blob.size >= file.size)) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, "") + (jpeg ? ".jpg" : ".webp"), {
+      type: jpeg ? "image/jpeg" : "image/webp",
     });
   } catch {
     return file;
   }
 }
 
-export function useUpload() {
+export function useUpload({ jpeg = false }: { jpeg?: boolean } = {}) {
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
 
   return async function upload(file: File): Promise<Id<"_storage">> {
-    const optimized = await compressImage(file);
+    const optimized = await compressImage(file, jpeg);
     const url = await generateUploadUrl();
     const res = await fetch(url, {
       method: "POST",

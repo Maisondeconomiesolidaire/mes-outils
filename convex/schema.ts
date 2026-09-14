@@ -1689,7 +1689,32 @@ export default defineSchema(
   }).index("by_pageId", ["pageId"]),
 
   /** Publications Facebook émises depuis Mes Outils, pour le suivi. */
+  socialCompositions: defineTable({
+    requestKey: v.string(),
+    message: v.string(),
+    images: v.array(v.id("_storage")),
+    authorClerkId: v.string(),
+    authorName: v.string(),
+    scheduledFor: v.optional(v.number()),
+    mesoutilsPostId: v.optional(v.id("posts")),
+    createdAt: v.number(),
+  }).index("by_requestKey", ["requestKey"]),
+
+  socialDeliveries: defineTable({
+    compositionId: v.id("socialCompositions"),
+    network: v.union(v.literal("facebook"), v.literal("instagram")),
+    targetId: v.string(),
+    targetName: v.string(),
+    status: v.union(v.literal("scheduled"), v.literal("publishing"), v.literal("published"), v.literal("failed"), v.literal("cancelled")),
+    scheduledFor: v.number(),
+    schedulerId: v.optional(v.id("_scheduled_functions")),
+    postId: v.optional(v.string()),
+    error: v.optional(v.string()),
+    publishedAt: v.optional(v.number()),
+  }).index("by_composition", ["compositionId"]).index("by_date", ["scheduledFor"]),
+
   socialFacebookPosts: defineTable({
+    composerId: v.optional(v.id("socialCompositions")),
     sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     /** Évènement du calendrier Recyclerie, quand la publication vient de là. */

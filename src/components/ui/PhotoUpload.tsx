@@ -13,6 +13,8 @@ export function PhotoUpload({
   value,
   onChange,
   onPreviewsChange,
+  onUploadingChange,
+  jpeg = false,
   className,
 }: {
   value: Id<"_storage">[];
@@ -23,12 +25,15 @@ export function PhotoUpload({
    * vient d'être choisie.
    */
   onPreviewsChange?: (previews: { storageId: Id<"_storage">; previewUrl: string }[]) => void;
+  jpeg?: boolean;
+  onUploadingChange?: (uploading: boolean) => void;
   className?: string;
 }) {
-  const upload = useUpload();
+  const upload = useUpload({ jpeg });
   const inputRef = useRef<HTMLInputElement>(null);
   const [photos, setPhotos] = useState<LocalPhoto[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (value.length === 0 && photos.length > 0) {
@@ -38,7 +43,9 @@ export function PhotoUpload({
 
   async function handleFiles(files: FileList | null) {
     if (!files?.length) return;
+    setError("");
     setUploading(true);
+    onUploadingChange?.(true);
     try {
       const added: LocalPhoto[] = [];
       for (const file of Array.from(files)) {
@@ -49,8 +56,11 @@ export function PhotoUpload({
       setPhotos(next);
       onChange(next.map((photo) => photo.storageId));
       onPreviewsChange?.(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Impossible d’envoyer les photos.");
     } finally {
       setUploading(false);
+      onUploadingChange?.(false);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
@@ -64,6 +74,7 @@ export function PhotoUpload({
 
   return (
     <div className={className}>
+      {error && <p role="alert" className="mb-3 text-sm text-red-700">{error}</p>}
       <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
         {photos.map((photo) => (
           <div

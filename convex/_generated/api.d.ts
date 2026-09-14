@@ -68,6 +68,7 @@ import type * as requests from "../requests.js";
 import type * as reservations from "../reservations.js";
 import type * as rh from "../rh.js";
 import type * as social from "../social.js";
+import type * as socialComposer from "../socialComposer.js";
 import type * as sorties from "../sorties.js";
 import type * as stripe from "../stripe.js";
 import type * as stripeCatalog from "../stripeCatalog.js";
@@ -145,6 +146,7 @@ declare const fullApi: ApiFromModules<{
   reservations: typeof reservations;
   rh: typeof rh;
   social: typeof social;
+  socialComposer: typeof socialComposer;
   sorties: typeof sorties;
   stripe: typeof stripe;
   stripeCatalog: typeof stripeCatalog;

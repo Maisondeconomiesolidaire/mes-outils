@@ -3,8 +3,8 @@
  *
  * Facebook n'a pas d'API de programmation à notre charge : on lui envoie le
  * post avec `published=false` et une date, et il le publie lui-même à l'heure
- * dite. Aucun cron de notre côté, donc aucune publication perdue si le
- * déploiement redémarre.
+ * dite pour les partages d’évènements. Le compositeur Réseaux utilise le
+ * scheduler persistant Convex pour les envois Facebook et Instagram.
  *
  * Les jetons de Page vivent dans `socialFacebookPages` et ne sortent jamais du
  * backend : le navigateur ne reçoit que l'identifiant et le nom des Pages.
@@ -18,6 +18,7 @@ import {
   query,
 } from "./_generated/server";
 import { internal } from "./_generated/api";
+import type { ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { formatUserName, requireCrmPermission, requireUser } from "./lib";
 
@@ -84,6 +85,7 @@ export const postsForEvent = query({
 
 export const eventPayload = internalQuery({
   args: {
+    composerId: v.optional(v.id("socialCompositions")),
     sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
@@ -102,8 +104,16 @@ export const eventPayload = internalQuery({
       throw new Error("Page Facebook inconnue ou désactivée.");
     }
 
-    if ([args.eventId, args.recycappEventId, args.sourcePostId].filter(Boolean).length !== 1) {
+    if ([args.eventId, args.recycappEventId, args.sourcePostId, args.composerId].filter(Boolean).length !== 1) {
       throw new Error("Choisissez un seul post ou événement à partager.");
+    }
+    if (args.composerId) {
+      const composition = await ctx.db.get(args.composerId);
+      if (!composition) throw new Error("Publication introuvable.");
+      return {
+        page: { pageId: page.pageId, name: page.name, accessToken: page.accessToken },
+        event: { title: "", description: composition.message, location: undefined, start: undefined, photoUrl: null },
+      };
     }
     if (args.sourcePostId) {
       await requireCrmPermission(ctx, PAGE_KEY, "read");
@@ -163,6 +173,7 @@ export const eventPayload = internalQuery({
 
 export const recordPost = internalMutation({
   args: {
+    composerId: v.optional(v.id("socialCompositions")),
     sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
@@ -219,8 +230,8 @@ function buildMessage(event: {
   return lines.join("\n");
 }
 
-export const publishEvent = action({
-  args: {
+const sendFacebookArgs = {
+    composerId: v.optional(v.id("socialCompositions")),
     sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
@@ -231,9 +242,12 @@ export const publishEvent = action({
     message: v.optional(v.string()),
     /** Photos du post. À défaut, celles de l'évènement. */
     photoStorageIds: v.optional(v.array(v.id("_storage"))),
-  },
-  handler: async (ctx, args): Promise<{ postId: string; scheduledFor?: number }> => {
-    const author: { clerkId: string; name: string } = await ctx.runQuery(
+};
+
+export const publishEvent = action({ args: sendFacebookArgs, handler: (ctx, args) => sendFacebook(ctx, args) });
+
+export async function sendFacebook(ctx: ActionCtx, args: import("convex/values").ObjectType<typeof sendFacebookArgs>, trustedAuthor?: { clerkId: string; name: string }): Promise<{ postId: string; scheduledFor?: number }> {
+    const author: { clerkId: string; name: string } = trustedAuthor ?? await ctx.runQuery(
       internal.social.assertCanPublish,
       {},
     );
@@ -251,6 +265,7 @@ export const publishEvent = action({
     }
 
     const payload = await ctx.runQuery(internal.social.eventPayload, {
+      composerId: args.composerId,
       sourcePostId: args.sourcePostId,
       eventId: args.eventId,
       recycappEventId: args.recycappEventId,
@@ -332,6 +347,7 @@ export const publishEvent = action({
     if (!postId) throw new Error("Facebook n'a pas renvoyé d'identifiant de publication.");
 
     await ctx.runMutation(internal.social.recordPost, {
+      composerId: args.composerId,
       sourcePostId: args.sourcePostId,
       eventId: args.eventId,
       recycappEventId: args.recycappEventId,
@@ -346,8 +362,8 @@ export const publishEvent = action({
     });
 
     return { postId, scheduledFor: args.scheduledFor };
-  },
-});
+}
+
 
 /**
  * Enregistre (ou met à jour) une Page et son jeton.
@@ -596,7 +612,7 @@ export const instagramTargets = internalQuery({
   handler: async (ctx, { instagramIds }) => {
     const pages = await ctx.db.query("socialFacebookPages").collect();
     return pages
-      .filter((page) => page.instagramId && instagramIds.includes(page.instagramId))
+      .filter((page) => page.active && page.instagramId && instagramIds.includes(page.instagramId))
       .map((page) => ({
         instagramId: page.instagramId!,
         username: page.instagramUsername ?? page.name,
@@ -688,20 +704,20 @@ export const pageTokens = internalQuery({
  * Un compte en échec n'interrompt pas les autres : le rapport dit ce qui est
  * passé et ce qui a échoué, plutôt que de tout annuler sur un refus.
  */
-export const publishEventToInstagram = action({
-  args: {
+const sendInstagramArgs = {
+    composerId: v.optional(v.id("socialCompositions")),
     sourcePostId: v.optional(v.id("posts")),
     eventId: v.optional(v.id("events")),
     recycappEventId: v.optional(v.id("recycappCalendarEvents")),
     instagramIds: v.array(v.string()),
     message: v.optional(v.string()),
     photoStorageIds: v.array(v.id("_storage")),
-  },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{ published: string[]; failed: Array<{ account: string; reason: string }> }> => {
-    const author: { clerkId: string; name: string } = await ctx.runQuery(
+};
+
+export const publishEventToInstagram = action({ args: sendInstagramArgs, handler: (ctx, args) => sendInstagram(ctx, args) });
+
+export async function sendInstagram(ctx: ActionCtx, args: import("convex/values").ObjectType<typeof sendInstagramArgs>, trustedAuthor?: { clerkId: string; name: string }): Promise<{ published: string[]; failed: Array<{ account: string; reason: string }> }> {
+    const author: { clerkId: string; name: string } = trustedAuthor ?? await ctx.runQuery(
       internal.social.assertCanPublish,
       {},
     );
@@ -723,6 +739,7 @@ export const publishEventToInstagram = action({
       });
 
     const payload = await ctx.runQuery(internal.social.eventPayload, {
+      composerId: args.composerId,
       sourcePostId: args.sourcePostId,
       eventId: args.eventId,
       recycappEventId: args.recycappEventId,
@@ -797,6 +814,7 @@ export const publishEventToInstagram = action({
         );
 
         await ctx.runMutation(internal.social.recordPost, {
+          composerId: args.composerId,
           sourcePostId: args.sourcePostId,
           eventId: args.eventId,
           recycappEventId: args.recycappEventId,
@@ -822,5 +840,4 @@ export const publishEventToInstagram = action({
       throw new Error(`Instagram a refusé la publication : ${failed[0].reason}`);
     }
     return { published, failed };
-  },
-});
+}
