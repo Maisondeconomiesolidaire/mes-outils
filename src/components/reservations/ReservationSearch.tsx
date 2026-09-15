@@ -27,9 +27,13 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
   const start = timestamp(draft.start, draft.startTime);
   const end = timestamp(draft.end, draft.endTime);
   const complete = Boolean(draft.start && draft.end);
-  const valid = complete && start >= Date.now() && end > start;
-  const error = !complete ? null : start < Date.now() ? "Le début doit être dans le futur."
-    : end <= start ? "La fin doit être après le début de la réservation." : null;
+  // C'est la FIN qui doit être à venir, pas le début : réserver une salle
+  // « aujourd'hui de 8h30 à 13h30 » reste légitime à 10h, et le serveur
+  // l'accepte (il ne vérifie que début < fin). Exiger un début futur
+  // interdisait toute réservation sur la demi-journée en cours.
+  const valid = complete && end > start && end > Date.now();
+  const error = !complete ? null : end <= start ? "La fin doit être après le début de la réservation."
+    : end <= Date.now() ? "Ce créneau est déjà passé." : null;
 
   function openDates() {
     setDraft(dates);
@@ -47,7 +51,7 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
   function search() {
     const from = timestamp(dates.start, dates.startTime);
     const to = timestamp(dates.end, dates.endTime);
-    if (!Number.isFinite(from) || !Number.isFinite(to) || from < Date.now() || to <= from) { openDates(); return; }
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to <= Date.now()) { openDates(); return; }
     if (!usage) { setStep("usage"); return; }
     onSearch({ start: from, end: to, usage });
     setStep(null);
