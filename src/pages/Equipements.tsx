@@ -5,7 +5,6 @@ import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 import {
   Boxes,
-  CalendarCheck,
   CalendarDays,
   Clock,
   Info,
@@ -23,29 +22,16 @@ import { canAccess } from "../lib/permissions";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
-import { Checkbox } from "../components/ui/Checkbox";
+
 import { Modal } from "../components/ui/Modal";
 import { PersonSelect, type Person } from "../components/ui/PersonSelect";
 import { SinglePhotoUpload } from "../components/ui/SinglePhotoUpload";
 import { FullSpinner } from "../components/ui/Spinner";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
+import { ReservationSearch, type ReservationSearchValue } from "../components/reservations/ReservationSearch";
+import { ReservationIntro } from "../components/reservations/ReservationIntro";
 import { formatDate, formatDateTime } from "../lib/format";
 import { confirmPermanentDelete } from "../lib/confirm";
-
-const FULL_DAY_START_TIME = "08:00";
-const FULL_DAY_END_TIME = "18:00";
-
-/** Heures proposées : journée entière + pas de 30 min, 06:00 → 22:00. */
-const TIME_OPTIONS = [
-  FULL_DAY_START_TIME,
-  ...Array.from({ length: 33 }, (_, index) => {
-    const minutes = 6 * 60 + index * 30;
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }),
-  FULL_DAY_END_TIME,
-];
 
 type Occupied = { userName: string; start: number; end: number } | null;
 
@@ -80,13 +66,6 @@ type DaySelection = { start: number; end: number };
 function startOfDayMs(input: number | Date): number {
   const date = new Date(input);
   date.setHours(0, 0, 0, 0);
-  return date.getTime();
-}
-
-function withTime(dayMs: number, time: string): number {
-  const [h, m] = time.split(":").map(Number);
-  const date = new Date(dayMs);
-  date.setHours(h, m, 0, 0);
   return date.getTime();
 }
 
@@ -145,42 +124,12 @@ export function BookEquipment() {
   const access = usePermissionsAccess();
   const canCreate = canAccess(access, "mesoutils:equipements", "create");
 
-  const [days, setDays] = useState<DaySelection | null>(null);
-  const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("10:00");
-  const [fullDay, setFullDay] = useState(false);
-
-  useEffect(() => {
-    if (!fullDay) return;
-    setStartTime(FULL_DAY_START_TIME);
-    setEndTime(FULL_DAY_END_TIME);
-  }, [fullDay]);
-
-  function handleDayClick(day: Date) {
-    const clicked = startOfDayMs(day);
-    setDays((current) => {
-      if (!current || current.start !== current.end || clicked <= current.start) {
-        return { start: clicked, end: clicked };
-      }
-      return { start: current.start, end: clicked };
-    });
-  }
-  function handleDayDoubleClick(day: Date) {
-    const clicked = startOfDayMs(day);
-    setDays({ start: clicked, end: clicked });
-  }
-
-  const range = useMemo(() => {
-    if (!days) return null;
-    return { start: withTime(days.start, startTime), end: withTime(days.end, endTime) };
-  }, [days, startTime, endTime]);
+  // Le créneau vient de la barre de recherche : tant qu'elle n'a rien renvoyé,
+  // l'écran se limite à elle.
+  const [search, setSearch] = useState<ReservationSearchValue | null>(null);
+  const days: DaySelection | null = search ? { start: startOfDayMs(search.start), end: startOfDayMs(search.end) } : null;
+  const range = search;
   const rangeValid = range !== null && range.start < range.end;
-
-  const durationDays = days ? Math.round((days.end - days.start) / 86_400_000) + 1 : 0;
-  const summary = !days ? "Sélectionnez un jour" :
-    days.start === days.end
-      ? format(new Date(days.start), "EEEE d MMMM yyyy", { locale: fr })
-      : `${format(new Date(days.start), "EEE d MMM", { locale: fr })} → ${format(new Date(days.end), "EEE d MMM yyyy", { locale: fr })}`;
 
   const [query, setQuery] = useState("");
   const equipments = useQuery(
@@ -284,71 +233,41 @@ export function BookEquipment() {
 
   return (
     <div className="space-y-5">
-      <div className="space-y-3 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] p-3">
-        <div className="space-y-1 px-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <CalendarCheck className="h-4 w-4 text-brand-600" />
-            <p className="text-sm font-semibold text-[var(--foreground)]">Réservations des équipements</p>
-          </div>
-          <p className="text-sm font-medium leading-6 text-[var(--foreground)] sm:text-base">
-            Double cliquez sur un jour du calendrier (début), puis un seul clic sur le second (fin). Double clic sur un jour = ce jour uniquement.
-          </p>
+      <ReservationIntro kind="equipment" showHint={!search} />
+      <ReservationSearch withUsage={false} onSearch={setSearch} />
+
+      {/* Rien d'autre tant qu'aucun créneau n'est choisi : sans dates, les
+          disponibilités et le planning n'ont rien à montrer. */}
+      {search && <>
+      <details className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
+        <summary className="cursor-pointer text-sm font-semibold">Consulter le planning des réservations</summary>
+        <div className="mt-4">
+          <CalendarBoard
+            rangeStart={days?.start}
+            rangeEnd={days?.end}
+            events={calendarEvents}
+            disabledBefore={Date.now()}
+            compact
+          />
         </div>
-        <CalendarBoard
-          rangeStart={days?.start}
-          rangeEnd={days?.end}
-          events={calendarEvents}
-          onSelect={handleDayClick}
-          onDoubleSelect={handleDayDoubleClick}
-          disabledBefore={Date.now()}
-          compact
-        />
-        <div className="space-y-4 border-t border-[var(--border)] pt-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="inline-flex items-center gap-2 rounded-full bg-[var(--selected)] px-3.5 py-1.5 text-sm font-semibold capitalize text-[var(--selected-foreground)]">
-              <CalendarCheck className="h-4 w-4" />
-              {summary}
-            </span>
-            <span className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm font-semibold text-[var(--foreground)]">
-              {days ? `${durationDays} jour${durationDays > 1 ? "s" : ""}` : "Aucune date sélectionnée"}
-            </span>
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <FilterField label="Heure de début">
-              <TimeSelect value={startTime} onChange={setStartTime} disabled={!days || fullDay} />
-            </FilterField>
-            <FilterField label="Heure de fin">
-              <TimeSelect value={endTime} onChange={setEndTime} disabled={!days || fullDay} />
-            </FilterField>
-            <div className="pb-2">
-              <Checkbox checked={fullDay} onChange={setFullDay} label="Journée entière" />
-            </div>
-            {days && !rangeValid ? (
-              <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm font-medium text-red-700 dark:bg-red-950/40 dark:text-red-300">
-                L'heure de fin doit être après l'heure de début.
-              </p>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border)] pt-3">
-            <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
-              <Search className="h-4 w-4 text-brand-600" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Rechercher un équipement"
-                className="w-full bg-transparent text-sm font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]"
-              />
-            </label>
-            <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">
-              {rangeValid ? `${freeCount} disponible${freeCount > 1 ? "s" : ""}` : ""}
-            </span>
-          </div>
-        </div>
+      </details>
+      <p className="text-sm text-[var(--muted-foreground)]">{formatDateTime(search.start)} → {formatDateTime(search.end)}</p>
+      <div className="flex flex-wrap items-center gap-3 border-t border-[var(--border)] pt-3">
+        <label className="flex h-11 min-w-56 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 sm:max-w-xs">
+          <Search className="h-4 w-4 text-brand-600" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Rechercher un équipement"
+            className="w-full bg-transparent text-sm font-medium text-[var(--foreground)] outline-none placeholder:text-[var(--muted-foreground)]"
+          />
+        </label>
+        <span className="ml-auto self-center text-sm font-medium text-[var(--muted-foreground)]">
+          {rangeValid ? `${freeCount} disponible${freeCount > 1 ? "s" : ""}` : ""}
+        </span>
       </div>
 
-      {!days ? (
-        <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Sélectionnez un jour" description="Choisissez une date dans le calendrier pour voir les disponibilités et réserver." />
-      ) : !rangeValid ? (
+      {!rangeValid ? (
         <EmptyState icon={<Clock className="h-8 w-8" />} title="Créneau invalide" description="Corrigez les heures de début et de fin pour voir les disponibilités." />
       ) : equipments === undefined ? (
         <FullSpinner label="Recherche des disponibilités..." />
@@ -379,6 +298,7 @@ export function BookEquipment() {
           })}
         </section>
       )}
+      </>}
 
       <Modal open={Boolean(booking)} onClose={closeBooking} title={booking ? `Réserver · ${booking.name}` : "Réserver"}>
         <div className="grid gap-4">
@@ -771,26 +691,6 @@ function DetailRow({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between gap-4">
       <dt className="text-[var(--muted-foreground)]">{label}</dt>
       <dd className="font-semibold text-[var(--foreground)]">{value}</dd>
-    </div>
-  );
-}
-
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--muted-foreground)]">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function TimeSelect({ value, onChange, disabled }: { value: string; onChange: (v: string) => void; disabled?: boolean }) {
-  return (
-    <div className={`flex h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--input)] px-3 ${disabled ? "opacity-50" : ""}`}>
-      <Clock className="h-4 w-4 text-brand-600" />
-      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="bg-transparent text-sm font-semibold text-[var(--foreground)] outline-none">
-        {TIME_OPTIONS.map((time) => <option key={time} value={time}>{time}</option>)}
-      </select>
     </div>
   );
 }

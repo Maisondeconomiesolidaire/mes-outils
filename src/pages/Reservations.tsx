@@ -4,8 +4,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
-import { Dialog } from "radix-ui";
-import { Boxes, CalendarCheck, CarFront, CirclePlay, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
+
+import { Boxes, CalendarCheck, CarFront, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -25,6 +25,7 @@ import { confirmPermanentDelete, alertDialog } from "../lib/confirm";
 import { useUpload } from "../lib/useUpload";
 import { BookEquipment } from "./Equipements";
 import { ReservationSearch, type ReservationSearchValue } from "../components/reservations/ReservationSearch";
+import { ReservationIntro } from "../components/reservations/ReservationIntro";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -80,41 +81,6 @@ export function Reservations() {
     <div className="space-y-6">
       <SectionHeader title="Réservations" />
       <SectionTabs />
-      {(tab === "rooms" || tab === "vehicles") && (
-        // Clé préfixée : `BrowseAndBook` est un frère portant déjà `key={tab}`.
-        // Deux clés identiques font dupliquer le bouton à chaque changement
-        // d'onglet.
-        <Dialog.Root key={`tutorial-${tab}`}>
-          <Dialog.Trigger asChild>
-            <Button type="button" variant="secondary">
-              <CirclePlay className="h-4 w-4" aria-hidden="true" />
-              Comment réserver
-            </Button>
-          </Dialog.Trigger>
-          <Dialog.Portal>
-            <Dialog.Overlay className="fixed inset-0 z-50 bg-black/45" />
-            <Dialog.Content
-              aria-describedby={undefined}
-              className="fixed left-1/2 top-1/2 z-50 aspect-[1.8] w-[min(90vw,144svh)] max-w-6xl -translate-x-1/2 -translate-y-1/2 outline-none"
-            >
-              <Dialog.Title className="sr-only">Tutoriel de réservation</Dialog.Title>
-              <Dialog.Close asChild>
-                <Button type="button" variant="secondary" size="sm" className="absolute bottom-full right-0 mb-2">
-                  Fermer
-                </Button>
-              </Dialog.Close>
-              <iframe
-                src={`https://app.supademo.com/embed/${tab === "vehicles" ? "cmtwy2kpe1v2jqm7xm504th6s" : "cmtwx2ybg1sceqm7x2fvv213r"}?embed_v=2&utm_source=embed`}
-                loading="lazy"
-                title={tab === "vehicles" ? "Comment réserver un véhicule sur MESOUTILS" : "Réservation de salles MESOUTILS"}
-                allow="clipboard-write"
-                allowFullScreen
-                className="absolute inset-0 block h-full w-full border-0"
-              />
-            </Dialog.Content>
-          </Dialog.Portal>
-        </Dialog.Root>
-      )}
       {tab === "mine" ? (
         <MyReservations />
       ) : tab === "equipment" ? (
@@ -284,12 +250,16 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           </Button>
         </div>
       ) : null}
+      <ReservationIntro kind={tab} showHint={!search} />
       <ReservationSearch onSearch={setSearch} />
+      {/* Rien d'autre tant qu'aucun créneau n'est choisi : sans dates, les
+          disponibilités et le planning n'ont rien à montrer. */}
+      {search && <>
       <details className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
         <summary className="cursor-pointer text-sm font-semibold">Consulter le planning des réservations</summary>
         <div className="mt-4"><Agenda tab={tab} days={days} /></div>
       </details>
-      {search && <p className="text-sm text-[var(--muted-foreground)]">{formatDateTime(search.start)} → {formatDateTime(search.end)} · Usage {usage === "personal" ? "personnel" : "professionnel"}</p>}
+      <p className="text-sm text-[var(--muted-foreground)]">{formatDateTime(search.start)} → {formatDateTime(search.end)} · Usage {usage === "personal" ? "personnel" : "professionnel"}</p>
         {/* Créneau sélectionné et filtres, sous le calendrier. */}
         <div className="space-y-4 border-t border-[var(--border)] pt-4">
           <div className="flex flex-wrap items-end gap-3 border-t border-[var(--border)] pt-3">
@@ -317,9 +287,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           </div>
         </div>
 
-      {!days ? (
-        <EmptyState icon={<CalendarCheck className="h-8 w-8" />} title="Préparez votre réservation" description="Choisissez vos dates et horaires, puis un usage professionnel ou personnel pour rechercher les disponibilités." />
-      ) : !rangeValid ? (
+      {!rangeValid ? (
         <EmptyState icon={<Clock className="h-8 w-8" />} title="Créneau invalide" description="Corrigez les heures de début et de fin pour voir les disponibilités." />
       ) : loading ? (
         <FullSpinner label="Recherche des disponibilités..." />
@@ -377,6 +345,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           })}
         </section>
       )}
+      </>}
 
       <Modal open={Boolean(bookingRoom || bookingVehicle)} onClose={closeBooking} title={bookingRoom ? `Réserver · ${bookingRoom.name}` : bookingVehicle ? `Réserver · ${bookingVehicle.name}` : "Réserver"}>
         <div className="grid gap-4">

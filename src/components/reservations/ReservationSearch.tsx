@@ -15,7 +15,12 @@ function timestamp(date: string, time: string) {
   return date ? new Date(`${date}T${time}:00`).getTime() : NaN;
 }
 
-export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationSearchValue) => void }) {
+/**
+ * `withUsage` : les équipements ne se réservent ni « pro » ni « perso ». La
+ * barre se réduit alors à l'étape des dates, et la recherche part dès qu'elles
+ * sont confirmées.
+ */
+export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (value: ReservationSearchValue) => void; withUsage?: boolean }) {
   const datesButton = useRef<HTMLButtonElement>(null);
   const [step, setStep] = useState<"dates" | "usage" | null>(null);
   const [dates, setDates] = useState<Dates>(EMPTY_DATES);
@@ -48,12 +53,13 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
     });
     if (value && field === "start") setActiveDate("end");
   }
-  function search() {
-    const from = timestamp(dates.start, dates.startTime);
-    const to = timestamp(dates.end, dates.endTime);
+  function search(override?: Dates) {
+    const source = override ?? dates;
+    const from = timestamp(source.start, source.startTime);
+    const to = timestamp(source.end, source.endTime);
     if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to <= Date.now()) { openDates(); return; }
-    if (!usage) { setStep("usage"); return; }
-    onSearch({ start: from, end: to, usage });
+    if (withUsage && !usage) { setStep("usage"); return; }
+    onSearch({ start: from, end: to, usage: usage ?? "pro" });
     setStep(null);
   }
 
@@ -68,11 +74,11 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
           <CalendarDays className="h-5 w-5 shrink-0 text-brand-600" />
           <span className="min-w-0"><span className="block text-sm font-bold">1 · Dates et horaires</span><span className="block truncate text-sm text-[var(--muted-foreground)]">{datesLabel}</span></span>
         </button>
-        <button type="button" onClick={() => setStep("usage")} className={cn("flex items-center gap-3 rounded-full px-5 py-4 text-left transition hover:bg-[var(--card)] focus-visible:outline-brand-500 sm:min-w-52", step === "usage" && "bg-[var(--card)] shadow-md")}>
+        {withUsage && <button type="button" onClick={() => setStep("usage")} className={cn("flex items-center gap-3 rounded-full px-5 py-4 text-left transition hover:bg-[var(--card)] focus-visible:outline-brand-500 sm:min-w-52", step === "usage" && "bg-[var(--card)] shadow-md")}>
           <BriefcaseBusiness className="h-5 w-5 shrink-0 text-brand-600" />
           <span><span className="block text-sm font-bold">2 · Usage</span><span className="block text-sm text-[var(--muted-foreground)]">{usage === "pro" ? "Professionnel" : usage === "personal" ? "Personnel" : "Pour quel usage ?"}</span></span>
-        </button>
-        <Button type="button" size="lg" className="h-14 rounded-full px-6" onClick={search}><Search className="h-5 w-5" />Rechercher</Button>
+        </button>}
+        <Button type="button" size="lg" className="h-14 rounded-full px-6" onClick={() => search()}><Search className="h-5 w-5" />Rechercher</Button>
       </div>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/35 backdrop-blur-sm" />
@@ -84,7 +90,7 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
           <div className="min-h-0 overflow-y-auto p-5 sm:p-8">
             <div className="mb-6 flex justify-center gap-2" aria-label="Étapes de la recherche">
               <button type="button" onClick={openDates} aria-current={step === "dates" ? "step" : undefined} className={cn("rounded-full px-5 py-2 text-sm font-semibold", step === "dates" ? "bg-[var(--foreground)] text-[var(--card)]" : "bg-[var(--accent)]")}>1 · Dates</button>
-              <button type="button" disabled={step === "dates" && !valid} onClick={() => { if (step === "dates" && valid) setDates(draft); setStep("usage"); }} aria-current={step === "usage" ? "step" : undefined} className={cn("rounded-full px-5 py-2 text-sm font-semibold", step === "usage" ? "bg-[var(--foreground)] text-[var(--card)]" : "bg-[var(--accent)] disabled:opacity-40")}>2 · Usage</button>
+              {withUsage && <button type="button" disabled={step === "dates" && !valid} onClick={() => { if (step === "dates" && valid) setDates(draft); setStep("usage"); }} aria-current={step === "usage" ? "step" : undefined} className={cn("rounded-full px-5 py-2 text-sm font-semibold", step === "usage" ? "bg-[var(--foreground)] text-[var(--card)]" : "bg-[var(--accent)] disabled:opacity-40")}>2 · Usage</button>}
             </div>
             {step === "dates" ? <>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -133,10 +139,12 @@ export function ReservationSearch({ onSearch }: { onSearch: (value: ReservationS
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-4 sm:px-8">
             {step === "dates" ? <>
               <Button type="button" variant="ghost" onClick={() => { setDraft(EMPTY_DATES); setActiveDate("start"); }}>Effacer les dates</Button>
-              <Button type="button" className="rounded-full px-6" disabled={!valid} onClick={() => { setDates(draft); setStep("usage"); }}>Confirmer <ChevronRight className="h-4 w-4" /></Button>
+              <Button type="button" className="rounded-full px-6" disabled={!valid} onClick={() => { setDates(draft); if (withUsage) setStep("usage"); else search(draft); }}>
+                {withUsage ? <>Confirmer <ChevronRight className="h-4 w-4" /></> : <><Search className="h-4 w-4" />Rechercher</>}
+              </Button>
             </> : <>
               <Button type="button" variant="ghost" onClick={openDates}><ChevronLeft className="h-4 w-4" />Retour</Button>
-              <Button type="button" className="rounded-full px-6" disabled={!usage} onClick={search}><Search className="h-4 w-4" />Rechercher</Button>
+              <Button type="button" className="rounded-full px-6" disabled={!usage} onClick={() => search()}><Search className="h-4 w-4" />Rechercher</Button>
             </>}
           </div>
         </Dialog.Content>
