@@ -43,6 +43,8 @@ export type ReportSale = {
   amount: number;
   /** Poids de l'article en kg : celui saisi, sinon la moyenne de sa catégorie. */
   weightKg: number;
+  /** Compteur Vinted relevé manuellement au moment de la vente. */
+  viewsAtSale?: number;
   soldAt: number;
 };
 
@@ -182,6 +184,7 @@ async function buildReport(
       outlet: itemOutlet,
       amount,
       weightKg: itemWeight,
+      viewsAtSale: item.viewsAtSale,
       soldAt,
     });
   }
@@ -865,6 +868,9 @@ export const salesAnalysis = query({
     const delays = items
       .map(daysToSell)
       .filter((value): value is number => value !== undefined);
+    const views = items
+      .map((item) => item.viewsAtSale)
+      .filter((value): value is number => value !== undefined);
     // Quatre paliers : sous la semaine, sous le mois, sous le trimestre, au-delà.
     const buckets = [
       { label: "Moins de 7 jours", max: 7 },
@@ -901,6 +907,14 @@ export const salesAnalysis = query({
       brands: rank(items, (item) => item.brand).slice(0, 10),
       conditions: rank(items, (item) => item.condition).slice(0, 10),
       sizes: rank(items, (item) => item.size).slice(0, 10),
+      views: {
+        measured: views.length,
+        unknown: items.length - views.length,
+        average: views.length
+          ? Math.round(views.reduce((total, value) => total + value, 0) / views.length)
+          : undefined,
+        median: views.length ? Math.round(median(views) ?? 0) : undefined,
+      },
       delay: {
         measured: delays.length,
         /** Articles vendus sans date de mise en ligne : le délai leur échappe. */

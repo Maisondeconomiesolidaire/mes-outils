@@ -2052,6 +2052,8 @@ export default defineSchema(
     // Prix réellement encaissé. Il peut être inférieur au prix affiché après
     // acceptation d'une offre ; c'est cette valeur qui sert au chiffre d'affaires.
     actualSalePrice: v.optional(v.number()),
+    /** Nombre de vues affiché par Vinted au moment où l'article est vendu. */
+    viewsAtSale: v.optional(v.number()),
     parcelSize: v.optional(v.string()),
     gender: v.optional(v.string()),
     style: v.optional(v.string()),
