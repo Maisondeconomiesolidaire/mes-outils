@@ -888,6 +888,8 @@ export default defineSchema(
     senderName: v.string(),
     senderClerkId: v.optional(v.string()),
     body: v.string(),
+    /** Photos jointes au message ; le texte peut alors être vide. */
+    images: v.optional(v.array(v.id("_storage"))),
     createdAt: v.number(),
     // Accusés de lecture ("Lu à HH:MM").
     readByClientAt: v.optional(v.number()),

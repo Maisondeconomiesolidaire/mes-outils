@@ -10,7 +10,10 @@ import {
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 
-function serializeMessage(message: Doc<"messages">) {
+/** Nombre de photos acceptées dans un même message. */
+const MAX_MESSAGE_IMAGES = 6;
+
+function serializeMessage(message: Doc<"messages">, imageUrls: string[] = []) {
   return {
     _id: message._id,
     senderRole: message.senderRole,
@@ -19,10 +22,20 @@ function serializeMessage(message: Doc<"messages">) {
         ? titleCaseName(message.senderName)
         : message.senderName,
     body: message.body,
+    imageUrls,
     createdAt: message.createdAt,
     readByClientAt: message.readByClientAt ?? null,
     readByStaffAt: message.readByStaffAt ?? null,
   };
+}
+
+/** Résumé d'une conversation : le texte, ou à défaut les photos envoyées. */
+export function messageSummary(message: { body: string; images?: Id<"_storage">[] }) {
+  const trimmed = message.body.trim();
+  if (trimmed) return trimmed;
+  const count = message.images?.length ?? 0;
+  if (!count) return "";
+  return count === 1 ? "Photo" : `${count} photos`;
 }
 
 export const listForRequest = query({
@@ -39,7 +52,14 @@ export const listForRequest = query({
       .query("messages")
       .withIndex("by_requestId", (q) => q.eq("requestId", requestId))
       .collect();
-    return messages.sort((a, b) => a.createdAt - b.createdAt).map(serializeMessage);
+    return await Promise.all(
+      messages
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .map(async (message) => {
+          const urls = await Promise.all((message.images ?? []).map((id) => ctx.storage.getUrl(id)));
+          return serializeMessage(message, urls.filter((url): url is string => Boolean(url)));
+        }),
+    );
   },
 });
 
@@ -47,14 +67,27 @@ export const sendMessage = mutation({
   args: {
     requestId: v.id("requests"),
     body: v.string(),
+    /** Photos déjà envoyées au stockage via `files.generateUploadUrl`. */
+    images: v.optional(v.array(v.id("_storage"))),
     // Côté depuis lequel le message est envoyé (portail client ou CRM). Un même
     // utilisateur peut être à la fois admin ET client : c'est le portail utilisé
     // qui détermine le côté, pas ses permissions.
     as: v.optional(v.union(v.literal("client"), v.literal("staff"))),
   },
-  handler: async (ctx, { requestId, body, as }) => {
+  handler: async (ctx, { requestId, body, images, as }) => {
     const trimmed = body.trim();
-    if (!trimmed) throw new Error("Message vide.");
+    const attachments = images ?? [];
+    // Une photo seule est un message valide ; un message sans rien ne l'est pas.
+    if (!trimmed && attachments.length === 0) throw new Error("Message vide.");
+    if (attachments.length > MAX_MESSAGE_IMAGES) {
+      throw new Error(`Joignez au maximum ${MAX_MESSAGE_IMAGES} photos par message.`);
+    }
+    for (const image of attachments) {
+      const file = await ctx.db.system.get(image);
+      if (!file?.contentType?.startsWith("image/")) {
+        throw new Error("Une photo est introuvable ou son format est invalide.");
+      }
+    }
     const { identity, request, staff } = await requireRequestParticipant(
       ctx,
       requestId,
@@ -95,6 +128,9 @@ export const sendMessage = mutation({
         "Client";
     }
 
+    // Aperçus (notification staff, email client) : « Photo » remplace le texte
+    // quand le message n'est qu'une image.
+    const summary = messageSummary({ body: trimmed, images: attachments });
     const now = Date.now();
     const messageId = await ctx.db.insert("messages", {
       requestId,
@@ -102,6 +138,7 @@ export const sendMessage = mutation({
       senderName,
       senderClerkId: identity.subject,
       body: trimmed,
+      images: attachments.length ? attachments : undefined,
       createdAt: now,
       // Le message est lu par son auteur d'office.
       readByStaffAt: fromStaff ? now : undefined,
@@ -110,7 +147,7 @@ export const sendMessage = mutation({
 
     // Notifier le staff quand un client écrit.
     if (!fromStaff) {
-      const messagePreview = trimmed.length > 160 ? `${trimmed.slice(0, 160)}…` : trimmed;
+      const messagePreview = summary.length > 160 ? `${summary.slice(0, 160)}…` : summary;
       // Une conversation garde une seule alerte de message, mise à jour avec
       // le dernier texte : une rafale de messages ne noie plus les demandes.
       const previousMessageNotifications = await ctx.db
@@ -148,7 +185,7 @@ export const sendMessage = mutation({
         reference: request.reference ?? String(request._id).slice(-6),
         type: request.type,
         requestId: String(request._id),
-        snippet: trimmed.length > 160 ? `${trimmed.slice(0, 160)}…` : trimmed,
+        snippet: summary.length > 160 ? `${summary.slice(0, 160)}…` : summary,
       });
     }
 
@@ -267,7 +304,7 @@ export const listConversations = query({
           reference: request.reference ?? null,
           imageUrl,
           customerName: customerFullName(request.customer),
-          lastBody: info.last.body,
+          lastBody: messageSummary(info.last),
           lastSenderRole: info.last.senderRole,
           lastAt: info.last.createdAt,
           total: info.total,
