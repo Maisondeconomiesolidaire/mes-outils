@@ -811,6 +811,20 @@ export const setActualSalePrice = mutation({
   },
 });
 
+/** Compteur Vinted relevé à la vente, modifiable même une fois l'article gagné. */
+export const setViewsAtSale = mutation({
+  args: { id: v.id("klydeItems"), viewsAtSale: v.optional(v.number()) },
+  handler: async (ctx, { id, viewsAtSale }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    await ctx.db.patch(id, {
+      viewsAtSale: normalizeViewsAtSale(viewsAtSale),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 /** Décision après trois semaines sur Vinted : retrait vers Stock B. */
 /**
  * Remise en vente à la boutique physique.
