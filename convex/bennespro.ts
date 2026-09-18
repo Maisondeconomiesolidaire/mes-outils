@@ -10,7 +10,7 @@ import {
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { v, type Infer } from "convex/values";
+import { ConvexError, v, type Infer } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { api, internal } from "./_generated/api";
 import { accessAllows, livePhotosByClerkId, requireCrmPermission, requireUser } from "./lib";
@@ -973,6 +973,37 @@ export const listDepots = query({
         };
       }),
     );
+  },
+});
+
+/**
+ * Dates minimales nécessaires au graphique de fréquentation. La période est
+ * bornée pour éviter qu'un écran analytique ne charge l'historique sans limite.
+ */
+export const attendanceStats = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, { from, to }) => {
+    await requireCrmPermission(ctx, "bennespro:depots", "read");
+    const maxRange = 370 * 24 * 60 * 60 * 1000;
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > maxRange) {
+      throw new ConvexError("La période de fréquentation demandée est invalide.");
+    }
+
+    const [depots, companies] = await Promise.all([
+      ctx.db
+        .query("bpDepots")
+        .withIndex("by_createdAt", (q) => q.gte("createdAt", from).lt("createdAt", to))
+        .collect(),
+      ctx.db
+        .query("bpCompanies")
+        .withIndex("by_createdAt", (q) => q.gte("createdAt", from).lt("createdAt", to))
+        .collect(),
+    ]);
+
+    return {
+      depotTimestamps: depots.map((depot) => depot.createdAt),
+      companyTimestamps: companies.map((company) => company.createdAt),
+    };
   },
 });
 

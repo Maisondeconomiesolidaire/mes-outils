@@ -2323,7 +2323,8 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_name", ["name"])
-    .index("by_owner", ["ownerUserId"]),
+    .index("by_owner", ["ownerUserId"])
+    .index("by_createdAt", ["createdAt"]),
 
   /** Documents rattachés à une entreprise (KBIS, RIB… ; client ↔ staff). */
   bpCompanyDocuments: defineTable({
@@ -2502,7 +2503,8 @@ export default defineSchema(
   })
     .index("by_company", ["companyId"])
     .index("by_number", ["depotNumber"])
-    .index("by_profile", ["createdByProfileId"]),
+    .index("by_profile", ["createdByProfileId"])
+    .index("by_createdAt", ["createdAt"]),
 
   // ───────────────────────── App « Pointeuse LSDB » ─────────────────────────
   // Suivi des salariés et des chantiers : clients, projets, pointages,
