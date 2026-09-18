@@ -1713,6 +1713,11 @@ export default defineSchema(
     requestKey: v.string(),
     message: v.string(),
     images: v.array(v.id("_storage")),
+    /**
+     * Vidéo du post. Les réseaux n'acceptent pas photos et vidéo dans la même
+     * publication : une composition porte soit l'un, soit l'autre.
+     */
+    videos: v.optional(v.array(v.id("_storage"))),
     authorClerkId: v.string(),
     authorName: v.string(),
     scheduledFor: v.optional(v.number()),
@@ -1752,6 +1757,8 @@ export default defineSchema(
     /** Date de publication programmée, absente pour une publication immédiate. */
     scheduledFor: v.optional(v.number()),
     withPhoto: v.boolean(),
+    /** Publication vidéo (Facebook /videos, Instagram Reels). */
+    withVideo: v.optional(v.boolean()),
     authorClerkId: v.string(),
     authorName: v.string(),
     createdAt: v.number(),

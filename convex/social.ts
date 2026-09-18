@@ -25,6 +25,18 @@ import { formatUserName, requireCrmPermission, requireUser } from "./lib";
 
 const PAGE_KEY = "mesoutils:actualites";
 const GRAPH_VERSION = "v26.0";
+/**
+ * Les vidéos ne passent pas par `graph.facebook.com` : Facebook les reçoit sur
+ * un hôte dédié, même quand on lui donne simplement l'URL à aller chercher.
+ */
+const GRAPH_VIDEO_HOST = "https://graph-video.facebook.com";
+/**
+ * Instagram encode un Reel de façon asynchrone : le conteneur n'est publiable
+ * qu'une fois `FINISHED`. On l'interroge jusqu'à ce délai, au-delà duquel
+ * l'encodage est considéré comme perdu (une action Convex ne vit pas 10 min).
+ */
+const REEL_POLL_INTERVAL_MS = 5_000;
+const REEL_POLL_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Facebook n'accepte une programmation qu'entre 10 minutes et 6 mois. On garde
@@ -185,6 +197,7 @@ export const recordPost = internalMutation({
     message: v.string(),
     scheduledFor: v.optional(v.number()),
     withPhoto: v.boolean(),
+    withVideo: v.optional(v.boolean()),
     authorClerkId: v.string(),
     authorName: v.string(),
   },
@@ -245,6 +258,11 @@ const sendFacebookArgs = {
     message: v.optional(v.string()),
     /** Photos du post. À défaut, celles de l'évènement. */
     photoStorageIds: v.optional(v.array(v.id("_storage"))),
+    /**
+     * Vidéo du post. Facebook ne mélange pas vidéo et photos dans une même
+     * publication : dès qu'une vidéo est là, les photos sont ignorées.
+     */
+    videoStorageIds: v.optional(v.array(v.id("_storage"))),
 };
 
 export const publishEvent = action({ args: sendFacebookArgs, handler: (ctx, args) => sendFacebook(ctx, args) });
@@ -288,6 +306,15 @@ export async function sendFacebook(ctx: ActionCtx, args: import("convex/values")
         ? [payload.event.photoUrl]
         : [];
 
+    const videoUrls: string[] = (
+      await Promise.all(
+        (args.videoStorageIds ?? []).map((id) => ctx.storage.getUrl(id as Id<"_storage">)),
+      )
+    ).filter((url): url is string => Boolean(url));
+    if ((args.videoStorageIds?.length ?? 0) > 0 && videoUrls.length === 0) {
+      throw new Error("Vidéo introuvable.");
+    }
+
     const graph = (path: string, params: URLSearchParams) =>
       fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${path}`, {
         method: "POST",
@@ -304,6 +331,52 @@ export async function sendFacebook(ctx: ActionCtx, args: import("convex/values")
           : "";
       return new Error(`Facebook a refusé la publication : ${detail}.${hint}`);
     };
+
+    /**
+     * Vidéo : Facebook la télécharge lui-même depuis l'URL Convex, sur son
+     * hôte vidéo. Le post porte alors la vidéo et son texte — les photos n'y
+     * ont pas leur place, l'API ne les rattache pas à une publication vidéo.
+     */
+    if (videoUrls.length > 0) {
+      const videoBody = new URLSearchParams({
+        access_token: payload.page.accessToken,
+        file_url: videoUrls[0],
+        description: message,
+      });
+      if (args.scheduledFor !== undefined) {
+        videoBody.set("published", "false");
+        videoBody.set("scheduled_publish_time", String(Math.floor(args.scheduledFor / 1000)));
+      }
+      const response = await fetch(
+        `${GRAPH_VIDEO_HOST}/${GRAPH_VERSION}/${payload.page.pageId}/videos`,
+        { method: "POST", body: videoBody },
+      );
+      const result = (await response.json()) as {
+        id?: string;
+        post_id?: string;
+        error?: { message?: string; code?: number };
+      };
+      if (!response.ok || result.error) throw fail(result, response.status);
+      const videoPostId = result.post_id ?? result.id;
+      if (!videoPostId) throw new Error("Facebook n'a pas renvoyé d'identifiant de publication.");
+
+      await ctx.runMutation(internal.social.recordPost, {
+        composerId: args.composerId,
+        sourcePostId: args.sourcePostId,
+        eventId: args.eventId,
+        recycappEventId: args.recycappEventId,
+        pageId: payload.page.pageId,
+        pageName: payload.page.name,
+        postId: videoPostId,
+        message,
+        scheduledFor: args.scheduledFor,
+        withPhoto: false,
+        withVideo: true,
+        authorClerkId: author.clerkId,
+        authorName: author.name,
+      });
+      return { postId: videoPostId, scheduledFor: args.scheduledFor };
+    }
 
     /**
      * Les photos sont d'abord déposées sans être publiées, puis rattachées au
@@ -611,8 +684,9 @@ export const pageTokens = internalQuery({
 /**
  * Publie un évènement sur un ou plusieurs comptes Instagram.
  *
- * Instagram exige au moins une image — un post texte n'y existe pas — et
- * publie en deux temps : on dépose d'abord un conteneur, on le publie ensuite.
+ * Instagram exige au moins une image ou une vidéo — un post texte n'y existe
+ * pas — et publie en deux temps : on dépose d'abord un conteneur, on le publie
+ * ensuite. Une vidéo part en Reel, après son encodage par Instagram.
  * L'API ne connaît pas la programmation, contrairement à Facebook : la
  * publication part immédiatement.
  *
@@ -627,6 +701,11 @@ const sendInstagramArgs = {
     instagramIds: v.array(v.string()),
     message: v.optional(v.string()),
     photoStorageIds: v.array(v.id("_storage")),
+    /**
+     * Vidéo du post. Instagram la publie en Reel : un Reel ne porte qu'une
+     * vidéo, et jamais de photo à côté.
+     */
+    videoStorageIds: v.optional(v.array(v.id("_storage"))),
 };
 
 export const publishEventToInstagram = action({ args: sendInstagramArgs, handler: (ctx, args) => sendInstagram(ctx, args) });
@@ -637,16 +716,21 @@ export async function sendInstagram(ctx: ActionCtx, args: import("convex/values"
       {},
     );
     if (args.instagramIds.length === 0) throw new Error("Choisissez au moins un compte.");
-    if (args.photoStorageIds.length === 0) {
-      throw new Error("Instagram exige au moins une photo : un post texte n'y existe pas.");
+    const videoIds = args.videoStorageIds ?? [];
+    if (args.photoStorageIds.length === 0 && videoIds.length === 0) {
+      throw new Error("Instagram exige au moins une photo ou une vidéo : un post texte n'y existe pas.");
     }
 
-    const photoUrls = (
+    const photoUrls = videoIds.length > 0 ? [] : (
       await Promise.all(
         args.photoStorageIds.map((id) => ctx.storage.getUrl(id as Id<"_storage">)),
       )
     ).filter((url): url is string => Boolean(url));
-    if (photoUrls.length === 0) throw new Error("Photos introuvables.");
+    const videoUrls = (
+      await Promise.all(videoIds.map((id) => ctx.storage.getUrl(id as Id<"_storage">)))
+    ).filter((url): url is string => Boolean(url));
+    if (videoIds.length > 0 && videoUrls.length === 0) throw new Error("Vidéo introuvable.");
+    if (videoIds.length === 0 && photoUrls.length === 0) throw new Error("Photos introuvables.");
 
     const targets: Array<{ instagramId: string; username: string; accessToken: string }> =
       await ctx.runQuery(internal.social.instagramTargets, {
@@ -678,13 +762,55 @@ export async function sendInstagram(ctx: ActionCtx, args: import("convex/values"
       return result.id;
     };
 
+    /**
+     * Un conteneur Reel n'est publiable qu'une fois encodé. Publier trop tôt
+     * renvoie une erreur sèche : on attend l'état `FINISHED`, et on abandonne
+     * proprement si Instagram signale une erreur ou prend trop de temps.
+     */
+    const awaitReelReady = async (containerId: string, accessToken: string) => {
+      const deadline = Date.now() + REEL_POLL_TIMEOUT_MS;
+      while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, REEL_POLL_INTERVAL_MS));
+        const response = await fetch(
+          `https://graph.facebook.com/${GRAPH_VERSION}/${containerId}?` +
+            new URLSearchParams({ fields: "status_code,status", access_token: accessToken }),
+        );
+        const result = (await response.json()) as {
+          status_code?: string;
+          status?: string;
+          error?: { message?: string };
+        };
+        if (!response.ok || result.error) {
+          throw new Error(result.error?.message ?? `HTTP ${response.status}`);
+        }
+        if (result.status_code === "FINISHED") return;
+        if (result.status_code === "ERROR" || result.status_code === "EXPIRED") {
+          throw new Error(result.status ?? "Instagram n'a pas pu encoder la vidéo.");
+        }
+      }
+      throw new Error(
+        "Instagram met trop de temps à encoder la vidéo. Réessayez avec une vidéo plus courte ou plus légère.",
+      );
+    };
+
     const published: string[] = [];
     const failed: Array<{ account: string; reason: string }> = [];
 
     for (const target of targets) {
       try {
         let containerId: string;
-        if (photoUrls.length === 1) {
+        if (videoUrls.length > 0) {
+          containerId = await call(
+            `${target.instagramId}/media`,
+            new URLSearchParams({
+              access_token: target.accessToken,
+              media_type: "REELS",
+              video_url: videoUrls[0],
+              caption,
+            }),
+          );
+          await awaitReelReady(containerId, target.accessToken);
+        } else if (photoUrls.length === 1) {
           containerId = await call(
             `${target.instagramId}/media`,
             new URLSearchParams({
@@ -738,7 +864,8 @@ export async function sendInstagram(ctx: ActionCtx, args: import("convex/values"
           pageName: `@${target.username}`,
           postId,
           message: caption,
-          withPhoto: true,
+          withPhoto: videoUrls.length === 0,
+          withVideo: videoUrls.length > 0,
           authorClerkId: author.clerkId,
           authorName: author.name,
         });

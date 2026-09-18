@@ -15,6 +15,7 @@ import { CalendarBoard } from "../ui/CalendarBoard";
 import { DateTimePicker } from "../ui/DateTimePicker";
 import { Modal } from "../ui/Modal";
 import { PhotoUpload } from "../ui/PhotoUpload";
+import { VideoUpload } from "../ui/VideoUpload";
 import { Field, Textarea } from "../ui/Field";
 import { FacebookPageMultiSelect } from "./FacebookPageMultiSelect";
 import { cn } from "../../lib/cn";
@@ -206,6 +207,9 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
   const [uploading, setUploading] = useState(false);
   const [previews, setPreviews] = useState<{ storageId: Id<"_storage">; previewUrl: string }[]>([]);
   const [images, setImages] = useState<Id<"_storage">[]>([]);
+  const [videos, setVideos] = useState<Id<"_storage">[]>([]);
+  const [videoPreviews, setVideoPreviews] = useState<{ storageId: Id<"_storage">; previewUrl: string }[]>([]);
+  const [uploadingVideo, setUploadingVideo] = useState(false);
   const [scheduled, setScheduled] = useState(false);
   const [date, setDate] = useState<number | null>(null);
   const [mesoutils, setMesoutils] = useState<boolean | null>(null);
@@ -214,13 +218,16 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
   const selectedPages = facebook ? (pages ?? []).filter(page => facebookIds.includes(page.pageId)) : [];
   const selectedAccounts = instagram ? (accounts ?? []).filter(account => instagramIds.includes(account.instagramId)) : [];
   const photoUrls = previews.filter(photo => images.includes(photo.storageId)).map(photo => photo.previewUrl);
+  const videoUrl = videoPreviews.find(video => videos.includes(video.storageId))?.previewUrl;
+  const hasVideo = videos.length > 0;
   const validTargets = (facebook || instagram) && (!facebook || selectedPages.length > 0) && (!instagram || selectedAccounts.length > 0);
   function next() {
     setError("");
     if (step === 0 && !validTargets) { setError("Choisissez au moins une page pour chaque réseau sélectionné."); return; }
     if (step === 1) {
-      if (!message.trim() && !images.length) { setError("Ajoutez du texte ou une photo."); return; }
-      if (instagram && !images.length) { setError("Ajoutez au moins une photo pour Instagram."); return; }
+      if (!message.trim() && !images.length && !hasVideo) { setError("Ajoutez du texte, une photo ou une vidéo."); return; }
+      if (hasVideo && images.length) { setError("Une publication porte soit des photos, soit une vidéo."); return; }
+      if (instagram && !images.length && !hasVideo) { setError("Ajoutez au moins une photo ou une vidéo pour Instagram."); return; }
       if (images.length > 10) { setError("Vous pouvez joindre au maximum 10 photos."); return; }
       if (scheduled && (!date || date < Date.now() + 60_000)) { setError("Choisissez une date au moins une minute dans le futur."); return; }
     }
@@ -258,13 +265,17 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
       <div hidden={step !== 1} className="space-y-5">
         {step === 1 && <SocialAiAssistant networks={[...(facebook ? ["facebook" as const] : []), ...(instagram ? ["instagram" as const] : [])]} pageNames={[...selectedPages.map(page => page.name), ...selectedAccounts.map(account => account.pageName)]} onApply={setMessage} />}
         <Field label="Texte du post"><Textarea aria-label="Texte du post" rows={7} value={message} maxLength={instagram ? 2200 : 63206} onChange={event => setMessage(event.target.value)} placeholder="Que souhaitez-vous partager ?" /></Field>
-        <div><p className="mb-2 text-sm font-medium">Photos · 10 maximum{instagram ? " · JPEG pour Instagram" : ""}</p><PhotoUpload jpeg value={images} onChange={setImages} onUploadingChange={setUploading} onPreviewsChange={setPreviews} /></div>
+        {!hasVideo && <div><p className="mb-2 text-sm font-medium">Photos · 10 maximum{instagram ? " · JPEG pour Instagram" : ""}</p><PhotoUpload jpeg value={images} onChange={setImages} onUploadingChange={setUploading} onPreviewsChange={setPreviews} /></div>}
+        {/* Photos et vidéo s'excluent : Facebook publie une vidéo seule et
+            Instagram en fait un Reel. On masque donc l'autre champ plutôt que
+            de laisser composer un post que les réseaux refuseront. */}
+        {!images.length && <div><p className="mb-2 text-sm font-medium">Vidéo · une seule{instagram ? " · MP4 ou MOV pour Instagram" : ""}</p><VideoUpload value={videos} onChange={setVideos} onPreviewsChange={setVideoPreviews} onUploadingChange={setUploadingVideo} /><p className="mt-2 text-xs text-[var(--muted-foreground)]">Sur Instagram, la vidéo est publiée en Reel. Son encodage peut prendre quelques minutes avant que la publication n'apparaisse.</p></div>}
         <div className="flex flex-wrap gap-3"><Choice selected={!scheduled} onClick={() => setScheduled(false)}>Publier maintenant</Choice><Choice selected={scheduled} onClick={() => setScheduled(true)}>Programmer</Choice></div>
         {scheduled && <Field label="Date et heure de publication sur les réseaux"><DateTimePicker value={date} onChange={setDate} /></Field>}
       </div>
       {step === 2 && <div className="space-y-5">
-        <div className="rounded-2xl bg-[var(--accent)] p-4"><p className="text-sm font-medium">{facebook ? `${selectedPages.length} page(s) Facebook` : ""}{facebook && instagram ? " · " : ""}{instagram ? `${selectedAccounts.length} compte(s) Instagram` : ""}</p><p className="mt-1 text-sm">{scheduled && date ? `Programmation : ${dateLabel(date)}` : "Publication immédiate sur les réseaux"}</p><p className="mt-3 whitespace-pre-wrap text-sm">{message || "Publication photo"}</p><p className="mt-2 text-xs">{images.length} photo(s)</p></div>
-        <div className="flex flex-wrap gap-2">{previews.map(photo => <img key={photo.storageId} src={photo.previewUrl} alt="Photo du post" className="h-24 w-24 rounded-xl object-cover" />)}</div>
+        <div className="rounded-2xl bg-[var(--accent)] p-4"><p className="text-sm font-medium">{facebook ? `${selectedPages.length} page(s) Facebook` : ""}{facebook && instagram ? " · " : ""}{instagram ? `${selectedAccounts.length} compte(s) Instagram` : ""}</p><p className="mt-1 text-sm">{scheduled && date ? `Programmation : ${dateLabel(date)}` : "Publication immédiate sur les réseaux"}</p><p className="mt-3 whitespace-pre-wrap text-sm">{message || "Publication photo"}</p><p className="mt-2 text-xs">{hasVideo ? "1 vidéo" : `${images.length} photo(s)`}</p></div>
+        <div className="flex flex-wrap gap-2">{hasVideo ? (videoUrl ? <video src={videoUrl} controls playsInline preload="metadata" className="max-h-48 rounded-xl bg-black" /> : null) : previews.map(photo => <img key={photo.storageId} src={photo.previewUrl} alt="Photo du post" className="h-24 w-24 rounded-xl object-cover" />)}</div>
         <h3 className="text-lg font-semibold">Souhaitez-vous publier ce post sur Mes Outils ?</h3>
         <div className="flex gap-3"><Choice selected={mesoutils === true} disabled={!canCreate} onClick={() => setMesoutils(true)}>Oui</Choice><Choice selected={mesoutils === false} onClick={() => setMesoutils(false)}>Non</Choice></div>
         <p className="text-sm text-[var(--muted-foreground)]">{canCreate ? "Si vous choisissez Oui, le post et ses photos apparaîtront immédiatement dans les Posts de Mes Outils, même si les réseaux sont programmés pour plus tard." : "Votre accès ne permet pas de créer un post sur Mes Outils. Vous pouvez publier sur les réseaux en choisissant Non."}</p>
@@ -272,17 +283,17 @@ function SocialComposer({ canCreate, onClose, onCreated }: { canCreate: boolean;
       </div>
       {step > 0 && <aside className="min-w-0 space-y-5" aria-label="Aperçus des publications">
         <h3 className="text-lg font-semibold">Aperçu des posts</h3>
-        {selectedPages.map(page => <section key={page.pageId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><FacebookIcon className="h-5 w-5" />Facebook · {page.name}</h4><FacebookPostPreview accountName={page.name} accountImageUrl={page.profileImageUrl} message={message} photoUrls={photoUrls} scheduledFor={scheduled ? date : undefined} /></section>)}
-        {selectedAccounts.map(account => <section key={account.instagramId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><InstagramIcon className="h-5 w-5" />Instagram · @{account.username}</h4><InstagramPostPreview accountName={account.username} accountImageUrl={account.profileImageUrl} caption={message} photoUrls={photoUrls} /></section>)}
+        {selectedPages.map(page => <section key={page.pageId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><FacebookIcon className="h-5 w-5" />Facebook · {page.name}</h4><FacebookPostPreview accountName={page.name} accountImageUrl={page.profileImageUrl} message={message} photoUrls={photoUrls} videoUrl={videoUrl} scheduledFor={scheduled ? date : undefined} /></section>)}
+        {selectedAccounts.map(account => <section key={account.instagramId} className="space-y-2"><h4 className="flex items-center gap-2 text-sm font-medium"><InstagramIcon className="h-5 w-5" />Instagram · @{account.username}</h4><InstagramPostPreview accountName={account.username} accountImageUrl={account.profileImageUrl} caption={message} photoUrls={photoUrls} videoUrl={videoUrl} /></section>)}
       </aside>}
       </div>
       {error && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}</p>}
       <div className="flex justify-between border-t border-[var(--border)] pt-4">
         <Button variant="secondary" disabled={busy} onClick={() => step ? setStep(step - 1) : onClose()}>{step ? "Retour" : "Annuler"}</Button>
-        {step < 2 ? <Button disabled={uploading} onClick={next}>{uploading ? "Photos en cours…" : "Continuer"}</Button> : <Button disabled={busy || mesoutils === null || !validTargets} onClick={async () => {
+        {step < 2 ? <Button disabled={uploading || uploadingVideo} onClick={next}>{uploading ? "Photos en cours…" : uploadingVideo ? "Vidéo en cours…" : "Continuer"}</Button> : <Button disabled={busy || mesoutils === null || !validTargets} onClick={async () => {
           setBusy(true); setError("");
           try {
-            const id = await create({ requestKey, message, images, facebookIds: selectedPages.map(page => page.pageId), instagramIds: selectedAccounts.map(account => account.instagramId), scheduledFor: scheduled ? date ?? undefined : undefined, publishOnMesoutils: mesoutils === true });
+            const id = await create({ requestKey, message, images, videos, facebookIds: selectedPages.map(page => page.pageId), instagramIds: selectedAccounts.map(account => account.instagramId), scheduledFor: scheduled ? date ?? undefined : undefined, publishOnMesoutils: mesoutils === true });
             onCreated(id, scheduled ? date ?? undefined : undefined);
           } catch (err) { setError(err instanceof Error ? err.message : "Impossible d'enregistrer la publication."); } finally { setBusy(false); }
         }}>{busy ? "Enregistrement…" : scheduled ? "Confirmer la programmation" : "Publier"}</Button>}

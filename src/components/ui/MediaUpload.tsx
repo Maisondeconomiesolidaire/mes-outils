@@ -10,8 +10,9 @@ type LocalMedia = {
 };
 
 /**
- * Upload de photos pour les publications. Les vidéos ne sont plus acceptées :
- * servies depuis Convex, elles faisaient exploser le data egress.
+ * Upload de photos pour les publications. Les vidéos passent par `VideoUpload` :
+ * elles se plafonnent, ne se préchargent pas dans le fil et s'excluent des
+ * photos sur les réseaux — une grille de vignettes carrées ne leur va pas.
  */
 export function MediaUpload({
   images,

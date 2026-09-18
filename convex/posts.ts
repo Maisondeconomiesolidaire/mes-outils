@@ -8,6 +8,14 @@ import { clerkPrimaryEmail, fetchAllClerkUsers, formatUserName, INTERNAL_EMAIL_D
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const POSTS_PAGE_KEY = "mesoutils:actualites";
+/**
+ * Plafond par vidéo. Les vidéos servies depuis Convex ont déjà fait exploser
+ * le data egress une fois : le fil ne les précharge pas (`preload="none"`,
+ * lecture sur clic) et une vidéo trop lourde est refusée à la source. C'est
+ * aussi la limite pratique d'un envoi par URL vers Facebook et Instagram.
+ */
+const MAX_POST_VIDEO_BYTES = 200 * 1024 * 1024;
+const MAX_POST_VIDEOS = 2;
 const POST_EMAIL_FROM = "Mes Outils <no-reply@mesoutils.eco-solidaire.fr>";
 const POST_EMAIL_RECIPIENTS_PER_SEND = 50;
 const POST_EDITOR_EMAILS = new Set(["lahmerselim@gmail.com"]);
@@ -28,6 +36,26 @@ const AIRTABLE_AUTHOR_FALLBACKS: Record<
       "https://img.clerk.com/eyJ0eXBlIjoiZGVmYXVsdCIsImlpZCI6Imluc18zRmN3Wjg5UnhIWnM3YjRBYzhmSzFXbTgwV2oiLCJyaWQiOiJ1c2VyXzNGZFlXUVZ2TjZnTXpEc1ZCYVdSMHJJemhJWSIsImluaXRpYWxzIjoiU00ifQ",
   },
 };
+
+/** Refuse ce que les navigateurs — et les réseaux — ne sauraient pas lire. */
+async function assertPlayableVideos(ctx: MutationCtx, videos: Id<"_storage">[]) {
+  if (videos.length === 0) return;
+  if (videos.length > MAX_POST_VIDEOS) {
+    throw new Error(`Une publication accepte au maximum ${MAX_POST_VIDEOS} vidéos.`);
+  }
+  for (const video of videos) {
+    const file = await ctx.db.system.get(video);
+    if (!file) throw new Error("Une vidéo est introuvable.");
+    if (!file.contentType?.startsWith("video/")) {
+      throw new Error("Ce fichier n'est pas une vidéo.");
+    }
+    if (file.size > MAX_POST_VIDEO_BYTES) {
+      throw new Error(
+        `Vidéo trop lourde (${Math.round(file.size / 1024 / 1024)} Mo) : ${MAX_POST_VIDEO_BYTES / 1024 / 1024} Mo au maximum.`,
+      );
+    }
+  }
+}
 
 function displayName(identity: {
   name?: string | null;
@@ -186,15 +214,13 @@ export const create = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, POSTS_PAGE_KEY, "create");
     const identity = await requireUser(ctx);
-    if (args.videos?.length) {
-      throw new Error("Les vidéos ne sont plus acceptées dans les publications.");
-    }
     const body = args.body.trim();
     const title = args.title?.trim();
     const externalLink = args.externalLink?.trim() || undefined;
-    if (!title && !body && !externalLink && !(args.images?.length ?? 0)) {
+    if (!title && !body && !externalLink && !(args.images?.length ?? 0) && !(args.videos?.length ?? 0)) {
       throw new Error("Le post est vide.");
     }
+    await assertPlayableVideos(ctx, args.videos ?? []);
 
     return await ctx.db.insert("posts", {
       authorClerkId: identity.subject,
@@ -321,17 +347,15 @@ export const update = mutation({
     if (post.authorClerkId !== identity.subject && !canEditAnyPost(identity.email)) {
       throw new Error("Modification non autorisée.");
     }
-    if (args.videos?.length) {
-      throw new Error("Les vidéos ne sont plus acceptées dans les publications.");
-    }
     const body = args.body.trim();
     const title = args.title?.trim() || undefined;
     const externalLink = args.externalLink?.trim() || undefined;
     const images = args.images ?? post.images;
-    const videos: Id<"_storage">[] = [];
-    if (!title && !body && !externalLink && images.length === 0) {
+    const videos = args.videos ?? post.videos ?? [];
+    if (!title && !body && !externalLink && images.length === 0 && videos.length === 0) {
       throw new Error("Le post est vide.");
     }
+    await assertPlayableVideos(ctx, videos);
     // Libère les fichiers retirés du post (sinon ils restent orphelins).
     const kept = new Set<Id<"_storage">>([...images, ...videos]);
     await deleteStorageFiles(
@@ -578,29 +602,6 @@ export const remove = mutation({
     // Libère aussi les fichiers du post (images + vidéos).
     await deleteStorageFiles(ctx, [...post.images, ...(post.videos ?? [])]);
     await ctx.db.delete(args.postId);
-  },
-});
-
-/**
- * Maintenance : retire toutes les vidéos des posts et supprime leurs fichiers
- * du storage (les vidéos servies depuis Convex explosent le data egress).
- * À lancer via `npx convex run posts:removeAllPostVideos`.
- */
-export const removeAllPostVideos = internalMutation({
-  args: {},
-  handler: async (ctx) => {
-    const posts = await ctx.db.query("posts").collect();
-    let removedFiles = 0;
-    let touchedPosts = 0;
-    for (const post of posts) {
-      const videos = post.videos ?? [];
-      if (videos.length === 0) continue;
-      await deleteStorageFiles(ctx, videos);
-      await ctx.db.patch(post._id, { videos: [] });
-      removedFiles += videos.length;
-      touchedPosts += 1;
-    }
-    return { touchedPosts, removedFiles };
   },
 });
 

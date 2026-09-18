@@ -7,6 +7,7 @@ import {
   CalendarPlus,
   Check,
   CircleHelp,
+  Film,
   ChevronLeft,
   ChevronRight,
   Image as ImageIcon,
@@ -58,6 +59,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { MediaUpload } from "../components/ui/MediaUpload";
+import { VideoUpload } from "../components/ui/VideoUpload";
 import { PhotoUpload } from "../components/ui/PhotoUpload";
 import { FullSpinner } from "../components/ui/Spinner";
 import { formatDate, formatDateTime, formatRelative } from "../lib/format";
@@ -126,6 +128,7 @@ type Post = {
   body?: string;
   externalLink?: string;
   images: Id<"_storage">[];
+  videos?: Id<"_storage">[];
   createdAt: number;
   editedAt?: number;
   pinned?: boolean;
@@ -167,7 +170,9 @@ function Publications({ canCreate, canManage, canPublish }: { canCreate: boolean
   const [title, setTitle] = useState("");
   const [externalLink, setExternalLink] = useState("");
   const [images, setImages] = useState<Id<"_storage">[]>([]);
+  const [videos, setVideos] = useState<Id<"_storage">[]>([]);
   const [showMedia, setShowMedia] = useState(false);
+  const [showVideo, setShowVideo] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // Composeur replié : on ne montre que le titre tant que l'utilisateur n'a pas
   // manifesté l'intention d'écrire. Trois champs vides d'emblée donnaient
@@ -175,15 +180,17 @@ function Publications({ canCreate, canManage, canPublish }: { canCreate: boolean
   const [composerOpen, setComposerOpen] = useState(false);
 
   async function submit() {
-    if (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0) return;
+    if (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0 && videos.length === 0) return;
     setSubmitting(true);
     try {
-      await createPost({ title, body, externalLink, images });
+      await createPost({ title, body, externalLink, images, videos });
       setTitle("");
       setBody("");
       setExternalLink("");
       setImages([]);
+      setVideos([]);
       setShowMedia(false);
+      setShowVideo(false);
       setComposerOpen(false);
     } finally {
       setSubmitting(false);
@@ -238,6 +245,9 @@ function Publications({ canCreate, canManage, canPublish }: { canCreate: boolean
           {composerOpen && showMedia ? (
             <MediaUpload images={images} onChange={setImages} className="mt-3 pl-[60px]" />
           ) : null}
+          {composerOpen && showVideo ? (
+            <VideoUpload value={videos} onChange={setVideos} max={2} className="mt-3 pl-[60px]" />
+          ) : null}
           {composerOpen ? (
             <div className="animate-enter mt-3 flex items-center justify-between border-t border-[var(--border)] pt-3">
               <button
@@ -247,18 +257,26 @@ function Publications({ canCreate, canManage, canPublish }: { canCreate: boolean
               >
                 <ImageIcon className="h-4 w-4" /> Photo
               </button>
+              <button
+                type="button"
+                onClick={() => setShowVideo((current) => !current)}
+                className={cn("inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition", showVideo ? "bg-brand-50 text-brand-700" : "text-[var(--muted-foreground)] hover:bg-[var(--accent)]")}
+              >
+                <Film className="h-4 w-4" /> Vidéo
+              </button>
               <div className="flex items-center gap-2">
                 <Button
                   variant="ghost"
                   onClick={() => {
                     setComposerOpen(false);
                     setShowMedia(false);
+                    setShowVideo(false);
                   }}
                   disabled={submitting}
                 >
                   Annuler
                 </Button>
-                <Button onClick={submit} disabled={submitting || (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0)}>
+                <Button onClick={submit} disabled={submitting || (!title.trim() && !body.trim() && !externalLink.trim() && images.length === 0 && videos.length === 0)}>
                   <Send className="h-4 w-4" /> {submitting ? "Publication..." : "Publier"}
                 </Button>
               </div>
@@ -302,7 +320,7 @@ function PostCard({
   post, currentName, currentImage, canManage, canCreate, onShareFacebook, onShareInstagram, onToggleLike, onPin, onRemove, onUpdate, onEmail, onAddComment, onRemoveComment,
 }: {
   post: Post; currentName: string; currentImage?: string; canManage: boolean; canCreate: boolean;
-  onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (next: { title?: string; body: string; externalLink?: string; images: Id<"_storage">[] }) => Promise<unknown>;
+  onToggleLike: () => void; onPin: () => void; onRemove: () => void; onUpdate: (next: { title?: string; body: string; externalLink?: string; images: Id<"_storage">[]; videos: Id<"_storage">[] }) => Promise<unknown>;
   onEmail: () => Promise<{ recipients: number }>;
   onShareFacebook?: () => void;
   onShareInstagram?: () => void;
@@ -315,6 +333,7 @@ function PostCard({
   const [editDraft, setEditDraft] = useState(post.body ?? "");
   const [editExternalLink, setEditExternalLink] = useState(post.externalLink ?? "");
   const [editImages, setEditImages] = useState<Id<"_storage">[]>(post.images ?? []);
+  const [editVideos, setEditVideos] = useState<Id<"_storage">[]>(post.videos ?? []);
   const [savingEdit, setSavingEdit] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [likesOpen, setLikesOpen] = useState(false);
@@ -333,6 +352,7 @@ function PostCard({
     setEditDraft(post.body ?? "");
     setEditExternalLink(post.externalLink ?? "");
     setEditImages(post.images ?? []);
+    setEditVideos(post.videos ?? []);
     setEditing(true);
   }
 
@@ -340,7 +360,7 @@ function PostCard({
     const nextTitle = editTitle.trim();
     const text = editDraft.trim();
     const nextExternalLink = editExternalLink.trim();
-    if (!nextTitle && !text && !nextExternalLink && editImages.length === 0 && post.videoUrls.length === 0) return;
+    if (!nextTitle && !text && !nextExternalLink && editImages.length === 0 && editVideos.length === 0) return;
     setSavingEdit(true);
     try {
       await onUpdate({
@@ -348,6 +368,7 @@ function PostCard({
         body: text,
         externalLink: nextExternalLink || undefined,
         images: editImages,
+        videos: editVideos,
       });
       setEditing(false);
     } finally {
@@ -442,11 +463,20 @@ function PostCard({
             }))}
             onChange={setEditImages}
           />
+          <VideoUpload
+            value={editVideos}
+            initialMedia={(post.videos ?? []).map((id, index) => ({
+              storageId: id,
+              previewUrl: post.videoUrls[index] ?? "",
+            }))}
+            onChange={setEditVideos}
+            max={2}
+          />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" size="sm" onClick={() => setEditing(false)} disabled={savingEdit}>
               <X className="h-4 w-4" /> Annuler
             </Button>
-            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editTitle.trim() && !editDraft.trim() && !editExternalLink.trim() && editImages.length === 0 && post.videoUrls.length === 0)}>
+            <Button size="sm" onClick={saveEdit} disabled={savingEdit || (!editTitle.trim() && !editDraft.trim() && !editExternalLink.trim() && editImages.length === 0 && editVideos.length === 0)}>
               {savingEdit ? "Enregistrement..." : "Enregistrer"}
             </Button>
           </div>

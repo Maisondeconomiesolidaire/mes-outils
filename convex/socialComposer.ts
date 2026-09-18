@@ -5,10 +5,19 @@ import { requireCrmPermission, requireUser, formatUserName } from "./lib";
 import { sendFacebook, sendInstagram } from "./social";
 
 const PAGE = "mesoutils:actualites";
+/**
+ * Plafond par vidéo, aligné sur celui des publications Mes Outils : Facebook
+ * et Instagram vont chercher le fichier sur l'URL Convex, et une vidéo trop
+ * lourde fait expirer leur téléchargement autant qu'elle coûte en egress.
+ */
+const MAX_VIDEO_BYTES = 200 * 1024 * 1024;
+/** Formats qu'Instagram accepte en Reel. */
+const REEL_CONTENT_TYPES = new Set(["video/mp4", "video/quicktime"]);
 
 export const create = mutation({
   args: {
     requestKey: v.string(), message: v.string(), images: v.array(v.id("_storage")),
+    videos: v.optional(v.array(v.id("_storage"))),
     facebookIds: v.array(v.string()), instagramIds: v.array(v.string()),
     scheduledFor: v.optional(v.number()), publishOnMesoutils: v.boolean(),
   },
@@ -25,10 +34,16 @@ export const create = mutation({
     const facebookIds = [...new Set(args.facebookIds)];
     const instagramIds = [...new Set(args.instagramIds)];
     if (!facebookIds.length && !instagramIds.length) throw new Error("Sélectionnez au moins une page ou un compte.");
-    if (!message && !args.images.length) throw new Error("Ajoutez un texte ou une photo.");
+    const videos = args.videos ?? [];
+    // Les réseaux ne mélangent pas vidéo et photos : Facebook publie une vidéo
+    // seule, Instagram en fait un Reel. Le refuser ici évite une publication
+    // amputée de ses photos sans que personne ne l'ait demandé.
+    if (videos.length && args.images.length) throw new Error("Une publication porte soit des photos, soit une vidéo.");
+    if (videos.length > 1) throw new Error("Une publication ne porte qu'une seule vidéo.");
+    if (!message && !args.images.length && !videos.length) throw new Error("Ajoutez un texte, une photo ou une vidéo.");
     if (message.length > (instagramIds.length ? 2200 : 63206)) throw new Error("Le texte dépasse la longueur autorisée pour le réseau choisi.");
     if (args.images.length > 10) throw new Error("Ajoutez au maximum 10 photos.");
-    if (instagramIds.length && !args.images.length) throw new Error("Instagram nécessite au moins une photo.");
+    if (instagramIds.length && !args.images.length && !videos.length) throw new Error("Instagram nécessite au moins une photo ou une vidéo.");
     const now = Date.now();
     if (args.scheduledFor !== undefined && (!Number.isFinite(args.scheduledFor) || args.scheduledFor < now + 60_000 || args.scheduledFor > now + 180 * 86400_000)) {
       throw new Error("Choisissez une date entre une minute et six mois à partir de maintenant.");
@@ -37,6 +52,12 @@ export const create = mutation({
       const file = await ctx.db.system.get(image);
       if (!file?.contentType?.startsWith("image/")) throw new Error("Une photo est introuvable ou son format est invalide.");
       if (instagramIds.length && file.contentType !== "image/jpeg") throw new Error("Pour Instagram, utilisez des photos JPEG.");
+    }
+    for (const video of videos) {
+      const file = await ctx.db.system.get(video);
+      if (!file?.contentType?.startsWith("video/")) throw new Error("La vidéo est introuvable ou son format est invalide.");
+      if (file.size > MAX_VIDEO_BYTES) throw new Error(`Vidéo trop lourde (${Math.round(file.size / 1024 / 1024)} Mo) : ${MAX_VIDEO_BYTES / 1024 / 1024} Mo au maximum.`);
+      if (instagramIds.length && !REEL_CONTENT_TYPES.has(file.contentType)) throw new Error("Pour Instagram, utilisez une vidéo MP4 ou MOV.");
     }
     const pages = (await ctx.db.query("socialFacebookPages").collect()).filter(p => p.active);
     const targets = [
@@ -58,11 +79,11 @@ export const create = mutation({
       mesoutilsPostId = await ctx.db.insert("posts", {
         authorClerkId: identity.subject, authorName,
         authorImageUrl: (identity as { pictureUrl?: string }).pictureUrl,
-        body: message, images: args.images, createdAt: now, pinned: false,
+        body: message, images: args.images, videos, createdAt: now, pinned: false,
       });
     }
     const id = await ctx.db.insert("socialCompositions", {
-      requestKey: args.requestKey, message, images: args.images,
+      requestKey: args.requestKey, message, images: args.images, videos,
       authorClerkId: identity.subject, authorName, scheduledFor: args.scheduledFor,
       mesoutilsPostId, createdAt: now,
     });
@@ -144,7 +165,7 @@ export const deliver = internalAction({
     const { delivery, composition } = work;
     try {
       const author = { clerkId: composition.authorClerkId, name: composition.authorName };
-      const source = { composerId: composition._id, message: composition.message, photoStorageIds: composition.images };
+      const source = { composerId: composition._id, message: composition.message, photoStorageIds: composition.images, videoStorageIds: composition.videos ?? [] };
       let postId: string | undefined;
       if (delivery.network === "facebook") {
         const result = await sendFacebook(ctx, { ...source, pageId: delivery.targetId }, author);

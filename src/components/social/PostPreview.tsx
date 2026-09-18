@@ -95,12 +95,15 @@ export function FacebookPostPreview({
   accountImageUrl,
   message,
   photoUrls,
+  videoUrl,
   scheduledFor,
 }: {
   accountName: string;
   accountImageUrl?: string;
   message: string;
   photoUrls: string[];
+  /** Vidéo du post : un post vidéo ne porte pas de photos à côté. */
+  videoUrl?: string;
   scheduledFor?: number | null;
 }) {
   const when = scheduledFor
@@ -126,7 +129,11 @@ export function FacebookPostPreview({
         <p className="px-3 pb-3 text-[14px] italic text-zinc-400">Message vide</p>
       )}
 
-      <PhotoGrid urls={photoUrls} />
+      {videoUrl ? (
+        <video src={videoUrl} controls playsInline preload="metadata" className="max-h-80 w-full bg-black object-contain" />
+      ) : (
+        <PhotoGrid urls={photoUrls} />
+      )}
 
       <div className="flex items-center justify-around border-t border-zinc-200 px-3 py-1.5 text-[13px] font-semibold text-zinc-500">
         <span className="flex items-center gap-1.5">
@@ -148,11 +155,14 @@ export function InstagramPostPreview({
   accountImageUrl,
   caption,
   photoUrls,
+  videoUrl,
 }: {
   accountName: string;
   accountImageUrl?: string;
   caption: string;
   photoUrls: string[];
+  /** Vidéo du post : Instagram la publie en Reel, seule et au format vertical. */
+  videoUrl?: string;
 }) {
   const handle = accountName.replace(/^@/, "");
   return (
@@ -164,7 +174,14 @@ export function InstagramPostPreview({
 
       {/* Instagram n'a pas de post sans image : l'aperçu le montre plutôt que
           de laisser croire à une publication texte possible. */}
-      {photoUrls.length > 0 ? (
+      {videoUrl ? (
+        <div className="relative bg-black">
+          <video src={videoUrl} controls playsInline preload="metadata" className="aspect-[4/5] w-full bg-black object-contain" />
+          <span className="absolute right-3 top-3 rounded-full bg-black/60 px-2 py-0.5 text-[11px] font-semibold text-white">
+            Reel
+          </span>
+        </div>
+      ) : photoUrls.length > 0 ? (
         <div className="relative">
           <img src={photoUrls[0]} alt="" className="aspect-square w-full bg-zinc-100 object-cover" />
           {photoUrls.length > 1 ? (
@@ -190,7 +207,7 @@ export function InstagramPostPreview({
         <div className="flex aspect-square w-full items-center justify-center bg-zinc-100 text-center text-sm text-zinc-500">
           <span className="flex flex-col items-center gap-2">
             <InstagramIcon className="h-6 w-6 text-zinc-400" />
-            Ajoutez une photo : Instagram n'accepte pas de publication sans image.
+            Ajoutez une photo ou une vidéo : Instagram n'accepte pas de publication sans média.
           </span>
         </div>
       )}
