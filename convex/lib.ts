@@ -626,9 +626,9 @@ export async function fetchAllClerkUsers(
 export async function fetchInternalClerkDirectory(
   secret: string,
   selfEmail: string,
-): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> {
+): Promise<Array<{ clerkId: string; name: string; email?: string; imageUrl: string | null }>> {
   const self = selfEmail.trim().toLowerCase();
-  const directory: Array<{ clerkId: string; name: string; imageUrl: string | null }> = [];
+  const directory: Array<{ clerkId: string; name: string; email?: string; imageUrl: string | null }> = [];
 
   for (const user of await fetchAllClerkUsers(secret)) {
     const clerkId = typeof user.id === "string" ? user.id : "";
@@ -644,6 +644,7 @@ export async function fetchInternalClerkDirectory(
         name: user.username,
         email,
       }),
+      email,
       imageUrl: typeof user.image_url === "string" ? user.image_url : null,
     });
   }

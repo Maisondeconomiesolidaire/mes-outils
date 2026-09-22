@@ -3336,6 +3336,15 @@ export default defineSchema(
         clerkId: v.string(),
         name: v.string(),
         imageUrl: v.optional(v.string()),
+        /** RACI : les anciennes affectations sans rôle restent des réalisateurs. */
+        role: v.optional(
+          v.union(
+            v.literal("responsible"),
+            v.literal("accountable"),
+            v.literal("consulted"),
+            v.literal("informed"),
+          ),
+        ),
       }),
     ),
     dueAt: v.optional(v.number()),

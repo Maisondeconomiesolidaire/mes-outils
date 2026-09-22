@@ -32,11 +32,31 @@ const taskPriority = v.union(
   v.literal("urgent"),
 );
 
+const assigneeRole = v.union(
+  v.literal("responsible"),
+  v.literal("accountable"),
+  v.literal("consulted"),
+  v.literal("informed"),
+);
+
 const assignee = v.object({
   clerkId: v.string(),
   name: v.string(),
   imageUrl: v.optional(v.string()),
+  role: v.optional(assigneeRole),
 });
+
+const MESTODO_DIRECTORY_EMAILS = new Set([
+  "s.lahmer@eco-solidaire.fr",
+  "g.henry@eco-solidaire.fr",
+  "w.morris@eco-solidaire.fr",
+  "g.daugeron@eco-solidaire.fr",
+  "a.dargent@eco-solidaire.fr",
+  "s.tiennot@eco-solidaire.fr",
+  "y.prata@eco-solidaire.fr",
+  "s.dumoulin@eco-solidaire.fr",
+  "a.decuigniere@eco-solidaire.fr",
+]);
 
 function requiredText(value: string, label: string, maxLength: number) {
   const text = value.trim();
@@ -60,19 +80,22 @@ function optionalDate(value: number | null | undefined) {
 }
 
 function cleanAssignees(
-  values: Array<{ clerkId: string; name: string; imageUrl?: string }>,
+  values: Array<{ clerkId: string; name: string; imageUrl?: string; role?: "responsible" | "accountable" | "consulted" | "informed" }>,
 ) {
-  if (values.length > 20) throw new Error("20 responsables maximum par tâche.");
+  if (values.length > 40) throw new Error("40 participants maximum par tâche.");
   const seen = new Set<string>();
   return values.flatMap((value) => {
     const clerkId = value.clerkId.trim();
     const name = value.name.trim();
-    if (!clerkId || !name || seen.has(clerkId)) return [];
-    seen.add(clerkId);
+    const role = value.role ?? "responsible";
+    const uniqueKey = `${role}:${clerkId}`;
+    if (!clerkId || !name || seen.has(uniqueKey)) return [];
+    seen.add(uniqueKey);
     return [{
       clerkId,
       name,
       imageUrl: value.imageUrl?.trim() || undefined,
+      role,
     }];
   });
 }
@@ -270,7 +293,7 @@ export const updateTask = mutation({
       description?: string;
       status?: "todo" | "in_progress" | "done";
       priority?: "low" | "medium" | "high" | "urgent";
-      assignees?: Array<{ clerkId: string; name: string; imageUrl?: string }>;
+      assignees?: Array<{ clerkId: string; name: string; imageUrl?: string; role?: "responsible" | "accountable" | "consulted" | "informed" }>;
       dueAt?: number;
       completedAt?: number;
       updatedAt: number;
@@ -390,20 +413,16 @@ export const removeNote = mutation({
 /** Annuaire interne Clerk de production pour l'affectation des tâches. */
 export const listDirectory = action({
   args: {},
-  handler: async (ctx): Promise<Array<{ clerkId: string; name: string; imageUrl: string | null }>> => {
+  handler: async (ctx): Promise<Array<{ clerkId: string; name: string; email: string; imageUrl: string | null }>> => {
     const access = await ctx.runQuery(api.permissions.myAccess, {});
     if (!accessAllows(access, PAGE_KEY, "read")) {
       throw new Error("Accès insuffisant à Mes Todo.");
     }
-    const identity = await requireUser(ctx);
     const secret = env.CLERK_SECRET_KEY;
     if (!secret) throw new Error("Annuaire indisponible.");
-    const directory = await fetchInternalClerkDirectory(secret, access.email ?? "");
-    directory.push({
-      clerkId: identity.subject,
-      name: formatUserName(identity),
-      imageUrl: identity.pictureUrl ?? null,
-    });
-    return directory.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+    const directory = await fetchInternalClerkDirectory(secret, "");
+    return directory
+      .filter((person): person is typeof person & { email: string } => Boolean(person.email && MESTODO_DIRECTORY_EMAILS.has(person.email)))
+      .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
