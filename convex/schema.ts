@@ -3316,6 +3316,8 @@ export default defineSchema(
   /** Tâches d'un projet Mes Todo. */
   todoTasks: defineTable({
     projectId: v.id("todoProjects"),
+    /** Une seule profondeur de sous-tâches, à la manière d'une tâche Asana. */
+    parentTaskId: v.optional(v.id("todoTasks")),
     title: v.string(),
     description: v.optional(v.string()),
     status: v.union(
@@ -3345,6 +3347,7 @@ export default defineSchema(
     updatedAt: v.number(),
   })
     .index("by_projectId", ["projectId"])
+    .index("by_parentTaskId", ["parentTaskId"])
     .index("by_projectId_and_status", ["projectId", "status"])
     .index("by_dueAt", ["dueAt"]),
 

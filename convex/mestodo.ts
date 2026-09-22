@@ -116,6 +116,20 @@ export const getProject = query({
   },
 });
 
+/** Vue transversale pour l'accueil et « Mes tâches ». */
+export const getWorkspace = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const identity = await requireUser(ctx);
+    const [projects, tasks] = await Promise.all([
+      ctx.db.query("todoProjects").withIndex("by_updatedAt").order("desc").take(200),
+      ctx.db.query("todoTasks").order("desc").take(500),
+    ]);
+    return { currentClerkId: identity.subject, projects, tasks };
+  },
+});
+
 export const createProject = mutation({
   args: {
     title: v.string(),
@@ -192,6 +206,7 @@ export const removeProject = mutation({
 export const createTask = mutation({
   args: {
     projectId: v.id("todoProjects"),
+    parentTaskId: v.optional(v.id("todoTasks")),
     title: v.string(),
     description: v.optional(v.string()),
     priority: taskPriority,
@@ -202,9 +217,20 @@ export const createTask = mutation({
     await requireCrmPermission(ctx, PAGE_KEY, "create");
     const identity = await requireUser(ctx);
     const project = await projectOrThrow(ctx, args.projectId);
+    if (args.parentTaskId) {
+      const parent = await ctx.db.get(args.parentTaskId);
+      if (!parent || parent.projectId !== args.projectId) throw new Error("Tâche parente introuvable.");
+      if (parent.parentTaskId) throw new Error("Une sous-tâche ne peut pas contenir de sous-tâches.");
+      const siblings = await ctx.db
+        .query("todoTasks")
+        .withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", args.parentTaskId))
+        .take(100);
+      if (siblings.length >= 100) throw new Error("100 sous-tâches maximum.");
+    }
     const now = Date.now();
     const id = await ctx.db.insert("todoTasks", {
       projectId: args.projectId,
+      parentTaskId: args.parentTaskId,
       title: requiredText(args.title, "Titre de la tâche", 180),
       description: optionalText(args.description, 4_000) ?? undefined,
       status: "todo",
@@ -217,10 +243,9 @@ export const createTask = mutation({
       createdAt: now,
       updatedAt: now,
     });
-    await ctx.db.patch(args.projectId, {
-      taskCount: project.taskCount + 1,
-      updatedAt: now,
-    });
+    await ctx.db.patch(args.projectId, args.parentTaskId
+      ? { updatedAt: now }
+      : { taskCount: project.taskCount + 1, updatedAt: now });
     return id;
   },
 });
@@ -260,12 +285,16 @@ export const updateTask = mutation({
     if (args.status !== undefined && args.status !== task.status) {
       patch.status = args.status;
       patch.completedAt = args.status === "done" ? now : undefined;
-      const project = await projectOrThrow(ctx, task.projectId);
-      const delta = args.status === "done" ? 1 : task.status === "done" ? -1 : 0;
-      await ctx.db.patch(task.projectId, {
-        completedTaskCount: Math.max(0, project.completedTaskCount + delta),
-        updatedAt: now,
-      });
+      if (task.parentTaskId) {
+        await ctx.db.patch(task.projectId, { updatedAt: now });
+      } else {
+        const project = await projectOrThrow(ctx, task.projectId);
+        const delta = args.status === "done" ? 1 : task.status === "done" ? -1 : 0;
+        await ctx.db.patch(task.projectId, {
+          completedTaskCount: Math.max(0, project.completedTaskCount + delta),
+          updatedAt: now,
+        });
+      }
     } else {
       await ctx.db.patch(task.projectId, { updatedAt: now });
     }
@@ -280,12 +309,24 @@ export const removeTask = mutation({
     const task = await ctx.db.get(taskId);
     if (!task) throw new Error("Tâche introuvable.");
     const project = await projectOrThrow(ctx, task.projectId);
+    const children = await ctx.db
+      .query("todoTasks")
+      .withIndex("by_parentTaskId", (q) => q.eq("parentTaskId", taskId))
+      .take(100);
+    for (const child of children) {
+      const childNotes = await ctx.db
+        .query("todoNotes")
+        .withIndex("by_taskId", (q) => q.eq("taskId", child._id))
+        .take(100);
+      for (const note of childNotes) await ctx.db.delete(note._id);
+      await ctx.db.delete(child._id);
+    }
     const notes = await ctx.db.query("todoNotes").withIndex("by_taskId", (q) => q.eq("taskId", taskId)).take(500);
     for (const note of notes) await ctx.db.delete(note._id);
     await ctx.db.delete(taskId);
     await ctx.db.patch(task.projectId, {
-      taskCount: Math.max(0, project.taskCount - 1),
-      completedTaskCount: Math.max(0, project.completedTaskCount - (task.status === "done" ? 1 : 0)),
+      taskCount: Math.max(0, project.taskCount - (task.parentTaskId ? 0 : 1)),
+      completedTaskCount: Math.max(0, project.completedTaskCount - (!task.parentTaskId && task.status === "done" ? 1 : 0)),
       updatedAt: Date.now(),
     });
   },
