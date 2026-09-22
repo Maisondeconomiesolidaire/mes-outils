@@ -10,6 +10,7 @@ import {
   DoorOpen,
   Hammer,
   Home,
+  ListTodo,
   MessageCircle,
   MessageSquareText,
   Newspaper,
@@ -55,6 +56,7 @@ export type AppDefinition = {
   key:
     | "recycapp"
     | "mesoutils"
+    | "mestodo"
     | "klyde"
     | "cycleenbray"
     | "bennespro"
@@ -74,7 +76,7 @@ export type AppDefinition = {
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse" | "feedback" | "batire";
+  app: "recycapp" | "mesoutils" | "mestodo" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse" | "feedback" | "batire";
   key: string;
   label: string;
   description: string;
@@ -276,6 +278,16 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
     label: "Admin Mes Outils",
     description: "Gestion transverse des droits Mes Outils et recyclerie.",
     actions: ["read", "manage"],
+  },
+];
+
+export const MESTODO_PAGES: PermissionPage[] = [
+  {
+    app: "mestodo",
+    key: "mestodo:projets",
+    label: "Projets et tâches",
+    description: "Chantiers, tâches, responsables, échéances et notes de suivi.",
+    actions: ["read", "create", "update", "delete"],
   },
 ];
 
@@ -518,10 +530,19 @@ export const BATIRE_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES, ...FEEDBACK_PAGES, ...BATIRE_PAGES];
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...MESTODO_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES, ...FEEDBACK_PAGES, ...BATIRE_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
+  {
+    key: "mestodo",
+    label: "Mes Todo",
+    description: "Projets, tâches, responsables, échéances et notes de suivi.",
+    icon: ListTodo,
+    href: "https://mestodo.groupemes.fr",
+    external: true,
+    accent: "from-indigo-500 to-violet-600",
+  },
   {
     key: "recycapp",
     label: "Recyclerie",
@@ -673,6 +694,9 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
   if (appKey === "mesoutils") {
     return access.grants.some((grant) => grant.pageKey.startsWith("mesoutils:"));
   }
+  if (appKey === "mestodo") {
+    return access.grants.some((grant) => grant.pageKey.startsWith("mestodo:"));
+  }
   if (appKey === "klyde") {
     return access.grants.some((grant) => grant.pageKey.startsWith("klyde:"));
   }
@@ -694,6 +718,7 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
 export function groupPagesByApp() {
   return [
     { key: "mesoutils", label: "Mes Outils", pages: MESOUTILS_PAGES },
+    { key: "mestodo", label: "Mes Todo", pages: MESTODO_PAGES },
     { key: "recycapp", label: "Recyclerie", pages: RECYCAPP_PAGES },
     { key: "klyde", label: "Klyde", pages: KLYDE_PAGES },
     { key: "cycleenbray", label: "Cycle en Bray", pages: CYCLEENBRAY_PAGES },

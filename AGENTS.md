@@ -5,22 +5,23 @@
 
 # Architecture (à connaître avant d'écrire une ligne)
 
-Les **7 apps** — Mes Outils (`~/mesoutils`), Recycapp (`~/recycapp`), Klyde
+Les **10 apps** — Mes Outils (`~/mesoutils`), Recycapp (`~/recycapp`), Klyde
 (`~/klyde`), Cycle en Bray (`~/cycleenbray`), Bennes Pro (`~/bennepro`),
-Pointeuse (`~/pointeuselsdb`), Feedback (`~/feedback`) — partagent :
+Pointeuse (`~/pointeuselsdb`), Feedback (`~/feedback`), Recyc Caisse
+(`~/recyccaisse`), Bâtire (`~/batire`) et Mes Todo (`~/mestodo`) — partagent :
 
 - **UN déploiement Convex de PRODUCTION** : `prod:hip-marten-394`
   (`https://hip-marten-394.eu-west-1.convex.cloud`). Données réelles,
   **pas de staging**.
 - **UNE instance Clerk de PRODUCTION** : issuer `https://clerk.groupemes.fr`
-  (`pk_live_…`, identique dans les 7 `.env.local`). Mêmes comptes et mêmes
+  (`pk_live_…`, identique dans les 10 `.env.local`). Mêmes comptes et mêmes
   `clerkId` dans toutes les apps.
 - **UN dossier `convex/` canonique** : `~/mesoutils/convex`. Les `convex/` des
   autres dépôts sont des **copies en lecture seule** pour le typecheck local.
 
 Chaque app a son propre dépôt GitHub et son propre projet Vercel — mais Vercel
 ne déploie que le **frontend**. Le backend est commun : casser une fonction ou
-une table Convex peut casser les 7 apps d'un coup. C'est la cause classique de
+une table Convex peut casser les 10 apps d'un coup. C'est la cause classique de
 « je modifie l'app X et une fonctionnalité de l'app Y meurt ».
 
 ## Règles backend (Convex)
@@ -42,14 +43,15 @@ une table Convex peut casser les 7 apps d'un coup. C'est la cause classique de
    script** : sans ça, sa copie `convex/` dérive en silence et son frontend
    typecheck contre un backend qui n'existe pas.
 5. **Avant de modifier ou supprimer une fonction/table/champ partagé, grep son
-   nom dans les `src/` des 7 dépôts** (`grep -rl "nomFonction"
+   nom dans les `src/` des 10 dépôts** (`grep -rl "nomFonction"
    ~/mesoutils/src ~/recycapp/src ~/klyde/src ~/cycleenbray/src ~/bennepro/src
-   ~/pointeuselsdb/src ~/feedback/src`). Une fonction sans usage dans CETTE app
+   ~/pointeuselsdb/src ~/feedback/src ~/recyccaisse/src ~/batire/src
+   ~/mestodo/src`). Une fonction sans usage dans CETTE app
    peut être vitale ailleurs.
 6. **Schéma : changements ADDITIFS seulement** (nouveau champ `v.optional`,
    nouvelle table, nouvel index). Renommer, supprimer ou rétrécir un champ =
    migration en 3 temps (élargir → migrer les données → rétrécir), validée sur
-   les 7 apps. Ne « nettoie » jamais un champ que tu crois inutilisé.
+   les 10 apps. Ne « nettoie » jamais un champ que tu crois inutilisé.
 7. **Les données sont réelles.** Pas de mutation de test contre la prod ;
    vérifie en lecture (`npx convex run … --prod`, `npx convex data … --prod`,
    `npx convex logs --prod`). `CONVEX_DEPLOYMENT` est vide dans `.env.local` :
@@ -65,10 +67,10 @@ une table Convex peut casser les 7 apps d'un coup. C'est la cause classique de
 ## Règles auth (Clerk)
 
 - **Une seule instance Clerk PROD.** `VITE_CLERK_PUBLISHABLE_KEY` doit rester
-  la clé `pk_live_…` (issuer `clerk.groupemes.fr`) dans les 7 apps, et
+  la clé `pk_live_…` (issuer `clerk.groupemes.fr`) dans les 10 apps, et
   `convex/auth.config.ts` pointe sur ce même issuer. Ne réintroduis **jamais**
   une clé dev/test dans une app : ses utilisateurs obtiennent d'autres
-  `identity.subject` et « perdent » leurs données dans les 7 apps.
+  `identity.subject` et « perdent » leurs données dans les 10 apps.
 - **`CLERK_SECRET_KEY` vit dans les variables d'env du déploiement Convex
   prod** (`npx convex env list --prod`), jamais dans les `.env.local` ni dans
   le code.
@@ -88,7 +90,7 @@ une table Convex peut casser les 7 apps d'un coup. C'est la cause classique de
 
 ## Règles frontend partagé (portail d'authentification)
 
-Les 8 apps web partagent la même instance Clerk et **le même écran de connexion
+Les 9 apps web partagent la même instance Clerk et **le même écran de connexion
 / inscription** (« Auth Switch » : formulaire qui glisse, panneaux qui se
 croisent).
 
@@ -121,7 +123,7 @@ croisent).
    `sync-auth-portal.sh` si le portail d'authentification a bougé).
 2. Typecheck OK : `npx tsc -p convex/tsconfig.json --noEmit` et
    `npx tsc -p tsconfig.app.json --noEmit` dans l'app touchée.
-3. Fonction/table partagée modifiée → usages greppés dans les 7 dépôts.
+3. Fonction/table partagée modifiée → usages greppés dans les 10 dépôts.
 4. Backend déployé depuis `~/mesoutils` uniquement, état du working tree connu
    et commité.
 5. Frontend : un push sur `main` du dépôt d'une app déclenche son déploiement

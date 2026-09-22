@@ -54,6 +54,7 @@ import type * as livraison from "../livraison.js";
 import type * as mesoutilsEmails from "../mesoutilsEmails.js";
 import type * as mesoutilsNotifications from "../mesoutilsNotifications.js";
 import type * as messages from "../messages.js";
+import type * as mestodo from "../mestodo.js";
 import type * as notifications from "../notifications.js";
 import type * as paymentLinks from "../paymentLinks.js";
 import type * as pdf from "../pdf.js";
@@ -137,6 +138,7 @@ declare const fullApi: ApiFromModules<{
   mesoutilsEmails: typeof mesoutilsEmails;
   mesoutilsNotifications: typeof mesoutilsNotifications;
   messages: typeof messages;
+  mestodo: typeof mestodo;
   notifications: typeof notifications;
   paymentLinks: typeof paymentLinks;
   pdf: typeof pdf;

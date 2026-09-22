@@ -139,6 +139,7 @@ function isAdminEmail(email: string) {
 const SIGNUP_APP_LABELS: Record<string, string> = {
   recycapp: "Recyclerie",
   mesoutils: "Mes Outils",
+  mestodo: "Mes Todo",
   klyde: "Klyd",
   cycleenbray: "Cycle en Bray",
   bennespro: "Bennes & Pro",
@@ -936,6 +937,7 @@ function AppBlock({
 /** Logo de chaque app (Mes Outils et Feedback n'ont pas d'entrée dans `APPS`). */
 const APP_LOGOS: Record<string, string | undefined> = {
   mesoutils: "/mesoutils-light.png",
+  mestodo: undefined,
   recycapp: "/recyclerie-logo.png",
   klyde: "/klyd-logo.png",
   cycleenbray: "/cycle-en-bray-logo.webp",

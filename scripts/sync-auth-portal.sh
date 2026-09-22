@@ -3,7 +3,7 @@
 # sync-auth-portal.sh — Propage le PORTAIL D'AUTHENTIFICATION canonique
 # (« Auth Switch ») de Mes Outils vers toutes les apps web de l'écosystème.
 #
-# Pourquoi : les 8 apps web partagent la même instance Clerk et doivent offrir
+# Pourquoi : les 9 apps web partagent la même instance Clerk et doivent offrir
 # le même écran de connexion / inscription. Le composant a déjà dérivé une fois
 # — Recycapp, Cycle en Bray et Bennes Pro avaient le `.tsx` mais PAS le CSS,
 # donc un portail sans mise en page ni animation. Ce script supprime la dérive.
@@ -26,7 +26,7 @@
 set -uo pipefail
 
 CANON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # = ~/mesoutils
-TARGETS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" "$HOME/feedback" "$HOME/batire" )
+TARGETS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" "$HOME/feedback" "$HOME/batire" "$HOME/mestodo" )
 
 COMPONENT="$CANON/src/components/ui/auth-switch.tsx"
 CSS="$CANON/src/index.css"
