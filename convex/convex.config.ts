@@ -32,8 +32,6 @@ export default defineApp({
     /** OAuth Google (client « Application Web ») — boîte Gmail Vinted de Klyd. */
     GOOGLE_CLIENT_ID: v.optional(v.string()),
     GOOGLE_CLIENT_SECRET: v.optional(v.string()),
-    /** Clé serveur Google Maps Routes API : calcul des trajets domicile → site RH. */
-    GOOGLE_MAPS_API_KEY: v.optional(v.string()),
     /** URL publique de Klyd : retour de l'utilisateur après le consentement. */
     KLYDE_APP_URL: v.optional(v.string()),
   },

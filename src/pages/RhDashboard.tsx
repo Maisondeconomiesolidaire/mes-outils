@@ -161,7 +161,7 @@ export function RhDashboard() {
           <iframe
             title={`Carte de ${mapEmployee.fullName}`}
             className="h-full min-h-[400px] w-full rounded-xl border-0"
-            src={`https://www.google.com/maps?q=${encodeURIComponent(mapEmployee.address)}&output=embed`}
+            src={`https://maps.google.com/maps?q=${encodeURIComponent(mapEmployee.address)}&output=embed&t=k&z=19`}
             loading="lazy"
             referrerPolicy="no-referrer-when-downgrade"
           />

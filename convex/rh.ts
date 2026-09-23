@@ -18,6 +18,7 @@ import {
 } from "./lib";
 import { bytesToBase64, type EmailAttachment } from "./emails";
 import type { Doc, Id } from "./_generated/dataModel";
+import { drivingRoute, geocode } from "./livraison";
 
 const RH_PAGE_KEY = "mesoutils:rh";
 const RH_DASHBOARD_PAGE_KEY = "mesoutils:rh-tableau-de-bord";
@@ -429,41 +430,19 @@ const WORKPLACE_ADDRESSES: Record<Doc<"hrEmployees">["structure"], string> = {
   "Recyclerie 76": "Gournay-en-Bray, France",
 };
 
-async function calculateGoogleRoute(origin: string, destination: string) {
-  if (!env.GOOGLE_MAPS_API_KEY) {
-    throw new Error("GOOGLE_MAPS_API_KEY n'est pas configurée sur le déploiement Convex.");
+/** Même calcul routier que les demandes de collecte Recycapp. */
+async function calculateCommuteRoute(origin: string, destination: string) {
+  if (!env.MAPBOX_ACCESS_TOKEN) {
+    throw new Error("MAPBOX_ACCESS_TOKEN n'est pas configuré sur le déploiement Convex.");
   }
-  const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": env.GOOGLE_MAPS_API_KEY,
-      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
-    },
-    body: JSON.stringify({
-      origin: { address: origin },
-      destination: { address: destination },
-      travelMode: "DRIVE",
-      routingPreference: "TRAFFIC_UNAWARE",
-      languageCode: "fr",
-      units: "METRIC",
-    }),
-  });
-  if (!response.ok) {
-    throw new Error(`Google Maps n'a pas pu calculer le trajet (${response.status}).`);
-  }
-  const payload = (await response.json()) as {
-    routes?: Array<{ distanceMeters?: number; duration?: string }>;
-  };
-  const route = payload.routes?.[0];
-  if (!route || typeof route.distanceMeters !== "number") {
-    throw new Error("Aucun itinéraire routier n'a été trouvé.");
-  }
+  const [from, to] = await Promise.all([
+    geocode(origin, env.MAPBOX_ACCESS_TOKEN),
+    geocode(destination, env.MAPBOX_ACCESS_TOKEN),
+  ]);
+  const route = await drivingRoute(from, to, env.MAPBOX_ACCESS_TOKEN);
   return {
-    distanceKm: Math.round((route.distanceMeters / 1000) * 10) / 10,
-    durationMinutes: route.duration
-      ? Math.round(Number.parseInt(route.duration, 10) / 60)
-      : undefined,
+    distanceKm: Math.round(route.km * 10) / 10,
+    durationMinutes: Math.round(route.minutes),
   };
 }
 
@@ -487,7 +466,7 @@ export const calculateDashboardDistances = action({
           return { employeeId: employee._id, error: "Adresse du salarié non renseignée." };
         }
         try {
-          return { employeeId: employee._id, ...(await calculateGoogleRoute(employee.address, WORKPLACE_ADDRESSES[employee.structure])) };
+          return { employeeId: employee._id, ...(await calculateCommuteRoute(employee.address, WORKPLACE_ADDRESSES[employee.structure])) };
         } catch (error) {
           return { employeeId: employee._id, error: error instanceof Error ? error.message : "Calcul impossible." };
         }
