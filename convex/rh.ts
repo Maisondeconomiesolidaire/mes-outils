@@ -391,7 +391,27 @@ export const listDashboardEmployees = query({
   handler: async (ctx) => {
     await requireCrmPermission(ctx, RH_DASHBOARD_PAGE_KEY, "read");
     const employees = await ctx.db.query("hrEmployees").withIndex("by_fullName").collect();
+    const latestContracts = await Promise.all(
+      employees.map((employee) =>
+        ctx.db
+          .query("hrContracts")
+          .withIndex("by_employee_and_requestedAt", (q) => q.eq("employeeId", employee._id))
+          .order("desc")
+          .first(),
+      ),
+    );
+    const todayInParis = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Europe/Paris",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+
     return employees
+      .filter((_, index) => {
+        const endDate = latestContracts[index]?.payload.date_fin_contrat;
+        return Boolean(endDate && endDate >= todayInParis);
+      })
       .map(({ _id, firstName, lastName, fullName, address, structure, active, commuteDistanceKm, commuteDurationMinutes, commuteCalculatedAt, commuteWorkplaceAddress, commuteLongitude, commuteLatitude }) => ({
         _id,
         firstName,
