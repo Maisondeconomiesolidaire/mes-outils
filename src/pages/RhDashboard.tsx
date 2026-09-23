@@ -1,12 +1,13 @@
 import { useAction, useQuery } from "convex/react";
-import { ArrowDownUp, ChevronDown, Loader2, MapPin, Navigation, Search, UsersRound } from "lucide-react";
+import { ChevronDown, Loader2, MapPin, Navigation, Search, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Input, Select } from "../components/ui/Field";
+import { Input } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
+import { PeriodDropdown } from "../components/ui/PeriodDropdown";
 import { FullSpinner } from "../components/ui/Spinner";
 import { EmployeeMap } from "../components/rh/EmployeeMap";
 import { cn } from "../lib/cn";
@@ -45,7 +46,7 @@ export function RhDashboard() {
   const [distanceError, setDistanceError] = useState<string | null>(null);
   const [mapEmployee, setMapEmployee] = useState<DashboardEmployee | null>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
-  const [employeeSort, setEmployeeSort] = useState<"structure" | "distance_desc">("structure");
+  const [employeeSort, setEmployeeSort] = useState<"name" | "distance_desc" | "distance_asc">("name");
 
   const groups = useMemo(() => {
     const normalizedSearch = employeeSearch.trim().toLocaleLowerCase("fr");
@@ -67,10 +68,13 @@ export function RhDashboard() {
       .map(([structure, people]) => ({
         structure,
         people: [...people].sort((left, right) => {
-          if (employeeSort === "distance_desc") {
+          if (employeeSort === "distance_desc" || employeeSort === "distance_asc") {
             const leftDistance = distanceFor(left)?.distanceKm ?? Number.NEGATIVE_INFINITY;
             const rightDistance = distanceFor(right)?.distanceKm ?? Number.NEGATIVE_INFINITY;
-            return rightDistance - leftDistance || left.fullName.localeCompare(right.fullName, "fr");
+            const distanceOrder = employeeSort === "distance_desc"
+              ? rightDistance - leftDistance
+              : (leftDistance === Number.NEGATIVE_INFINITY ? Number.POSITIVE_INFINITY : leftDistance) - (rightDistance === Number.NEGATIVE_INFINITY ? Number.POSITIVE_INFINITY : rightDistance);
+            return distanceOrder || left.fullName.localeCompare(right.fullName, "fr");
           }
           return left.fullName.localeCompare(right.fullName, "fr");
         }),
@@ -132,13 +136,16 @@ export function RhDashboard() {
             aria-label="Rechercher un salarié"
           />
         </div>
-        <div className="relative sm:w-64">
-          <ArrowDownUp className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
-          <Select className="pl-9" value={employeeSort} onChange={(event) => setEmployeeSort(event.target.value as "structure" | "distance_desc")} aria-label="Trier la liste des salariés">
-            <option value="structure">Trier par nom</option>
-            <option value="distance_desc">Distance décroissante</option>
-          </Select>
-        </div>
+        <PeriodDropdown
+          label="Trier les salariés"
+          value={employeeSort}
+          onValueChange={(value) => setEmployeeSort(value as "name" | "distance_desc" | "distance_asc")}
+          options={[
+            { value: "name", label: "Par nom" },
+            { value: "distance_desc", label: "Distance décroissante" },
+            { value: "distance_asc", label: "Distance croissante" },
+          ]}
+        />
       </div>
 
       {distanceError ? (
