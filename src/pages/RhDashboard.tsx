@@ -1,11 +1,11 @@
 import { useAction, useQuery } from "convex/react";
-import { ChevronDown, Loader2, MapPin, Navigation, Search, UsersRound } from "lucide-react";
+import { ArrowDownUp, ChevronDown, Loader2, MapPin, Navigation, Search, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Input } from "../components/ui/Field";
+import { Input, Select } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { FullSpinner } from "../components/ui/Spinner";
 import { EmployeeMap } from "../components/rh/EmployeeMap";
@@ -45,6 +45,7 @@ export function RhDashboard() {
   const [distanceError, setDistanceError] = useState<string | null>(null);
   const [mapEmployee, setMapEmployee] = useState<DashboardEmployee | null>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
+  const [employeeSort, setEmployeeSort] = useState<"structure" | "distance_desc">("structure");
 
   const groups = useMemo(() => {
     const normalizedSearch = employeeSearch.trim().toLocaleLowerCase("fr");
@@ -63,8 +64,18 @@ export function RhDashboard() {
         const rightIndex = STRUCTURE_ORDER.indexOf(right);
         return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex) || left.localeCompare(right, "fr");
       })
-      .map(([structure, people]) => ({ structure, people }));
-  }, [employeeSearch, employees]);
+      .map(([structure, people]) => ({
+        structure,
+        people: [...people].sort((left, right) => {
+          if (employeeSort === "distance_desc") {
+            const leftDistance = distanceFor(left)?.distanceKm ?? Number.NEGATIVE_INFINITY;
+            const rightDistance = distanceFor(right)?.distanceKm ?? Number.NEGATIVE_INFINITY;
+            return rightDistance - leftDistance || left.fullName.localeCompare(right.fullName, "fr");
+          }
+          return left.fullName.localeCompare(right.fullName, "fr");
+        }),
+      }));
+  }, [distances, employeeSearch, employeeSort, employees]);
 
   if (employees === undefined) {
     return <FullSpinner label="Chargement du tableau de bord RH..." />;
@@ -110,15 +121,24 @@ export function RhDashboard() {
 
       <EmployeeMap employees={employees} />
 
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
-        <Input
-          className="pl-9"
-          value={employeeSearch}
-          onChange={(event) => setEmployeeSearch(event.target.value)}
-          placeholder="Rechercher un salarié…"
-          aria-label="Rechercher un salarié"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <Input
+            className="pl-9"
+            value={employeeSearch}
+            onChange={(event) => setEmployeeSearch(event.target.value)}
+            placeholder="Rechercher un salarié…"
+            aria-label="Rechercher un salarié"
+          />
+        </div>
+        <div className="relative sm:w-64">
+          <ArrowDownUp className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <Select className="pl-9" value={employeeSort} onChange={(event) => setEmployeeSort(event.target.value as "structure" | "distance_desc")} aria-label="Trier la liste des salariés">
+            <option value="structure">Trier par nom</option>
+            <option value="distance_desc">Distance décroissante</option>
+          </Select>
+        </div>
       </div>
 
       {distanceError ? (

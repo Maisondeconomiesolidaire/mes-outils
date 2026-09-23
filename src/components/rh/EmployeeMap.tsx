@@ -26,11 +26,21 @@ type CommuteRoute = {
   coordinates: number[][];
 };
 
-function createPin() {
+function pinColorForStructure(structure: string) {
+  const normalized = structure.toLocaleLowerCase("fr");
+  if (normalized.includes("recyclerie") || normalized.includes("sens du bray")) return "#f97316";
+  if (normalized.includes("pays de bray emploi")) return "#2563eb";
+  if (normalized.includes("pays de bray services")) return "#64748b";
+  return "#22c55e";
+}
+
+function createPin(structure: string) {
   const pin = document.createElement("button");
   pin.type = "button";
   pin.setAttribute("aria-label", "Voir les informations du salarié");
-  pin.style.cssText = "width:29px;height:29px;border:3px solid white;border-radius:999px;background:#22c55e;box-shadow:0 4px 12px rgba(22,101,52,.45);cursor:pointer;";
+  const color = pinColorForStructure(structure);
+  pin.dataset.baseColor = color;
+  pin.style.cssText = `width:29px;height:29px;border:3px solid white;border-radius:999px;background:${color};box-shadow:0 4px 12px rgba(15,23,42,.38);cursor:pointer;`;
   return pin;
 }
 
@@ -85,14 +95,14 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
 
     let activePin: HTMLButtonElement | null = null;
     const markers = points.map((employee) => {
-      const pin = createPin();
+      const pin = createPin(employee.structure);
       const marker = new mapboxgl.Marker({ element: pin, anchor: "bottom" })
         .setLngLat([employee.commuteLongitude, employee.commuteLatitude])
         .addTo(map);
       pin.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (activePin && activePin !== pin) activePin.style.background = "#22c55e";
+        if (activePin && activePin !== pin) activePin.style.background = activePin.dataset.baseColor ?? "#22c55e";
         pin.style.background = "#2563eb";
         activePin = pin;
         clearRoute();
@@ -136,6 +146,11 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
           <h2 className="text-lg font-extrabold tracking-tight text-[var(--foreground)]">Carte des salariés</h2>
         </div>
         <span className="text-sm text-[var(--muted-foreground)]">{points.length} adresse{points.length > 1 ? "s" : ""} positionnée{points.length > 1 ? "s" : ""}</span>
+      </div>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-[var(--border)] px-5 py-2.5 text-xs font-semibold text-[var(--muted-foreground)]">
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />Recycleries &amp; LSDB</span>
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-600" />PBE</span>
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-slate-500" />PBS</span>
       </div>
       {points.length > 0 ? (
         <div className="relative h-[420px] w-full overflow-hidden">
