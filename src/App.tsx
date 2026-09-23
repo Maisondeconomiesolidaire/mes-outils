@@ -10,7 +10,6 @@ import { Notifications } from "./pages/Notifications";
 import { Portail } from "./pages/Portail";
 import { Conges } from "./pages/Conges";
 import { RessourcesHumaines } from "./pages/RessourcesHumaines";
-import { RhDashboard } from "./pages/RhDashboard";
 import { Reservations } from "./pages/Reservations";
 import { Salles } from "./pages/Salles";
 import { Equipements } from "./pages/Equipements";
@@ -82,19 +81,7 @@ export default function App() {
         />
         <Route
           path="/rh"
-          element={
-            <RequirePermission pageKey="mesoutils:rh">
-              <RessourcesHumaines />
-            </RequirePermission>
-          }
-        />
-        <Route
-          path="/rh/tableau-de-bord"
-          element={
-            <RequirePermission pageKey="mesoutils:rh-tableau-de-bord">
-              <RhDashboard />
-            </RequirePermission>
-          }
+          element={<RessourcesHumaines />}
         />
         <Route
           path="/messagerie"

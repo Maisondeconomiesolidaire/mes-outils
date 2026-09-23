@@ -11,6 +11,9 @@ import { Field, Input, Select } from "../components/ui/Field";
 import { FullSpinner } from "../components/ui/Spinner";
 import { UnderlineTabs } from "../components/ui/UnderlineTabs";
 import { cn } from "../lib/cn";
+import { canAccess } from "../lib/permissions";
+import { usePermissionsAccess, RequirePermission } from "../components/RequirePermission";
+import { RhDashboard } from "./RhDashboard";
 
 type Employee = {
   _id: Id<"hrEmployees">;
@@ -132,8 +135,33 @@ function readUnlocked() {
  */
 export function RessourcesHumaines() {
   const [unlocked, setUnlocked] = useState(readUnlocked);
+  const access = usePermissionsAccess();
+  const canManageRh = canAccess(access, "mesoutils:rh");
+  const canViewDashboard = canAccess(access, "mesoutils:rh-tableau-de-bord");
+
+  if (access === undefined) return <FullSpinner label="Chargement des accès RH..." />;
+  // Une personne disposant uniquement du droit Tableau de bord arrive bien dans
+  // RH, sans pour autant obtenir la gestion des contrats ou des fiches complètes.
+  if (!canManageRh) {
+    return (
+      <RequirePermission pageKey="mesoutils:rh-tableau-de-bord">
+        <div className="space-y-6">
+          <SectionHeader
+            title="Ressources humaines"
+            subtitle="Tableau de bord des salariés, regroupés par structure."
+          />
+          <UnderlineTabs
+            value="dashboard"
+            onChange={() => undefined}
+            items={[{ key: "dashboard", label: "Tableau de bord", icon: Users }]}
+          />
+          <RhDashboard />
+        </div>
+      </RequirePermission>
+    );
+  }
   if (!unlocked) return <RhPasswordGate onUnlocked={() => setUnlocked(true)} />;
-  return <RhWorkspace />;
+  return <RhWorkspace canViewDashboard={canViewDashboard} />;
 }
 
 function RhPasswordGate({ onUnlocked }: { onUnlocked: () => void }) {
@@ -217,13 +245,13 @@ function RhPasswordGate({ onUnlocked }: { onUnlocked: () => void }) {
   );
 }
 
-function RhWorkspace() {
+function RhWorkspace({ canViewDashboard }: { canViewDashboard: boolean }) {
   const employees = useQuery(api.rh.listEmployees) as Employee[] | undefined;
   const contracts = useQuery(api.rh.listContracts) as ContractHistoryItem[] | undefined;
   const upsertEmployee = useMutation(api.rh.upsertEmployee);
   const generateContract = useAction(api.rh.generateContract);
 
-  const [tab, setTab] = useState<"employees" | "contracts">("employees");
+  const [tab, setTab] = useState<"dashboard" | "employees" | "contracts">("employees");
   const [employeeSection, setEmployeeSection] = useState<"new" | "list">("list");
   const [contractSection, setContractSection] = useState<"new" | "history">("new");
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
@@ -403,12 +431,13 @@ function RhWorkspace() {
         value={tab}
         onChange={setTab}
         items={[
+          ...(canViewDashboard ? [{ key: "dashboard" as const, label: "Tableau de bord", icon: Users }] : []),
           { key: "employees", label: "Salariés", icon: Users },
           { key: "contracts", label: "Contrats", icon: FileText },
         ]}
       />
 
-      {tab === "employees" ? (
+      {tab === "dashboard" ? <RhDashboard /> : tab === "employees" ? (
         <div className="space-y-5">
           <SegmentedTabs
             value={employeeSection}

@@ -626,7 +626,6 @@ export const PORTAL_NAV = [
   { to: "/equipements", label: "Équipements", pageKey: "mesoutils:equipements", icon: Boxes },
   { to: "/conges", label: "Congés", pageKey: "mesoutils:conges", icon: CalendarDays },
   { to: "/rh", label: "Ressources humaines", pageKey: "mesoutils:rh", icon: UsersRound },
-  { to: "/rh/tableau-de-bord", label: "RH — Tableau de bord", pageKey: "mesoutils:rh-tableau-de-bord", icon: UsersRound },
   { to: "/messagerie", label: "Messagerie", icon: MessageCircle },
   { to: "/notifications", label: "Notifications", icon: Bell },
   { to: "/admin", label: "Admin", adminOnly: true, icon: ShieldCheck },

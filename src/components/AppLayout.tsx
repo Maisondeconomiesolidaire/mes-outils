@@ -194,6 +194,9 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
     // La messagerie interne n'est visible que pour les utilisateurs ayant au
     // moins un droit « Mes Outils » (ou les admins).
     if (item.to === "/messagerie") return hasMesoutilsAccess;
+    if (item.to === "/rh") {
+      return canAccess(access, "mesoutils:rh") || canAccess(access, "mesoutils:rh-tableau-de-bord");
+    }
     if ("pageKey" in item && item.pageKey) return canAccess(access, item.pageKey);
     if (item.to === "/notifications") return hasMesoutilsAccess;
     return true;

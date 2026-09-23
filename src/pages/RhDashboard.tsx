@@ -1,11 +1,8 @@
 import { useAction, useQuery } from "convex/react";
 import { ChevronDown, Loader2, MapPin, Navigation, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { usePermissionsAccess } from "../components/RequirePermission";
-import { SectionHeader } from "../components/SectionHeader";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
 import { Modal } from "../components/ui/Modal";
@@ -35,7 +32,6 @@ const STRUCTURE_ORDER = [
 /** Tableau de bord RH, protégé par un droit de lecture distinct des contrats. */
 export function RhDashboard() {
   const employees = useQuery(api.rh.listDashboardEmployees) as DashboardEmployee[] | undefined;
-  const access = usePermissionsAccess();
   const calculateDistances = useAction(api.rh.calculateDashboardDistances);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [distances, setDistances] = useState<Record<string, Distance>>({});
@@ -59,7 +55,7 @@ export function RhDashboard() {
       .map(([structure, people]) => ({ structure, people }));
   }, [employees]);
 
-  if (employees === undefined || access === undefined) {
+  if (employees === undefined) {
     return <FullSpinner label="Chargement du tableau de bord RH..." />;
   }
 
@@ -85,32 +81,13 @@ export function RhDashboard() {
   }
 
   return (
-    <div className="space-y-6">
-      <SectionHeader
-        title="Ressources humaines"
-        subtitle="Tableau de bord des salariés, regroupés par structure."
-        actions={
-          <Button onClick={() => void calculateAllDistances()} disabled={calculating || employees.length === 0}>
-            {calculating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Navigation className="h-4 w-4" />}
-            {calculating ? "Calcul des distances..." : "Calculer les distances"}
-          </Button>
-        }
-      />
-
-      <nav className="border-b border-[var(--border)]" aria-label="Sections RH">
-        <div className="flex gap-6">
-          <span className="relative pb-3 text-[15px] font-semibold text-[var(--foreground)]">
-            <UsersRound className="mr-2 inline h-[18px] w-[18px]" />
-            Tableau de bord
-            <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-brand-500" />
-          </span>
-          {access.isAdmin || access.grants.some((grant) => grant.pageKey === "mesoutils:rh") ? (
-            <Link to="/rh" className="pb-3 text-[15px] font-semibold text-[var(--muted-foreground)] transition hover:text-[var(--foreground)]">
-              Gestion RH
-            </Link>
-          ) : null}
-        </div>
-      </nav>
+    <div className="space-y-5">
+      <div className="flex justify-end">
+        <Button onClick={() => void calculateAllDistances()} disabled={calculating || employees.length === 0}>
+          {calculating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Navigation className="h-4 w-4" />}
+          {calculating ? "Calcul des distances..." : "Calculer les distances"}
+        </Button>
+      </div>
 
       {distanceError ? (
         <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
