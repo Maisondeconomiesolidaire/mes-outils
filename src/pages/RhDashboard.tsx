@@ -1,10 +1,11 @@
 import { useAction, useQuery } from "convex/react";
-import { ChevronDown, Loader2, MapPin, Navigation, UsersRound } from "lucide-react";
+import { ChevronDown, Loader2, MapPin, Navigation, Search, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Input } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { FullSpinner } from "../components/ui/Spinner";
 import { cn } from "../lib/cn";
@@ -38,10 +39,15 @@ export function RhDashboard() {
   const [calculating, setCalculating] = useState(false);
   const [distanceError, setDistanceError] = useState<string | null>(null);
   const [mapEmployee, setMapEmployee] = useState<DashboardEmployee | null>(null);
+  const [employeeSearch, setEmployeeSearch] = useState("");
 
   const groups = useMemo(() => {
+    const normalizedSearch = employeeSearch.trim().toLocaleLowerCase("fr");
+    const visibleEmployees = normalizedSearch
+      ? (employees ?? []).filter((employee) => employee.fullName.toLocaleLowerCase("fr").includes(normalizedSearch))
+      : employees ?? [];
     const byStructure = new Map<string, DashboardEmployee[]>();
-    for (const employee of employees ?? []) {
+    for (const employee of visibleEmployees) {
       const current = byStructure.get(employee.structure) ?? [];
       current.push(employee);
       byStructure.set(employee.structure, current);
@@ -53,7 +59,7 @@ export function RhDashboard() {
         return (leftIndex < 0 ? 99 : leftIndex) - (rightIndex < 0 ? 99 : rightIndex) || left.localeCompare(right, "fr");
       })
       .map(([structure, people]) => ({ structure, people }));
-  }, [employees]);
+  }, [employeeSearch, employees]);
 
   if (employees === undefined) {
     return <FullSpinner label="Chargement du tableau de bord RH..." />;
@@ -91,6 +97,17 @@ export function RhDashboard() {
         </Button>
       </div>
 
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+        <Input
+          className="pl-9"
+          value={employeeSearch}
+          onChange={(event) => setEmployeeSearch(event.target.value)}
+          placeholder="Rechercher un salarié…"
+          aria-label="Rechercher un salarié"
+        />
+      </div>
+
       {distanceError ? (
         <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
           {distanceError}
@@ -98,7 +115,7 @@ export function RhDashboard() {
       ) : null}
 
       {groups.length === 0 ? (
-        <EmptyState icon={<UsersRound className="h-8 w-8" />} title="Aucun salarié" description="Les salariés ajoutés dans la gestion RH apparaîtront ici." />
+        <EmptyState icon={<UsersRound className="h-8 w-8" />} title={employeeSearch ? "Aucun salarié trouvé" : "Aucun salarié"} description={employeeSearch ? "Essayez avec un autre nom." : "Les salariés ajoutés dans la gestion RH apparaîtront ici."} />
       ) : (
         <div className="space-y-4">
           {groups.map(({ structure, people }) => {
@@ -112,7 +129,7 @@ export function RhDashboard() {
                   className="flex w-full items-center justify-between gap-4 px-5 py-4 text-left transition hover:bg-[var(--accent)]"
                 >
                   <span>
-                    <span className="block text-base font-semibold text-[var(--foreground)]">{structure}</span>
+                    <span className="block text-lg font-extrabold tracking-tight text-[var(--foreground)] sm:text-xl">{structure}</span>
                     <span className="mt-0.5 block text-sm text-[var(--muted-foreground)]">{people.length} salarié{people.length > 1 ? "s" : ""}</span>
                   </span>
                   <ChevronDown className={cn("h-5 w-5 text-[var(--muted-foreground)] transition-transform", isCollapsed && "-rotate-90")} />
