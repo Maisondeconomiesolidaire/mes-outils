@@ -117,7 +117,13 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
     const markers = points.map((employee) => {
       const pin = createPin();
       const popup = new mapboxgl.Popup({ offset: 18, closeButton: true }).setDOMContent(createPopup(employee));
-      pin.addEventListener("click", () => {
+      const marker = new mapboxgl.Marker({ element: pin, anchor: "bottom" })
+        .setLngLat([employee.commuteLongitude, employee.commuteLatitude])
+        .addTo(map);
+      pin.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        popup.setLngLat([employee.commuteLongitude, employee.commuteLatitude]).addTo(map);
         popup.setDOMContent(createPopup(employee, undefined, true));
         void getCommuteRoute({ employeeId: employee._id })
           .then((route) => {
@@ -134,10 +140,7 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
             popup.setDOMContent(content);
           });
       });
-      return new mapboxgl.Marker({ element: pin, anchor: "bottom" })
-        .setLngLat([employee.commuteLongitude, employee.commuteLatitude])
-        .setPopup(popup)
-        .addTo(map);
+      return marker;
     });
     map.on("load", () => {
       const bounds = new mapboxgl.LngLatBounds();

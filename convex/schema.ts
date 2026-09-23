@@ -2441,6 +2441,8 @@ export default defineSchema(
     key: v.string(),
     /** Prix du DIB en centimes d'euro par kg (défaut : 34). */
     dibPriceCentsPerKg: v.optional(v.number()),
+    /** Prix du bois en centimes d'euro par kg (défaut : 17). */
+    woodPriceCentsPerKg: v.optional(v.number()),
     /** Code PIN de l'onglet « Profils » (défaut : 0205). */
     profilesPin: v.optional(v.string()),
     updatedAt: v.optional(v.number()),
