@@ -106,7 +106,7 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
           type: "line",
           source: "employee-commute-route",
           layout: { "line-cap": "round", "line-join": "round" },
-          paint: { "line-color": "#16a34a", "line-width": 5, "line-opacity": 0.9 },
+          paint: { "line-color": "#2563eb", "line-width": 5, "line-opacity": 0.9 },
         });
       }
       const bounds = new mapboxgl.LngLatBounds();
@@ -114,6 +114,7 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
       map.fitBounds(bounds, { padding: 64, maxZoom: 14, duration: 750 });
     };
 
+    let activePin: HTMLButtonElement | null = null;
     const markers = points.map((employee) => {
       const pin = createPin();
       const popup = new mapboxgl.Popup({ offset: 18, closeButton: true }).setDOMContent(createPopup(employee));
@@ -123,6 +124,9 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
       pin.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
+        if (activePin && activePin !== pin) activePin.style.background = "#22c55e";
+        pin.style.background = "#2563eb";
+        activePin = pin;
         popup.setLngLat([employee.commuteLongitude, employee.commuteLatitude]).addTo(map);
         popup.setDOMContent(createPopup(employee, undefined, true));
         void getCommuteRoute({ employeeId: employee._id })
