@@ -2746,6 +2746,9 @@ export default defineSchema(
     commuteDurationMinutes: v.optional(v.number()),
     commuteCalculatedAt: v.optional(v.number()),
     commuteWorkplaceAddress: v.optional(v.string()),
+    /** Coordonnées géocodées, destinées uniquement à la carte interne RH. */
+    commuteLongitude: v.optional(v.number()),
+    commuteLatitude: v.optional(v.number()),
     active: v.boolean(),
     importedFrom: v.optional(v.string()),
     createdAt: v.number(),

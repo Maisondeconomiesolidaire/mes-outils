@@ -8,6 +8,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Input } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { FullSpinner } from "../components/ui/Spinner";
+import { EmployeeMap } from "../components/rh/EmployeeMap";
 import { cn } from "../lib/cn";
 
 type DashboardEmployee = {
@@ -18,6 +19,8 @@ type DashboardEmployee = {
   active: boolean;
   commuteDistanceKm?: number;
   commuteDurationMinutes?: number;
+  commuteLongitude?: number;
+  commuteLatitude?: number;
 };
 
 type Distance = { distanceKm?: number; durationMinutes?: number; error?: string };
@@ -104,6 +107,8 @@ export function RhDashboard() {
           {calculating ? "Calcul des distances..." : "Calculer les distances"}
         </Button>
       </div>
+
+      <EmployeeMap employees={employees} />
 
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />

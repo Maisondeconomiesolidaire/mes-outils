@@ -392,7 +392,7 @@ export const listDashboardEmployees = query({
     await requireCrmPermission(ctx, RH_DASHBOARD_PAGE_KEY, "read");
     const employees = await ctx.db.query("hrEmployees").withIndex("by_fullName").collect();
     return employees
-      .map(({ _id, firstName, lastName, fullName, address, structure, active, commuteDistanceKm, commuteDurationMinutes, commuteCalculatedAt, commuteWorkplaceAddress }) => ({
+      .map(({ _id, firstName, lastName, fullName, address, structure, active, commuteDistanceKm, commuteDurationMinutes, commuteCalculatedAt, commuteWorkplaceAddress, commuteLongitude, commuteLatitude }) => ({
         _id,
         firstName,
         lastName,
@@ -404,6 +404,8 @@ export const listDashboardEmployees = query({
         commuteDurationMinutes,
         commuteCalculatedAt,
         commuteWorkplaceAddress,
+        commuteLongitude,
+        commuteLatitude,
       }))
       .sort((a, b) => a.fullName.localeCompare(b.fullName, "fr"));
   },
@@ -447,6 +449,8 @@ async function calculateCommuteRoute(origin: string, destination: string) {
   return {
     distanceKm: Math.round(route.km * 10) / 10,
     durationMinutes: Math.round(route.minutes),
+    longitude: from.longitude,
+    latitude: from.latitude,
   };
 }
 
@@ -457,6 +461,8 @@ export const saveDashboardDistances = internalMutation({
       distanceKm: v.number(),
       durationMinutes: v.optional(v.number()),
       workplaceAddress: v.string(),
+      longitude: v.number(),
+      latitude: v.number(),
     })),
   },
   handler: async (ctx, { distances }) => {
@@ -468,6 +474,8 @@ export const saveDashboardDistances = internalMutation({
         commuteDurationMinutes: distance.durationMinutes,
         commuteCalculatedAt: calculatedAt,
         commuteWorkplaceAddress: distance.workplaceAddress,
+        commuteLongitude: distance.longitude,
+        commuteLatitude: distance.latitude,
       });
     }
     return distances.length;
@@ -483,6 +491,8 @@ export const calculateDashboardDistances = action({
       employeeId: Id<"hrEmployees">;
       distanceKm?: number;
       durationMinutes?: number;
+      longitude?: number;
+      latitude?: number;
       error?: string;
     }> = [];
 
@@ -502,8 +512,8 @@ export const calculateDashboardDistances = action({
       results.push(...batchResults);
     }
     const calculatedDistances = results.filter(
-      (result): result is { employeeId: Id<"hrEmployees">; distanceKm: number; durationMinutes?: number } =>
-        typeof result.distanceKm === "number",
+      (result): result is { employeeId: Id<"hrEmployees">; distanceKm: number; durationMinutes?: number; longitude: number; latitude: number } =>
+        typeof result.distanceKm === "number" && typeof result.longitude === "number" && typeof result.latitude === "number",
     );
     if (calculatedDistances.length > 0) {
       await ctx.runMutation(internal.rh.saveDashboardDistances, {
@@ -512,6 +522,8 @@ export const calculateDashboardDistances = action({
           distanceKm: result.distanceKm,
           durationMinutes: result.durationMinutes,
           workplaceAddress: WORKPLACE_ADDRESSES[employees.find((employee) => employee._id === result.employeeId)!.structure],
+          longitude: result.longitude,
+          latitude: result.latitude,
         })),
       });
     }
