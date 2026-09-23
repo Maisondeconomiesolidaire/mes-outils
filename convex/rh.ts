@@ -20,6 +20,7 @@ import { bytesToBase64, type EmailAttachment } from "./emails";
 import type { Doc, Id } from "./_generated/dataModel";
 
 const RH_PAGE_KEY = "mesoutils:rh";
+const RH_DASHBOARD_PAGE_KEY = "mesoutils:rh-tableau-de-bord";
 const CONTRACT_WEBHOOK_URL =
   "https://hook.eu2.make.com/huqlb8dif2n27j5bpnp5tycwniqrt1ow";
 
@@ -377,6 +378,123 @@ export const listEmployees = query({
     await requireCrmPermission(ctx, RH_PAGE_KEY, "read");
     const employees = await ctx.db.query("hrEmployees").withIndex("by_fullName").collect();
     return employees.sort((a, b) => a.fullName.localeCompare(b.fullName, "fr"));
+  },
+});
+
+/**
+ * Vue volontairement séparée des fiches RH et des contrats : elle ne délivre
+ * que l'identité, la structure et l'adresse nécessaires au tableau de bord.
+ */
+export const listDashboardEmployees = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, RH_DASHBOARD_PAGE_KEY, "read");
+    const employees = await ctx.db.query("hrEmployees").withIndex("by_fullName").collect();
+    return employees
+      .map(({ _id, firstName, lastName, fullName, address, structure, active }) => ({
+        _id,
+        firstName,
+        lastName,
+        fullName,
+        address,
+        structure,
+        active,
+      }))
+      .sort((a, b) => a.fullName.localeCompare(b.fullName, "fr"));
+  },
+});
+
+/** Version interne, utilisée par l'action Google Maps avec le même contrôle d'accès. */
+export const listDashboardEmployeesForDistance = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, RH_DASHBOARD_PAGE_KEY, "read");
+    const employees = await ctx.db.query("hrEmployees").withIndex("by_fullName").collect();
+    return employees.map(({ _id, fullName, address, structure }) => ({
+      _id,
+      fullName,
+      address,
+      structure,
+    }));
+  },
+});
+
+const WORKPLACE_ADDRESSES: Record<Doc<"hrEmployees">["structure"], string> = {
+  "Pays de Bray Emploi": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
+  "Pays de Bray Services 60": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
+  "Maison d'Economie Solidaire": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
+  "Recyclerie 60": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
+  "Les Sens du Bray": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
+  "Pays de Bray Services 76": "Gournay-en-Bray, France",
+  "Recyclerie 76": "Gournay-en-Bray, France",
+};
+
+async function calculateGoogleRoute(origin: string, destination: string) {
+  if (!env.GOOGLE_MAPS_API_KEY) {
+    throw new Error("GOOGLE_MAPS_API_KEY n'est pas configurée sur le déploiement Convex.");
+  }
+  const response = await fetch("https://routes.googleapis.com/directions/v2:computeRoutes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Goog-Api-Key": env.GOOGLE_MAPS_API_KEY,
+      "X-Goog-FieldMask": "routes.distanceMeters,routes.duration",
+    },
+    body: JSON.stringify({
+      origin: { address: origin },
+      destination: { address: destination },
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_UNAWARE",
+      languageCode: "fr",
+      units: "METRIC",
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Google Maps n'a pas pu calculer le trajet (${response.status}).`);
+  }
+  const payload = (await response.json()) as {
+    routes?: Array<{ distanceMeters?: number; duration?: string }>;
+  };
+  const route = payload.routes?.[0];
+  if (!route || typeof route.distanceMeters !== "number") {
+    throw new Error("Aucun itinéraire routier n'a été trouvé.");
+  }
+  return {
+    distanceKm: Math.round((route.distanceMeters / 1000) * 10) / 10,
+    durationMinutes: route.duration
+      ? Math.round(Number.parseInt(route.duration, 10) / 60)
+      : undefined,
+  };
+}
+
+/** Calcule à la demande les trajets, sans enregistrer ni exposer la clé Google. */
+export const calculateDashboardDistances = action({
+  args: {},
+  handler: async (ctx) => {
+    const employees = await ctx.runQuery(internal.rh.listDashboardEmployeesForDistance, {});
+    const results: Array<{
+      employeeId: Id<"hrEmployees">;
+      distanceKm?: number;
+      durationMinutes?: number;
+      error?: string;
+    }> = [];
+
+    // Petits lots pour respecter les quotas de l'API tout en restant réactif.
+    for (let index = 0; index < employees.length; index += 4) {
+      const batch = employees.slice(index, index + 4);
+      const batchResults = await Promise.all(batch.map(async (employee) => {
+        if (!employee.address.trim()) {
+          return { employeeId: employee._id, error: "Adresse du salarié non renseignée." };
+        }
+        try {
+          return { employeeId: employee._id, ...(await calculateGoogleRoute(employee.address, WORKPLACE_ADDRESSES[employee.structure])) };
+        } catch (error) {
+          return { employeeId: employee._id, error: error instanceof Error ? error.message : "Calcul impossible." };
+        }
+      }));
+      results.push(...batchResults);
+    }
+    return results;
   },
 });
 

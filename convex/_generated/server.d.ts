@@ -38,6 +38,7 @@ type Env = {
   readonly EMAIL_LOGO_ID: string | undefined;
   readonly GOOGLE_CLIENT_ID: string | undefined;
   readonly GOOGLE_CLIENT_SECRET: string | undefined;
+  readonly GOOGLE_MAPS_API_KEY: string | undefined;
   readonly KLYDE_APP_URL: string | undefined;
   readonly MAPBOX_ACCESS_TOKEN: string | undefined;
   readonly MESOUTILS_APP_URL: string | undefined;
