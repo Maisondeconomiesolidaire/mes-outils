@@ -18,7 +18,7 @@ import {
 } from "./lib";
 import { bytesToBase64, type EmailAttachment } from "./emails";
 import type { Doc, Id } from "./_generated/dataModel";
-import { drivingRoute, geocode } from "./livraison";
+import { drivingRoute, drivingRouteGeometry, geocode } from "./livraison";
 
 const RH_PAGE_KEY = "mesoutils:rh";
 const RH_DASHBOARD_PAGE_KEY = "mesoutils:rh-tableau-de-bord";
@@ -426,6 +426,16 @@ export const listDashboardEmployeesForDistance = internalQuery({
   },
 });
 
+export const getDashboardEmployeeForRoute = internalQuery({
+  args: { employeeId: v.id("hrEmployees") },
+  handler: async (ctx, { employeeId }) => {
+    await requireCrmPermission(ctx, RH_DASHBOARD_PAGE_KEY, "read");
+    const employee = await ctx.db.get(employeeId);
+    if (!employee) throw new Error("Salarié introuvable.");
+    return employee;
+  },
+});
+
 const WORKPLACE_ADDRESSES: Record<Doc<"hrEmployees">["structure"], string> = {
   "Pays de Bray Emploi": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
   "Pays de Bray Services 60": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
@@ -486,7 +496,10 @@ export const saveDashboardDistances = internalMutation({
 export const calculateDashboardDistances = action({
   args: {},
   handler: async (ctx) => {
-    const employees = await ctx.runQuery(internal.rh.listDashboardEmployeesForDistance, {});
+    const employees: Array<Pick<Doc<"hrEmployees">, "_id" | "address" | "structure">> = await ctx.runQuery(
+      internal.rh.listDashboardEmployeesForDistance,
+      {},
+    );
     const results: Array<{
       employeeId: Id<"hrEmployees">;
       distanceKm?: number;
@@ -528,6 +541,32 @@ export const calculateDashboardDistances = action({
       });
     }
     return results;
+  },
+});
+
+/** Itinéraire domicile → lieu de travail affiché au clic sur un pin de la carte RH. */
+export const getDashboardCommuteRoute = action({
+  args: { employeeId: v.id("hrEmployees") },
+  handler: async (ctx, { employeeId }) => {
+    const employee: Doc<"hrEmployees"> = await ctx.runQuery(
+      internal.rh.getDashboardEmployeeForRoute,
+      { employeeId },
+    );
+    if (!employee.address.trim()) throw new Error("Adresse du salarié non renseignée.");
+    if (!env.MAPBOX_ACCESS_TOKEN) throw new Error("MAPBOX_ACCESS_TOKEN n'est pas configuré sur le déploiement Convex.");
+
+    const from = employee.commuteLongitude !== undefined && employee.commuteLatitude !== undefined
+      ? { longitude: employee.commuteLongitude, latitude: employee.commuteLatitude }
+      : await geocode(employee.address, env.MAPBOX_ACCESS_TOKEN);
+    const workplaceAddress = WORKPLACE_ADDRESSES[employee.structure];
+    const to = await geocode(workplaceAddress, env.MAPBOX_ACCESS_TOKEN);
+    const route = await drivingRouteGeometry(from, to, env.MAPBOX_ACCESS_TOKEN);
+    return {
+      distanceKm: Math.round(route.km * 10) / 10,
+      durationMinutes: Math.round(route.minutes),
+      workplaceAddress,
+      coordinates: route.coordinates,
+    };
   },
 });
 

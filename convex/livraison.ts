@@ -115,6 +115,36 @@ export async function drivingRoute(
   return { km: (route.distance ?? 0) / 1000, minutes: (route.duration ?? 0) / 60 };
 }
 
+/** Itinéraire complet pour l'affichage d'un trajet sur une carte interne. */
+export async function drivingRouteGeometry(
+  from: { longitude: number; latitude: number },
+  to: { longitude: number; latitude: number },
+  accessToken: string,
+): Promise<{ km: number; minutes: number; coordinates: number[][] }> {
+  const coords = `${from.longitude},${from.latitude};${to.longitude},${to.latitude}`;
+  const url = new URL(`https://api.mapbox.com/directions/v5/mapbox/driving/${coords}`);
+  url.searchParams.set("access_token", accessToken);
+  url.searchParams.set("overview", "full");
+  url.searchParams.set("geometries", "geojson");
+  url.searchParams.set("alternatives", "false");
+
+  const response = await fetch(url.toString());
+  const payload = (await response.json()) as {
+    code?: string;
+    message?: string;
+    routes?: Array<{ distance?: number; duration?: number; geometry?: { coordinates?: number[][] } }>;
+  };
+  const route = payload.routes?.[0];
+  if (!response.ok || payload.code !== "Ok" || !route?.geometry?.coordinates?.length) {
+    throw new Error(payload.message || "Itinéraire Mapbox impossible.");
+  }
+  return {
+    km: (route.distance ?? 0) / 1000,
+    minutes: (route.duration ?? 0) / 60,
+    coordinates: route.geometry.coordinates,
+  };
+}
+
 /** Distance à vol d'oiseau (km) — pour filtrer rapidement les créneaux. */
 function haversineKm(
   a: { longitude: number; latitude: number },
