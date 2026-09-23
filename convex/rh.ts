@@ -409,8 +409,10 @@ export const listDashboardEmployees = query({
 
     return employees
       .filter((_, index) => {
-        const endDate = latestContracts[index]?.payload.date_fin_contrat;
-        return Boolean(endDate && endDate >= todayInParis);
+        const contract = latestContracts[index]?.payload;
+        if (!contract) return false;
+        if (contract.type_contrat === "CDI") return true;
+        return Boolean(contract.date_fin_contrat && contract.date_fin_contrat >= todayInParis);
       })
       .map(({ _id, firstName, lastName, fullName, address, structure, active, commuteDistanceKm, commuteDurationMinutes, commuteCalculatedAt, commuteWorkplaceAddress, commuteLongitude, commuteLatitude }) => ({
         _id,
