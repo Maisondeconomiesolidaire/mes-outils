@@ -2741,6 +2741,11 @@ export default defineSchema(
     socialSecurityNumber: v.string(),
     socialSecurityNumberNormalized: v.string(),
     firstContractDate: v.optional(v.string()),
+    /** Distance domicile → lieu de travail, calculée via le service de tournée partagé. */
+    commuteDistanceKm: v.optional(v.number()),
+    commuteDurationMinutes: v.optional(v.number()),
+    commuteCalculatedAt: v.optional(v.number()),
+    commuteWorkplaceAddress: v.optional(v.string()),
     active: v.boolean(),
     importedFrom: v.optional(v.string()),
     createdAt: v.number(),

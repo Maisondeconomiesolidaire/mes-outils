@@ -16,6 +16,8 @@ type DashboardEmployee = {
   address: string;
   structure: string;
   active: boolean;
+  commuteDistanceKm?: number;
+  commuteDurationMinutes?: number;
 };
 
 type Distance = { distanceKm?: number; durationMinutes?: number; error?: string };
@@ -86,7 +88,13 @@ export function RhDashboard() {
     });
   }
 
-  const mapDistance = mapEmployee ? distances[mapEmployee._id] : undefined;
+  function distanceFor(employee: DashboardEmployee): Distance | undefined {
+    return distances[employee._id] ?? (employee.commuteDistanceKm !== undefined
+      ? { distanceKm: employee.commuteDistanceKm, durationMinutes: employee.commuteDurationMinutes }
+      : undefined);
+  }
+
+  const mapDistance = mapEmployee ? distanceFor(mapEmployee) : undefined;
 
   return (
     <div className="space-y-5">
@@ -137,7 +145,7 @@ export function RhDashboard() {
                 {!isCollapsed ? (
                   <div className="border-t border-[var(--border)] px-5 py-2">
                     {people.map((employee) => {
-                      const distance = distances[employee._id];
+                      const distance = distanceFor(employee);
                       return (
                         <article key={employee._id} className="flex flex-col gap-3 border-b border-[var(--border)] py-4 last:border-0 sm:flex-row sm:items-center sm:justify-between">
                           <div className="min-w-0">
