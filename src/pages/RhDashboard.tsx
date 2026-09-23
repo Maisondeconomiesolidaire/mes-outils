@@ -1,5 +1,6 @@
 import { useAction, useQuery } from "convex/react";
-import { ChevronDown, Loader2, MapPin, Navigation, Search, UsersRound } from "lucide-react";
+import * as XLSX from "@e965/xlsx";
+import { ChevronDown, FileSpreadsheet, Loader2, MapPin, Navigation, Search, UsersRound } from "lucide-react";
 import { useMemo, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -14,6 +15,8 @@ import { cn } from "../lib/cn";
 
 type DashboardEmployee = {
   _id: Id<"hrEmployees">;
+  firstName: string;
+  lastName: string;
   fullName: string;
   address: string;
   structure: string;
@@ -36,6 +39,16 @@ const STRUCTURE_ORDER = [
   "Maison d'Economie Solidaire",
 ];
 
+function workplaceSite(structure: string): "60" | "76" {
+  const normalized = structure.toLocaleLowerCase("fr");
+  return normalized.includes("services 76") || normalized.includes("recyclerie 76") ? "76" : "60";
+}
+
+const workplaceLabels = {
+  "60": "Lachapelle-aux-Pots / 60",
+  "76": "Gournay-en-Bray / 76",
+} as const;
+
 /** Tableau de bord RH, protégé par un droit de lecture distinct des contrats. */
 export function RhDashboard() {
   const employees = useQuery(api.rh.listDashboardEmployees) as DashboardEmployee[] | undefined;
@@ -47,6 +60,7 @@ export function RhDashboard() {
   const [mapEmployee, setMapEmployee] = useState<DashboardEmployee | null>(null);
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [employeeSort, setEmployeeSort] = useState<"name" | "distance_desc" | "distance_asc">("name");
+  const [exportOpen, setExportOpen] = useState(false);
 
   const groups = useMemo(() => {
     const normalizedSearch = employeeSearch.trim().toLocaleLowerCase("fr");
@@ -114,6 +128,24 @@ export function RhDashboard() {
 
   const mapDistance = mapEmployee ? distanceFor(mapEmployee) : undefined;
 
+  function exportEmployees(site: "60" | "76") {
+    const rows = (employees ?? [])
+      .filter((employee) => workplaceSite(employee.structure) === site)
+      .sort((left, right) => left.lastName.localeCompare(right.lastName, "fr") || left.firstName.localeCompare(right.firstName, "fr"))
+      .map((employee) => ({
+        Nom: employee.lastName,
+        "Prénom": employee.firstName,
+        Structure: employee.structure,
+        "Distance (km)": distanceFor(employee)?.distanceKm ?? "Non calculée",
+      }));
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    sheet["!cols"] = [{ wch: 24 }, { wch: 24 }, { wch: 32 }, { wch: 16 }];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, `Salariés ${site}`);
+    XLSX.writeFile(workbook, `salaries-${site}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    setExportOpen(false);
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex justify-end">
@@ -124,6 +156,12 @@ export function RhDashboard() {
       </div>
 
       <EmployeeMap employees={employees} />
+
+      <div className="flex justify-end">
+        <Button variant="outline" onClick={() => setExportOpen(true)} disabled={employees.length === 0}>
+          <FileSpreadsheet className="h-4 w-4" />Exporter en Excel
+        </Button>
+      </div>
 
       <div className="flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
@@ -234,6 +272,20 @@ export function RhDashboard() {
             />
           </div>
         ) : null}
+      </Modal>
+
+      <Modal open={exportOpen} onClose={() => setExportOpen(false)} title="Exporter les salariés">
+        <p className="text-sm text-[var(--muted-foreground)]">Sélectionnez le lieu de travail à exporter.</p>
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+          {(["60", "76"] as const).map((site) => (
+            <button key={site} type="button" onClick={() => exportEmployees(site)} className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5 text-left transition hover:border-brand-400 hover:bg-[var(--accent)]">
+              <FileSpreadsheet className="h-5 w-5 text-brand-600" />
+              <p className="mt-3 font-extrabold text-[var(--foreground)]">{site}</p>
+              <p className="mt-1 text-sm text-[var(--muted-foreground)]">{workplaceLabels[site]}</p>
+              <p className="mt-3 text-xs font-semibold text-brand-700 dark:text-brand-300">{employees.filter((employee) => workplaceSite(employee.structure) === site).length} salarié{employees.filter((employee) => workplaceSite(employee.structure) === site).length > 1 ? "s" : ""}</p>
+            </button>
+          ))}
+        </div>
       </Modal>
     </div>
   );

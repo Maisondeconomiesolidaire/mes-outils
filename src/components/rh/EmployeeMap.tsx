@@ -26,19 +26,18 @@ type CommuteRoute = {
   coordinates: number[][];
 };
 
-function pinColorForStructure(structure: string) {
+function pinColorForWorkplace(structure: string) {
   const normalized = structure.toLocaleLowerCase("fr");
-  if (normalized.includes("recyclerie") || normalized.includes("sens du bray")) return "#f97316";
-  if (normalized.includes("pays de bray emploi")) return "#2563eb";
-  if (normalized.includes("pays de bray services")) return "#64748b";
-  return "#22c55e";
+  return normalized.includes("services 76") || normalized.includes("recyclerie 76")
+    ? "#2563eb"
+    : "#f97316";
 }
 
 function createPin(structure: string) {
   const pin = document.createElement("button");
   pin.type = "button";
   pin.setAttribute("aria-label", "Voir les informations du salarié");
-  const color = pinColorForStructure(structure);
+  const color = pinColorForWorkplace(structure);
   pin.dataset.baseColor = color;
   pin.style.cssText = `width:29px;height:29px;border:3px solid white;border-radius:999px;background:${color};box-shadow:0 4px 12px rgba(15,23,42,.38);cursor:pointer;`;
   return pin;
@@ -148,9 +147,8 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
         <span className="text-sm text-[var(--muted-foreground)]">{points.length} adresse{points.length > 1 ? "s" : ""} positionnée{points.length > 1 ? "s" : ""}</span>
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-2 border-t border-[var(--border)] px-5 py-2.5 text-xs font-semibold text-[var(--muted-foreground)]">
-        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />Recycleries &amp; LSDB</span>
-        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-600" />PBE</span>
-        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-slate-500" />PBS</span>
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-orange-500" />Lachapelle-aux-Pots / 60</span>
+        <span className="flex items-center gap-1.5"><i className="h-2.5 w-2.5 rounded-full bg-blue-600" />Gournay-en-Bray / 76</span>
       </div>
       {points.length > 0 ? (
         <div className="relative h-[420px] w-full overflow-hidden">
