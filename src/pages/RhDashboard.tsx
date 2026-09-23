@@ -80,6 +80,8 @@ export function RhDashboard() {
     });
   }
 
+  const mapDistance = mapEmployee ? distances[mapEmployee._id] : undefined;
+
   return (
     <div className="space-y-5">
       <div className="flex justify-end">
@@ -158,13 +160,22 @@ export function RhDashboard() {
 
       <Modal open={Boolean(mapEmployee)} onClose={() => setMapEmployee(null)} title={mapEmployee ? `Adresse de ${mapEmployee.fullName}` : "Adresse"} className="sm:h-[72vh] sm:w-[min(720px,80vw)] sm:max-w-[720px]">
         {mapEmployee ? (
-          <iframe
-            title={`Carte de ${mapEmployee.fullName}`}
-            className="h-full min-h-[400px] w-full rounded-xl border-0"
-            src={`https://maps.google.com/maps?q=${encodeURIComponent(mapEmployee.address)}&output=embed&t=k&z=19`}
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
+          <div className="flex h-full min-h-[400px] flex-col gap-3">
+            <p className="shrink-0 rounded-xl bg-brand-500/10 px-3 py-2 text-sm text-brand-800 dark:text-brand-200">
+              Distance entre l&apos;adresse du salarié et le lieu de travail : {mapDistance?.distanceKm !== undefined ? (
+                <strong>{mapDistance.distanceKm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} km</strong>
+              ) : (
+                <span>à calculer depuis le tableau de bord.</span>
+              )}
+            </p>
+            <iframe
+              title={`Carte de ${mapEmployee.fullName}`}
+              className="min-h-0 w-full flex-1 rounded-xl border-0"
+              src={`https://maps.google.com/maps?q=${encodeURIComponent(mapEmployee.address)}&output=embed&t=k&z=19`}
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
         ) : null}
       </Modal>
     </div>
