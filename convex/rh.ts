@@ -442,8 +442,8 @@ const WORKPLACE_ADDRESSES: Record<Doc<"hrEmployees">["structure"], string> = {
   "Maison d'Economie Solidaire": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
   "Recyclerie 60": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
   "Les Sens du Bray": "4 rue de la Prairie, 60650 Lachapelle-aux-Pots, France",
-  "Pays de Bray Services 76": "Gournay-en-Bray, France",
-  "Recyclerie 76": "Gournay-en-Bray, France",
+  "Pays de Bray Services 76": "150 Rte de Paris, 76220 Gournay-en-Bray, France",
+  "Recyclerie 76": "150 Rte de Paris, 76220 Gournay-en-Bray, France",
 };
 
 /** Même calcul routier que les demandes de collecte Recycapp. */
