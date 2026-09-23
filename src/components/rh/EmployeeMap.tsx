@@ -1,8 +1,8 @@
 import { useAction } from "convex/react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { MapPinned } from "lucide-react";
-import { useEffect, useMemo, useRef } from "react";
+import { MapPinned, Route, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 
@@ -26,43 +26,6 @@ type CommuteRoute = {
   coordinates: number[][];
 };
 
-function createPopup(employee: MappedEmployee, route?: CommuteRoute, loading = false) {
-  const content = document.createElement("div");
-  content.style.cssText = "min-width:190px;padding:2px 1px;font-family:Inter,system-ui,sans-serif;";
-  const name = document.createElement("p");
-  name.textContent = employee.fullName;
-  name.style.cssText = "margin:0;font-size:14px;font-weight:800;color:#18181b;";
-  const structure = document.createElement("p");
-  structure.textContent = employee.structure;
-  structure.style.cssText = "margin:3px 0 0;font-size:12px;font-weight:700;color:#15803d;";
-  const address = document.createElement("p");
-  address.textContent = employee.address;
-  address.style.cssText = "margin:7px 0 0;font-size:12px;line-height:1.4;color:#52525b;";
-  content.append(name, structure, address);
-  if (loading) {
-    const status = document.createElement("p");
-    status.textContent = "Calcul de l’itinéraire…";
-    status.style.cssText = "margin:8px 0 0;font-size:12px;font-weight:700;color:#166534;";
-    content.append(status);
-  } else if (route) {
-    const distance = document.createElement("p");
-    distance.textContent = `Itinéraire domicile → travail : ${route.distanceKm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} km · ${route.durationMinutes} min`;
-    distance.style.cssText = "margin:8px 0 0;font-size:12px;font-weight:800;color:#166534;";
-    content.append(distance);
-    const destination = document.createElement("p");
-    destination.textContent = `Destination : ${route.workplaceAddress}`;
-    destination.style.cssText = "margin:4px 0 0;font-size:11px;line-height:1.35;color:#52525b;";
-    content.append(destination);
-  } else if (employee.commuteDistanceKm !== undefined) {
-    const distance = document.createElement("p");
-    const duration = employee.commuteDurationMinutes !== undefined ? ` · ${employee.commuteDurationMinutes} min` : "";
-    distance.textContent = `Distance domicile → travail : ${employee.commuteDistanceKm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} km${duration}`;
-    distance.style.cssText = "margin:8px 0 0;font-size:12px;font-weight:700;color:#166534;";
-    content.append(distance);
-  }
-  return content;
-}
-
 function createPin() {
   const pin = document.createElement("button");
   pin.type = "button";
@@ -74,7 +37,9 @@ function createPin() {
 /** Carte interne : les coordonnées proviennent du géocodage sauvegardé côté RH. */
 export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const selectedIdRef = useRef<Id<"hrEmployees"> | null>(null);
   const getCommuteRoute = useAction(api.rh.getDashboardCommuteRoute);
+  const [selected, setSelected] = useState<{ employee: MappedEmployee; route?: CommuteRoute; error?: string; loading: boolean } | null>(null);
   const points = useMemo(
     () => employees.filter((employee): employee is MappedEmployee & { commuteLongitude: number; commuteLatitude: number } =>
       typeof employee.commuteLongitude === "number" && typeof employee.commuteLatitude === "number"),
@@ -113,11 +78,14 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
       route.coordinates.forEach((coordinate) => bounds.extend([coordinate[0], coordinate[1]]));
       map.fitBounds(bounds, { padding: 64, maxZoom: 14, duration: 750 });
     };
+    const clearRoute = () => {
+      if (map.getLayer("employee-commute-route-line")) map.removeLayer("employee-commute-route-line");
+      if (map.getSource("employee-commute-route")) map.removeSource("employee-commute-route");
+    };
 
     let activePin: HTMLButtonElement | null = null;
     const markers = points.map((employee) => {
       const pin = createPin();
-      const popup = new mapboxgl.Popup({ offset: 18, closeButton: true }).setDOMContent(createPopup(employee));
       const marker = new mapboxgl.Marker({ element: pin, anchor: "bottom" })
         .setLngLat([employee.commuteLongitude, employee.commuteLatitude])
         .addTo(map);
@@ -127,21 +95,19 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
         if (activePin && activePin !== pin) activePin.style.background = "#22c55e";
         pin.style.background = "#2563eb";
         activePin = pin;
-        popup.setLngLat([employee.commuteLongitude, employee.commuteLatitude]).addTo(map);
-        popup.setDOMContent(createPopup(employee, undefined, true));
+        clearRoute();
+        selectedIdRef.current = employee._id;
+        setSelected({ employee, loading: true });
         void getCommuteRoute({ employeeId: employee._id })
           .then((route) => {
+            if (selectedIdRef.current !== employee._id) return;
             drawRoute(route as CommuteRoute);
-            popup.setDOMContent(createPopup(employee, route as CommuteRoute));
+            setSelected({ employee, route: route as CommuteRoute, loading: false });
           })
           .catch((error) => {
+            if (selectedIdRef.current !== employee._id) return;
             const message = error instanceof Error ? error.message : "Itinéraire impossible.";
-            const content = createPopup(employee);
-            const status = document.createElement("p");
-            status.textContent = message;
-            status.style.cssText = "margin:8px 0 0;font-size:12px;font-weight:700;color:#b91c1c;";
-            content.append(status);
-            popup.setDOMContent(content);
+            setSelected({ employee, error: message, loading: false });
           });
       });
       return marker;
@@ -153,6 +119,7 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
     });
     return () => {
       markers.forEach((marker) => marker.remove());
+      selectedIdRef.current = null;
       map.remove();
     };
   }, [getCommuteRoute, points]);
@@ -171,7 +138,23 @@ export function EmployeeMap({ employees }: { employees: MappedEmployee[] }) {
         <span className="text-sm text-[var(--muted-foreground)]">{points.length} adresse{points.length > 1 ? "s" : ""} positionnée{points.length > 1 ? "s" : ""}</span>
       </div>
       {points.length > 0 ? (
-        <div ref={containerRef} className="h-[420px] w-full" aria-label="Carte des adresses des salariés" />
+        <div className="relative h-[420px] w-full overflow-hidden">
+          <div ref={containerRef} className="h-full w-full" aria-label="Carte des adresses des salariés" />
+          {selected ? (
+            <aside key={selected.employee._id} className="employee-map-panel absolute bottom-3 right-3 top-3 z-10 flex w-[min(22rem,calc(100%-1.5rem))] flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+              <button type="button" className="absolute right-3 top-3 rounded-full p-1.5 text-[var(--muted-foreground)] hover:bg-[var(--accent)]" aria-label="Fermer la fiche du salarié" onClick={() => { selectedIdRef.current = null; setSelected(null); }}><X className="h-4 w-4" /></button>
+              <p className="pr-8 text-lg font-extrabold text-[var(--foreground)]">{selected.employee.fullName}</p>
+              <p className="mt-1 text-sm font-bold text-emerald-700 dark:text-emerald-400">{selected.employee.structure}</p>
+              <p className="mt-4 text-sm leading-6 text-[var(--muted-foreground)]">{selected.employee.address}</p>
+              <div className="mt-5 rounded-xl bg-emerald-50 p-3 text-sm dark:bg-emerald-500/10">
+                <div className="flex items-center gap-2 font-extrabold text-emerald-800 dark:text-emerald-300"><Route className="h-4 w-4" />Itinéraire domicile → travail</div>
+                {selected.loading ? <p className="mt-2 text-emerald-700 dark:text-emerald-300">Calcul de l’itinéraire…</p> : null}
+                {selected.route ? <><p className="mt-2 text-base font-extrabold text-emerald-800 dark:text-emerald-200">{selected.route.distanceKm.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} km · {selected.route.durationMinutes} min</p><p className="mt-2 text-xs leading-5 text-emerald-800/80 dark:text-emerald-200/80">Destination : {selected.route.workplaceAddress}</p></> : null}
+                {selected.error ? <p className="mt-2 text-red-700 dark:text-red-300">{selected.error}</p> : null}
+              </div>
+            </aside>
+          ) : null}
+        </div>
       ) : (
         <p className="border-t border-[var(--border)] px-5 py-8 text-center text-sm text-[var(--muted-foreground)]">Les adresses seront positionnées après le prochain calcul des distances.</p>
       )}

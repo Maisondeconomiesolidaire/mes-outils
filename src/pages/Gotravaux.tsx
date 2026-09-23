@@ -2547,11 +2547,14 @@ function VehicleReservationsPanel() {
   const remindVehicleReturn = useMutation(api.reservations.remindVehicleReturn);
   const [selectedId, setSelectedId] = useState<Id<"vehicleReservations"> | null>(null);
   const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<ReservationFilter>("all");
 
   if (reservations === undefined) return <FullSpinner label="Chargement des réservations..." />;
 
   const needle = query.trim().toLowerCase();
+  const now = Date.now();
   const visibleReservations = reservations.filter((reservation) => {
+    if (!matchesReservationFilter(reservation, filter, now)) return false;
     if (!needle) return true;
     return [
       reservation.userName,
@@ -2563,7 +2566,7 @@ function VehicleReservationsPanel() {
       reservation.vehicle?.plate,
       reservation.status,
     ].filter(Boolean).join(" ").toLowerCase().includes(needle);
-  });
+  }).sort((left, right) => left.start - right.start);
   const pending = visibleReservations.filter((r) => r.status === "pending");
   const others = visibleReservations.filter((r) => r.status !== "pending");
   const selected = reservations.find((reservation) => reservation._id === selectedId) ?? null;
@@ -2593,14 +2596,19 @@ function VehicleReservationsPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="relative max-w-xl">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
-        <Input
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Rechercher par nom, véhicule, plaque, motif..."
-          className="pl-9"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative max-w-xl flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Rechercher par nom, véhicule, plaque, motif..."
+            className="pl-9"
+          />
+        </div>
+        <Select value={filter} onChange={(event) => setFilter(event.target.value as ReservationFilter)} className="sm:w-56" aria-label="Filtrer les réservations">
+          {Object.entries(reservationFilterLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+        </Select>
       </div>
       {reservations.length === 0 ? <EmptyState icon={<CalendarClock className="h-8 w-8" />} title="Aucune réservation" description="Les demandes de réservation apparaîtront ici." /> : null}
       {reservations.length > 0 && visibleReservations.length === 0 ? <EmptyState icon={<Search className="h-8 w-8" />} title="Aucun résultat" description="Aucune réservation ne correspond à votre recherche." /> : null}
@@ -2614,12 +2622,12 @@ function VehicleReservationsPanel() {
           </div>
         </section>
       ) : null}
-      <section className="premium-panel overflow-hidden rounded-2xl">
-        <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">Historique</h2></div>
+      {others.length > 0 ? <section className="premium-panel overflow-hidden rounded-2xl">
+        <div className="border-b border-[var(--border)] px-5 py-4"><h2 className="text-lg font-semibold text-[var(--foreground)]">{filter === "all" ? "Réservations" : reservationFilterLabels[filter]}</h2></div>
         <div className="divide-y divide-[var(--border)]">
           {others.map((r) => <ReservationRow key={r._id} reservation={r} canManage={canManage} canDeleteForever={canDeleteForever} onOpen={() => setSelectedId(r._id)} onCancel={() => cancelReservationWithConfirmation(r._id)} />)}
         </div>
-      </section>
+      </section> : null}
 
       <ReservationDetailsModal
         reservation={selected}
@@ -2659,6 +2667,26 @@ type ReservationItem = {
   feedbackManualReturnBy?: string;
   feedbackReminderSentAt?: number;
 };
+
+type ReservationFilter = "all" | "pending" | "upcoming" | "awaiting_return" | "returned" | "closed";
+
+const reservationFilterLabels: Record<ReservationFilter, string> = {
+  all: "Toutes les demandes",
+  pending: "À traiter",
+  upcoming: "À venir",
+  awaiting_return: "En attente de retour",
+  returned: "Véhicules retournés",
+  closed: "Refusées ou annulées",
+};
+
+function matchesReservationFilter(reservation: ReservationItem, filter: ReservationFilter, now: number) {
+  if (filter === "all") return true;
+  if (filter === "pending") return reservation.status === "pending";
+  if (filter === "upcoming") return reservation.status === "approved" && reservation.end >= now;
+  if (filter === "awaiting_return") return reservation.status === "approved" && reservation.end < now && !reservation.feedbackSubmittedAt;
+  if (filter === "returned") return reservation.status === "approved" && Boolean(reservation.feedbackSubmittedAt);
+  return reservation.status === "rejected" || reservation.status === "cancelled";
+}
 
 function ReservationRow({ reservation, canManage, canDeleteForever, onOpen, onCancel }: { reservation: ReservationItem; canManage: boolean; canDeleteForever: boolean; onOpen: () => void; onCancel: () => void }) {
   return (
