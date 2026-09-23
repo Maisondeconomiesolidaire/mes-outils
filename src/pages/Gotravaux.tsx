@@ -2566,7 +2566,7 @@ function VehicleReservationsPanel() {
       reservation.vehicle?.plate,
       reservation.status,
     ].filter(Boolean).join(" ").toLowerCase().includes(needle);
-  }).sort((left, right) => left.start - right.start);
+  }).sort((left, right) => right.start - left.start);
   const pending = visibleReservations.filter((r) => r.status === "pending");
   const others = visibleReservations.filter((r) => r.status !== "pending");
   const selected = reservations.find((reservation) => reservation._id === selectedId) ?? null;
