@@ -2848,6 +2848,8 @@ export default defineSchema(
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     /** Main d'œuvre requise par mois, en heures (base du plan de charge). */
     requiredMonthlyHours: v.optional(v.number()),
+    /** Nombre de salariés nécessaires simultanément sur la tâche. */
+    requiredWorkers: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
   }).index("by_name", ["name"]),

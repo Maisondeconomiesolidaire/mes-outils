@@ -25,14 +25,18 @@ export const listTasks = query({
 const taskSite = v.union(v.literal("60"), v.literal("76"));
 
 /** Nom, site de traitement et main d'œuvre requise : la fiche d'une tâche. */
-function taskProfile(args: { name: string; site?: "60" | "76"; requiredMonthlyHours?: number }) {
+function taskProfile(args: { name: string; site?: "60" | "76"; requiredMonthlyHours?: number; requiredWorkers?: number }) {
   const name = args.name.trim();
   if (!name) throw new Error("Le nom de la tâche est requis.");
   const hours = args.requiredMonthlyHours;
   if (hours !== undefined && (!Number.isFinite(hours) || hours <= 0)) {
     throw new Error("Les heures requises doivent être un nombre positif.");
   }
-  return { name, site: args.site, requiredMonthlyHours: hours };
+  const requiredWorkers = args.requiredWorkers;
+  if (requiredWorkers !== undefined && (!Number.isInteger(requiredWorkers) || requiredWorkers < 1)) {
+    throw new Error("Le nombre de salariés requis doit être un entier positif.");
+  }
+  return { name, site: args.site, requiredMonthlyHours: hours, requiredWorkers };
 }
 
 export const createTask = mutation({
@@ -40,6 +44,7 @@ export const createTask = mutation({
     name: v.string(),
     site: v.optional(taskSite),
     requiredMonthlyHours: v.optional(v.number()),
+    requiredWorkers: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -73,6 +78,7 @@ export const updateTask = mutation({
     name: v.string(),
     site: v.optional(taskSite),
     requiredMonthlyHours: v.optional(v.number()),
+    requiredWorkers: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
