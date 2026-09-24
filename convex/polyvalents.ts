@@ -258,11 +258,14 @@ function workerProfile(args: {
   email?: string;
   sites?: ("60" | "76")[];
   employmentType?: "permanent" | "polyvalent";
+  hasDrivingLicenseB?: boolean;
+  notes?: string;
 }) {
   const firstName = args.firstName.trim();
   const lastName = args.lastName.trim();
   if (!firstName && !lastName) throw new Error("Le nom du salarié est requis.");
   const email = args.email?.trim();
+  const notes = args.notes?.trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("L'adresse email est invalide.");
   return {
     firstName,
@@ -270,6 +273,8 @@ function workerProfile(args: {
     email: email || undefined,
     sites: args.sites?.length ? args.sites : undefined,
     employmentType: args.employmentType,
+    hasDrivingLicenseB: args.hasDrivingLicenseB || undefined,
+    notes: notes || undefined,
   };
 }
 
@@ -280,6 +285,8 @@ export const createWorker = mutation({
     email: v.optional(v.string()),
     sites: v.optional(workerSites),
     employmentType: v.optional(workerEmploymentType),
+    hasDrivingLicenseB: v.optional(v.boolean()),
+    notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
@@ -301,6 +308,8 @@ export const updateWorker = mutation({
     email: v.optional(v.string()),
     sites: v.optional(workerSites),
     employmentType: v.optional(workerEmploymentType),
+    hasDrivingLicenseB: v.optional(v.boolean()),
+    notes: v.optional(v.string()),
     active: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {

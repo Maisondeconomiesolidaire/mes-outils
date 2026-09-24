@@ -2860,6 +2860,10 @@ export default defineSchema(
     sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
     /** Type de contrat : agent permanent ou agent polyvalent. */
     employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
+    /** Le salarié est titulaire du permis de conduire B. */
+    hasDrivingLicenseB: v.optional(v.boolean()),
+    /** Informations libres liées à la fiche salarié. */
+    notes: v.optional(v.string()),
     /** Inactif = conservé pour l'historique mais plus attribuable. */
     active: v.optional(v.boolean()),
     /** Salarié RH correspondant : la fiche RH fait foi pour l'identité. */
