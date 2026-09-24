@@ -362,12 +362,14 @@ export const setWorkerSchedule = mutation({
   args: { workerId: v.id("polyvalentWorkers"), availability: availabilityValidator },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "update");
-    if (args.availability.length > 7) throw new Error("Un planning contient au maximum 7 jours.");
-    const days = new Set<number>();
+    if (args.availability.length > 14) throw new Error("Un planning contient au maximum deux créneaux par jour.");
+    const slotsByDay = new Map<number, number>();
     for (const slot of args.availability) {
-      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 7 || days.has(slot.weekday)) throw new Error("Les jours de disponibilité sont invalides.");
+      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 7) throw new Error("Les jours de disponibilité sont invalides.");
       if (!/^\d{2}:\d{2}$/.test(slot.start) || !/^\d{2}:\d{2}$/.test(slot.end) || slot.end <= slot.start) throw new Error("Les horaires de disponibilité sont invalides.");
-      days.add(slot.weekday);
+      const count = (slotsByDay.get(slot.weekday) ?? 0) + 1;
+      if (count > 2) throw new Error("Un jour ne peut avoir qu’un créneau matin et un créneau après-midi.");
+      slotsByDay.set(slot.weekday, count);
     }
     if (!await ctx.db.get(args.workerId)) throw new Error("Ouvrier introuvable.");
     const schedule = await ctx.db.query("polyvalentWorkerSchedules").withIndex("by_worker", (q) => q.eq("workerId", args.workerId)).unique();
