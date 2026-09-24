@@ -440,8 +440,18 @@ export const deleteRecurrence = mutation({
   },
 });
 
-/** Déplace tout le groupe d’affectations dans une transaction. Les récurrences
- * conservent leur modèle hebdomadaire ; seul le jour sélectionné est modifié. */
+export const listRecurrenceExceptions = query({
+  args: { startAt: v.number(), endAt: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    return await ctx.db.query("polyvalentRecurrenceExceptions")
+      .withIndex("by_originalStartAt", (q) => q.gte("originalStartAt", args.startAt).lt("originalStartAt", args.endAt))
+      .take(5000);
+  },
+});
+
+/** Déplace le groupe sélectionné. Une occurrence récurrente devient une
+ * activité datée, sans modifier aucun des créneaux du modèle hebdomadaire. */
 export const updatePlannerTiming = mutation({
   args: {
     activityIds: v.array(v.id("polyvalentActivities")),
@@ -472,8 +482,24 @@ export const updatePlannerTiming = mutation({
       if (!recurrence) throw new Error("Récurrence introuvable.");
       const selected = recurrence.slots.find((slot) => slot.weekday === from.weekday && slot.start === from.time);
       if (!selected) throw new Error("Ce créneau récurrent a été modifié. Réessayez.");
-      if (from.weekday !== start.weekday && recurrence.slots.some((slot) => slot.weekday === start.weekday)) throw new Error("Cette récurrence possède déjà un créneau ce jour-là.");
-      await ctx.db.patch(id, { slots: recurrence.slots.map((slot) => slot === selected ? { weekday: start.weekday, start: start.time, end: end.time } : slot) });
+      const existing = await ctx.db.query("polyvalentRecurrenceExceptions")
+        .withIndex("by_recurrenceId_and_originalStartAt", (q) => q.eq("recurrenceId", id).eq("originalStartAt", args.originalStartAt))
+        .unique();
+      if (existing) throw new Error("Cette occurrence a déjà été déplacée. Réessayez depuis son nouveau créneau.");
+      const activityId = await ctx.db.insert("polyvalentActivities", {
+        taskId: recurrence.taskId,
+        workerId: recurrence.workerId,
+        startAt: args.startAt,
+        endAt: args.endAt,
+        site: recurrence.site,
+        createdBy: recurrence.createdBy,
+        createdAt: Date.now(),
+      });
+      await ctx.db.insert("polyvalentRecurrenceExceptions", {
+        recurrenceId: id,
+        originalStartAt: args.originalStartAt,
+        activityId,
+      });
     }
     return null;
   },

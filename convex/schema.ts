@@ -2909,6 +2909,15 @@ export default defineSchema(
     .index("by_task", ["taskId"])
     .index("by_worker", ["workerId"]),
 
+  /** Occurrences détachées du modèle hebdomadaire après un déplacement. */
+  polyvalentRecurrenceExceptions: defineTable({
+    recurrenceId: v.id("polyvalentTaskRecurrences"),
+    originalStartAt: v.number(),
+    activityId: v.id("polyvalentActivities"),
+  })
+    .index("by_originalStartAt", ["originalStartAt"])
+    .index("by_recurrenceId_and_originalStartAt", ["recurrenceId", "originalStartAt"]),
+
   polyvalentActivities: defineTable({
     taskId: v.id("polyvalentTasks"),
     /** Une tâche peut être planifiée avant qu'un salarié lui soit affecté. */
