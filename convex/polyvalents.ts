@@ -371,7 +371,7 @@ export const setWorkerSchedule = mutation({
     if (args.availability.length > 14) throw new Error("Un planning contient au maximum deux créneaux par jour.");
     const slotsByDay = new Map<number, number>();
     for (const slot of args.availability) {
-      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 7) throw new Error("Les jours de disponibilité sont invalides.");
+      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 6) throw new Error("Les disponibilités vont du lundi au samedi.");
       if (!/^\d{2}:\d{2}$/.test(slot.start) || !/^\d{2}:\d{2}$/.test(slot.end) || slot.end <= slot.start) throw new Error("Les horaires de disponibilité sont invalides.");
       const count = (slotsByDay.get(slot.weekday) ?? 0) + 1;
       if (count > 2) throw new Error("Un jour ne peut avoir qu’un créneau matin et un créneau après-midi.");
