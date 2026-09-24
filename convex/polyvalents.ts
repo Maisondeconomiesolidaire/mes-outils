@@ -52,6 +52,21 @@ export const createTask = mutation({
   },
 });
 
+/** Tâches de base du planning hebdomadaire Recyclerie. Idempotent. */
+export const ensurePlannerTasks = mutation({
+  args: { site: taskSite },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "create");
+    const identity = await requireUser(ctx);
+    const existing = await ctx.db.query("polyvalentTasks").take(500);
+    const defaults = ["Apports", "Caisse magasin"];
+    for (const name of defaults) {
+      if (existing.some((task) => task.site === args.site && task.name.trim().toLocaleLowerCase("fr") === name.toLocaleLowerCase("fr"))) continue;
+      await ctx.db.insert("polyvalentTasks", { name, site: args.site, createdBy: formatUserName(identity), createdAt: Date.now() });
+    }
+  },
+});
+
 export const updateTask = mutation({
   args: {
     id: v.id("polyvalentTasks"),
@@ -730,4 +745,3 @@ export const setWorkerEmploymentType = mutation({
     await ctx.db.patch(args.id, { employmentType: args.employmentType });
   },
 });
-
