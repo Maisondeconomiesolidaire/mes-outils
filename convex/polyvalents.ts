@@ -440,6 +440,45 @@ export const deleteRecurrence = mutation({
   },
 });
 
+/** Déplace tout le groupe d’affectations dans une transaction. Les récurrences
+ * conservent leur modèle hebdomadaire ; seul le jour sélectionné est modifié. */
+export const updatePlannerTiming = mutation({
+  args: {
+    activityIds: v.array(v.id("polyvalentActivities")),
+    recurrenceIds: v.array(v.id("polyvalentTaskRecurrences")),
+    originalStartAt: v.number(), startAt: v.number(), endAt: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    if (![args.startAt, args.endAt, args.originalStartAt].every(Number.isFinite) || args.endAt <= args.startAt || args.activityIds.length + args.recurrenceIds.length > 100) {
+      throw new Error("Créneau invalide.");
+    }
+    const parts = (at: number) => {
+      const values = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Paris", weekday: "short", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(at));
+      const get = (key: string) => values.find((part) => part.type === key)?.value ?? "";
+      return { weekday: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(get("weekday")) + 1, time: `${get("hour")}:${get("minute")}`, date: `${get("year")}-${get("month")}-${get("day")}` };
+    };
+    const from = parts(args.originalStartAt), start = parts(args.startAt), end = parts(args.endAt);
+    if (start.date !== end.date || start.weekday === 7) throw new Error("Choisissez un créneau sur une même journée, du lundi au samedi.");
+    for (const id of new Set(args.activityIds)) {
+      const activity = await ctx.db.get(id);
+      if (!activity) throw new Error("Affectation introuvable.");
+      if (activity.startAt !== args.originalStartAt) throw new Error("Ce créneau a été modifié. Réessayez.");
+      await ctx.db.patch(id, { startAt: args.startAt, endAt: args.endAt });
+    }
+    for (const id of new Set(args.recurrenceIds)) {
+      const recurrence = await ctx.db.get(id);
+      if (!recurrence) throw new Error("Récurrence introuvable.");
+      const selected = recurrence.slots.find((slot) => slot.weekday === from.weekday && slot.start === from.time);
+      if (!selected) throw new Error("Ce créneau récurrent a été modifié. Réessayez.");
+      if (from.weekday !== start.weekday && recurrence.slots.some((slot) => slot.weekday === start.weekday)) throw new Error("Cette récurrence possède déjà un créneau ce jour-là.");
+      await ctx.db.patch(id, { slots: recurrence.slots.map((slot) => slot === selected ? { weekday: start.weekday, start: start.time, end: end.time } : slot) });
+    }
+    return null;
+  },
+});
+
 /* ─── Activités (affectations) ────────────────────────────────────────────── */
 
 export const listActivities = query({
