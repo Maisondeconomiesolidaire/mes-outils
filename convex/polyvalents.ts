@@ -1,7 +1,7 @@
 import { internalMutation, mutation, query, type MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { formatUserName, requireCrmPermission, requireStaff, requireUser } from "./lib";
+import { formatUserName, requireAdmin, requireCrmPermission, requireStaff, requireUser } from "./lib";
 
 /**
  * Agents polyvalents (Recyclerie) — gestion des ouvriers polyvalents.
@@ -415,11 +415,12 @@ export const createRecurrence = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "create");
     const identity = await requireUser(ctx);
-    if (args.slots.length === 0 || args.slots.length > 7) throw new Error("Choisissez entre un et sept créneaux hebdomadaires.");
-    const days = new Set<number>();
+    if (args.slots.length === 0 || args.slots.length > 14) throw new Error("Choisissez entre un et quatorze créneaux hebdomadaires.");
+    const slots = new Set<string>();
     for (const slot of args.slots) {
-      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 7 || days.has(slot.weekday) || !/^\d{2}:\d{2}$/.test(slot.start) || !/^\d{2}:\d{2}$/.test(slot.end) || slot.end <= slot.start) throw new Error("Les créneaux récurrents sont invalides.");
-      days.add(slot.weekday);
+      const key = `${slot.weekday}-${slot.start}-${slot.end}`;
+      if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 6 || slots.has(key) || !/^\d{2}:\d{2}$/.test(slot.start) || !/^\d{2}:\d{2}$/.test(slot.end) || slot.end <= slot.start) throw new Error("Les créneaux récurrents sont invalides.");
+      slots.add(key);
     }
     const [task, worker] = await Promise.all([ctx.db.get(args.taskId), args.workerId ? ctx.db.get(args.workerId) : null]);
     if (!task) throw new Error("Tâche introuvable.");
@@ -429,6 +430,89 @@ export const createRecurrence = mutation({
       createdBy: formatUserName(identity),
       createdAt: Date.now(),
     });
+  },
+});
+
+const importSlot = v.object({ weekday: v.number(), start: v.string(), end: v.string() });
+const importedPlanningWorker = v.object({
+  firstName: v.string(),
+  lastName: v.string(),
+  availability: v.array(importSlot),
+  assignments: v.array(v.object({ task: v.string(), slots: v.array(importSlot) })),
+});
+
+/** Import idempotent du planning LCP, réservé aux administrateurs. */
+export const importPlanningLcp = mutation({
+  args: { workers: v.array(importedPlanningWorker), tasks: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const identity = await requireAdmin(ctx);
+    if (args.workers.length === 0 || args.workers.length > 100 || args.tasks.length > 50) {
+      throw new Error("Le fichier de planning est invalide.");
+    }
+    const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const validateSlots = (slots: Array<{ weekday: number; start: string; end: string }>) => {
+      if (slots.length === 0 || slots.length > 14) throw new Error("Un salarié doit avoir entre un et quatorze créneaux.");
+      const seen = new Set<string>();
+      for (const slot of slots) {
+        const key = `${slot.weekday}-${slot.start}-${slot.end}`;
+        if (!Number.isInteger(slot.weekday) || slot.weekday < 1 || slot.weekday > 6 || !/^\d{2}:\d{2}$/.test(slot.start) || !/^\d{2}:\d{2}$/.test(slot.end) || slot.end <= slot.start || seen.has(key)) throw new Error("Un créneau importé est invalide.");
+        seen.add(key);
+      }
+    };
+    const [workers, tasks, schedules, recurrences] = await Promise.all([
+      ctx.db.query("polyvalentWorkers").take(1000),
+      ctx.db.query("polyvalentTasks").take(1000),
+      ctx.db.query("polyvalentWorkerSchedules").take(1000),
+      ctx.db.query("polyvalentTaskRecurrences").take(1000),
+    ]);
+    const taskByName = new Map(tasks.map((task) => [normalize(task.name), task]));
+    for (const rawName of args.tasks) {
+      const name = rawName.trim();
+      if (!name) continue;
+      const key = normalize(name);
+      if (taskByName.has(key)) continue;
+      const id = await ctx.db.insert("polyvalentTasks", { name, site: "60", createdBy: formatUserName(identity), createdAt: Date.now() });
+      taskByName.set(key, (await ctx.db.get(id))!);
+    }
+    // Les deux créneaux non affectés livrés avec le prototype ne font pas partie du CSV.
+    for (const recurrence of recurrences) {
+      const task = taskByName.get(String(recurrence.taskId)) ?? tasks.find((item) => item._id === recurrence.taskId);
+      if (!recurrence.workerId && ["apports", "caissemagasin"].includes(normalize(task?.name ?? ""))) await ctx.db.delete(recurrence._id);
+    }
+    const workerByName = new Map<string, Doc<"polyvalentWorkers">>();
+    for (const worker of workers) workerByName.set(normalize(`${worker.firstName} ${worker.lastName}`), worker);
+    const scheduleByWorker = new Map(schedules.map((schedule) => [String(schedule.workerId), schedule]));
+    const recurrenceByWorkerTask = new Map(recurrences.filter((item) => item.workerId).map((item) => [`${item.workerId}-${item.taskId}`, item]));
+    let createdWorkers = 0;
+    let createdTasks = 0;
+    let updatedRecurrences = 0;
+    for (const imported of args.workers) {
+      validateSlots(imported.availability);
+      const key = normalize(`${imported.firstName} ${imported.lastName}`);
+      let worker = workerByName.get(key);
+      if (!worker) {
+        const id = await ctx.db.insert("polyvalentWorkers", { firstName: imported.firstName.trim(), lastName: imported.lastName.trim(), sites: ["60"], employmentType: "polyvalent", active: true, createdBy: formatUserName(identity), createdAt: Date.now() });
+        worker = (await ctx.db.get(id))!;
+        workerByName.set(key, worker);
+        createdWorkers++;
+      } else {
+        await ctx.db.patch(worker._id, { active: true, sites: Array.from(new Set([...(worker.sites ?? []), "60"])) });
+      }
+      const schedule = scheduleByWorker.get(String(worker._id));
+      if (schedule) await ctx.db.patch(schedule._id, { availability: imported.availability });
+      else await ctx.db.insert("polyvalentWorkerSchedules", { workerId: worker._id, availability: imported.availability });
+      for (const assignment of imported.assignments) {
+        validateSlots(assignment.slots);
+        const task = taskByName.get(normalize(assignment.task));
+        if (!task) throw new Error(`Tâche introuvable : ${assignment.task}`);
+        const recurrence = recurrenceByWorkerTask.get(`${worker._id}-${task._id}`);
+        if (recurrence) await ctx.db.patch(recurrence._id, { slots: assignment.slots });
+        else await ctx.db.insert("polyvalentTaskRecurrences", { taskId: task._id, workerId: worker._id, slots: assignment.slots, createdBy: formatUserName(identity), createdAt: Date.now() });
+        updatedRecurrences++;
+      }
+    }
+    createdTasks = args.tasks.filter((name) => !tasks.some((task) => normalize(task.name) === normalize(name))).length;
+    return { createdWorkers, createdTasks, updatedRecurrences, importedWorkers: args.workers.length };
   },
 });
 
