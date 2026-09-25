@@ -524,6 +524,47 @@ export const deleteRecurrence = mutation({
   },
 });
 
+/** Supprime un créneau affiché dans le planning. Les occurrences récurrentes
+ * restent définies pour les autres semaines : seule celle sélectionnée est
+ * exclue grâce à une exception. */
+export const deletePlannerOccurrence = mutation({
+  args: {
+    activityIds: v.array(v.id("polyvalentActivities")),
+    recurrenceIds: v.array(v.id("polyvalentTaskRecurrences")),
+    originalStartAt: v.number(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "delete");
+    if (!Number.isFinite(args.originalStartAt) || args.activityIds.length + args.recurrenceIds.length === 0 || args.activityIds.length + args.recurrenceIds.length > 100) {
+      throw new Error("Tâche à supprimer invalide.");
+    }
+
+    for (const id of new Set(args.activityIds)) {
+      const activity = await ctx.db.get(id);
+      if (activity) await ctx.db.delete(id);
+    }
+
+    for (const id of new Set(args.recurrenceIds)) {
+      const recurrence = await ctx.db.get(id);
+      if (!recurrence) continue;
+      const existing = await ctx.db
+        .query("polyvalentRecurrenceExceptions")
+        .withIndex("by_recurrenceId_and_originalStartAt", (q) =>
+          q.eq("recurrenceId", id).eq("originalStartAt", args.originalStartAt),
+        )
+        .unique();
+      if (!existing) {
+        await ctx.db.insert("polyvalentRecurrenceExceptions", {
+          recurrenceId: id,
+          originalStartAt: args.originalStartAt,
+        });
+      }
+    }
+    return null;
+  },
+});
+
 export const listRecurrenceExceptions = query({
   args: { startAt: v.number(), endAt: v.number() },
   handler: async (ctx, args) => {

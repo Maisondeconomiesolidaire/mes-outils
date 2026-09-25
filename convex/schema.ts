@@ -2913,7 +2913,9 @@ export default defineSchema(
   polyvalentRecurrenceExceptions: defineTable({
     recurrenceId: v.id("polyvalentTaskRecurrences"),
     originalStartAt: v.number(),
-    activityId: v.id("polyvalentActivities"),
+    /** Une occurrence peut être déplacée vers une activité datée, ou simplement
+     * supprimée. Dans ce dernier cas, aucun remplacement n'est créé. */
+    activityId: v.optional(v.id("polyvalentActivities")),
   })
     .index("by_originalStartAt", ["originalStartAt"])
     .index("by_recurrenceId_and_originalStartAt", ["recurrenceId", "originalStartAt"]),
