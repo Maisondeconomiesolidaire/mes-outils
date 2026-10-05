@@ -12,6 +12,21 @@ import { formatUserName, requireAdmin, requireCrmPermission, requireStaff, requi
  */
 const PAGE_KEY = "agents-polyvalents";
 
+/**
+ * Libellés des types de contrat d'un salarié.
+ *
+ * Doit rester aligné sur `polyvalentWorkers.employmentType` dans le schéma et
+ * sur `WORKER_EMPLOYMENT_LABELS` côté Recycapp (`src/lib/constants.ts`).
+ */
+const WORKER_EMPLOYMENT_LABELS: Record<
+  "permanent" | "encadranttechnique" | "polyvalent",
+  string
+> = {
+  permanent: "Ouvrier permanent",
+  encadranttechnique: "Encadrant technique",
+  polyvalent: "Ouvrier polyvalent",
+};
+
 /* ─── Tâches ──────────────────────────────────────────────────────────────── */
 
 export const listTasks = query({
@@ -243,19 +258,18 @@ export const listPersonas = query({
       .map((worker) => ({
         _id: worker._id,
         name: `${worker.firstName} ${worker.lastName}`.trim(),
-        role:
-          worker.employmentType === "permanent"
-            ? "Ouvrier permanent"
-            : worker.employmentType === "polyvalent"
-              ? "Ouvrier polyvalent"
-              : null,
+        role: worker.employmentType ? WORKER_EMPLOYMENT_LABELS[worker.employmentType] : null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "fr"));
   },
 });
 
 const workerSites = v.array(v.union(v.literal("60"), v.literal("76")));
-const workerEmploymentType = v.union(v.literal("permanent"), v.literal("polyvalent"));
+const workerEmploymentType = v.union(
+  v.literal("permanent"),
+  v.literal("encadranttechnique"),
+  v.literal("polyvalent"),
+);
 
 /** Champs de fiche partagés par la création et la modification d'un salarié. */
 function workerProfile(args: {
@@ -263,7 +277,7 @@ function workerProfile(args: {
   lastName: string;
   email?: string;
   sites?: ("60" | "76")[];
-  employmentType?: "permanent" | "polyvalent";
+  employmentType?: "permanent" | "encadranttechnique" | "polyvalent";
   hasDrivingLicenseB?: boolean;
   notes?: string;
 }) {

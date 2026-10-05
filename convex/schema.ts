@@ -2861,7 +2861,7 @@ export default defineSchema(
     /** Recycleries de rattachement : un salarié peut intervenir sur les deux. */
     sites: v.optional(v.array(v.union(v.literal("60"), v.literal("76")))),
     /** Type de contrat : agent permanent ou agent polyvalent. */
-    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("polyvalent"))),
+    employmentType: v.optional(v.union(v.literal("permanent"), v.literal("encadranttechnique"), v.literal("polyvalent"))),
     /** Le salarié est titulaire du permis de conduire B. */
     hasDrivingLicenseB: v.optional(v.boolean()),
     /** Informations libres liées à la fiche salarié. */
