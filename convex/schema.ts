@@ -2375,6 +2375,13 @@ export default defineSchema(
   /** Évènements internes affichés dans le calendrier CRM Recycapp. */
   recycappCalendarEvents: defineTable({
     title: v.string(),
+    /**
+     * Auteur de l'évènement (`identity.subject` Clerk). Optionnel : les
+     * évènements créés avant l'ajout du champ, et ceux importés d'un planning,
+     * n'ont pas d'auteur — leur suppression reste réservée à `calendrier:delete`.
+     */
+    authorClerkId: v.optional(v.string()),
+    authorName: v.optional(v.string()),
     animationType: v.optional(v.string()),
     structure: v.optional(v.string()),
     activity: v.optional(v.string()),

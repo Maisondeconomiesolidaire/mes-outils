@@ -1,7 +1,13 @@
 import { mutation, query, type QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { Doc, Id } from "./_generated/dataModel";
-import { requireCrmPermission } from "./lib";
+import {
+  formatUserName,
+  hasCrmPermission,
+  requireAnyCrmPermission,
+  requireCrmPermission,
+  requireUser,
+} from "./lib";
 
 /**
  * Durée hebdomadaire de travail d'un salarié, en heures.
@@ -36,19 +42,48 @@ async function eventWorkers(ctx: QueryCtx, workerIds: Id<"polyvalentWorkers">[] 
   );
 }
 
+/**
+ * Qui peut supprimer cet évènement.
+ *
+ * La permission `calendrier:delete` autorise tout le calendrier ; à défaut,
+ * chacun peut supprimer ce qu'il a lui-même créé. Sans cette seconde règle,
+ * l'équipe qui anime le calendrier (permissions `read`/`update`) ne pouvait
+ * retirer aucun de ses propres évènements.
+ */
+function canDeleteEvent(
+  event: Doc<"recycappCalendarEvents">,
+  clerkId: string,
+  globalDelete: boolean,
+) {
+  return globalDelete || (event.authorClerkId !== undefined && event.authorClerkId === clerkId);
+}
+
 export const list = query({ args: { from: v.number(), to: v.number() }, handler: async (ctx, args) => {
   await requireCrmPermission(ctx, "calendrier", "read");
+  const identity = await requireUser(ctx);
+  const globalDelete = await hasCrmPermission(ctx, "calendrier", "delete");
   const events = await ctx.db.query("recycappCalendarEvents").withIndex("by_startAt", (q) => q.gte("startAt", args.from).lte("startAt", args.to)).collect();
   return Promise.all(events.map(async (event) => ({
     ...event,
     attachmentUrls: await Promise.all(event.attachments.map((id) => ctx.storage.getUrl(id))),
     workers: await eventWorkers(ctx, event.workerIds),
+    canDelete: canDeleteEvent(event, identity.subject, globalDelete),
   })));
 } });
 export const create = mutation({ args: { title: v.string(), animationType: v.optional(v.string()), structure: v.optional(v.string()), activity: v.optional(v.string()), location: v.optional(v.string()), relatedEvent: v.optional(v.string()), targetAudience: v.optional(v.string()), organizer: v.optional(v.string()), completed: v.optional(v.boolean()), workerIds: v.optional(v.array(v.id("polyvalentWorkers"))), startAt: v.number(), endAt: v.number(), attachments: v.array(v.id("_storage")), urls: v.array(v.string()) }, handler: async (ctx, args) => {
-  await requireCrmPermission(ctx, "calendrier", "create");
+  // Le bouton « Nouvel évènement » est offert à toute l'équipe du calendrier :
+  // `update` vaut donc création, sinon ceux qui tiennent le calendrier au
+  // quotidien se heurtaient à un refus d'accès en le créant.
+  await requireAnyCrmPermission(ctx, [["calendrier", "create"], ["calendrier", "update"]]);
+  const identity = await requireUser(ctx);
   if (!args.title.trim() || args.endAt <= args.startAt) throw new Error("Renseignez un intitulé et des dates valides.");
-  return await ctx.db.insert("recycappCalendarEvents", { ...args, title: args.title.trim(), createdAt: Date.now() });
+  return await ctx.db.insert("recycappCalendarEvents", {
+    ...args,
+    title: args.title.trim(),
+    authorClerkId: identity.subject,
+    authorName: formatUserName(identity),
+    createdAt: Date.now(),
+  });
 } });
 
 /** Modifie l'ensemble des informations d'un évènement existant. */
@@ -123,7 +158,17 @@ export const setWorkers = mutation({ args: { id: v.id("recycappCalendarEvents"),
   await ctx.db.patch(args.id, { workerIds: args.workerIds });
 } });
 
-export const remove = mutation({ args: { id: v.id("recycappCalendarEvents") }, handler: async (ctx, args) => { await requireCrmPermission(ctx, "calendrier", "delete"); await ctx.db.delete(args.id); } });
+export const remove = mutation({ args: { id: v.id("recycappCalendarEvents") }, handler: async (ctx, args) => {
+  await requireCrmPermission(ctx, "calendrier", "read");
+  const identity = await requireUser(ctx);
+  const event = await ctx.db.get(args.id);
+  if (!event) return;
+  const globalDelete = await hasCrmPermission(ctx, "calendrier", "delete");
+  if (!canDeleteEvent(event, identity.subject, globalDelete)) {
+    throw new Error("Suppression non autorisée.");
+  }
+  await ctx.db.delete(args.id);
+} });
 
 /** Champs d'un évènement dont les valeurs sont choisies dans une liste. */
 const OPTION_FIELD = v.union(v.literal("animationType"), v.literal("structure"), v.literal("activity"), v.literal("targetAudience"));

@@ -1105,14 +1105,12 @@ function Evenements({
             [...(calendar ?? []), ...(undated ?? [])].find((item) => item.id === openId) ?? null
           }
           onClose={() => setOpenId(null)}
-          onDelete={
-            canCreate
-              ? (eventId) => {
-                  void removeEventWithConfirmation(eventId);
-                  setOpenId(null);
-                }
-              : undefined
-          }
+          // Le droit de suppression se décide par évènement (`canManage` :
+          // son auteur, ou un gestionnaire de la page), pas sur `create`.
+          onDelete={(eventId) => {
+            void removeEventWithConfirmation(eventId);
+            setOpenId(null);
+          }}
         />
       ) : null}
     </div>
