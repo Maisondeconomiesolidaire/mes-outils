@@ -4,7 +4,6 @@ import { Doc, Id } from "./_generated/dataModel";
 import {
   formatUserName,
   hasCrmPermission,
-  requireAnyCrmPermission,
   requireCrmPermission,
   requireUser,
 } from "./lib";
@@ -71,10 +70,7 @@ export const list = query({ args: { from: v.number(), to: v.number() }, handler:
   })));
 } });
 export const create = mutation({ args: { title: v.string(), animationType: v.optional(v.string()), structure: v.optional(v.string()), activity: v.optional(v.string()), location: v.optional(v.string()), relatedEvent: v.optional(v.string()), targetAudience: v.optional(v.string()), organizer: v.optional(v.string()), completed: v.optional(v.boolean()), workerIds: v.optional(v.array(v.id("polyvalentWorkers"))), startAt: v.number(), endAt: v.number(), attachments: v.array(v.id("_storage")), urls: v.array(v.string()) }, handler: async (ctx, args) => {
-  // Le bouton « Nouvel évènement » est offert à toute l'équipe du calendrier :
-  // `update` vaut donc création, sinon ceux qui tiennent le calendrier au
-  // quotidien se heurtaient à un refus d'accès en le créant.
-  await requireAnyCrmPermission(ctx, [["calendrier", "create"], ["calendrier", "update"]]);
+  await requireCrmPermission(ctx, "calendrier", "create");
   const identity = await requireUser(ctx);
   if (!args.title.trim() || args.endAt <= args.startAt) throw new Error("Renseignez un intitulé et des dates valides.");
   return await ctx.db.insert("recycappCalendarEvents", {

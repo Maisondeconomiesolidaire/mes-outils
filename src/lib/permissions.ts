@@ -139,7 +139,7 @@ export const RECYCAPP_PAGES: PermissionPage[] = [
     key: "calendrier",
     label: "Calendrier",
     description: "Planning des interventions.",
-    actions: ["read", "update"],
+    actions: ["read", "create", "update", "delete"],
   },
   {
     app: "recycapp",
