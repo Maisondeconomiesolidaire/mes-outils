@@ -7,7 +7,7 @@ import type { Doc, Id } from "./_generated/dataModel";
  * Prévenance de fin de contrat (cron quotidien).
  *
  * On regarde, pour chaque salarié actif, la date de fin de son DERNIER contrat
- * généré, et on prévient les responsables RH de sa structure à J-22, J-15 et
+ * généré, et on prévient les responsables RH de sa structure à J-22, J-12 et
  * J-3 de l'échéance.
  *
  * Deux écarts volontaires avec le script Airtable d'origine, qui comparait
@@ -25,7 +25,7 @@ import type { Doc, Id } from "./_generated/dataModel";
  */
 
 /** Paliers de prévenance, en jours avant la fin du contrat (du plus lointain au plus proche). */
-const NOTICE_THRESHOLDS = [22, 15, 3];
+const NOTICE_THRESHOLDS = [22, 12, 3];
 
 /**
  * Responsables prévenus, par structure du salarié.
@@ -92,7 +92,7 @@ function formatDateFr(dateStr: string): string {
 type PendingNotice = {
   contractId: Id<"hrContracts">;
   recipients: string[];
-  /** Palier déclenché (22, 15 ou 3) et paliers à marquer comme couverts. */
+  /** Palier déclenché (22, 12 ou 3) et paliers à marquer comme couverts. */
   threshold: number;
   coveredThresholds: number[];
   employeeName: string;
