@@ -249,7 +249,7 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
     key: "mesoutils:salles",
     label: "Salles",
     description: "Gestion des salles, capacites, services et disponibilites.",
-    actions: ["read", "create", "update"],
+    actions: ["read", "create", "update", "manage"],
   },
   {
     app: "mesoutils",

@@ -38,6 +38,8 @@ function assetImageArgs(asset: { photo?: unknown; photoUrl?: string }) {
 }
 
 const PAGE_KEY = "mesoutils:reservations";
+/** Gestion des salles : ses responsables annulent aussi les créneaux posés. */
+const ROOMS_PAGE_KEY = "mesoutils:salles";
 
 // Comptes prévenus dans l'app à chaque « nouvelle demande de réservation
 // véhicule ». Doit rester aligné sur `VEHICLE_REQUEST_MANAGER_EMAILS`, qui
@@ -462,28 +464,41 @@ export const bookRoom = mutation({
   },
 });
 
+/**
+ * Annule une réservation de salle.
+ *
+ * Qui peut annuler : la personne concernée (celle qui a réservé, ou celle pour
+ * qui on a réservé), un gestionnaire des réservations, ou un gestionnaire des
+ * salles — les responsables d'une salle doivent pouvoir libérer un créneau sans
+ * courir après son auteur.
+ *
+ * Quand l'annulation vient de quelqu'un d'autre, la personne est prévenue par
+ * mail, avec le motif saisi. L'email part aussi sur la suppression définitive :
+ * un créneau qui disparaît sans un mot est le pire des deux mondes.
+ */
 export const cancelRoomReservation = mutation({
   args: {
     reservationId: v.id("roomReservations"),
+    /** Motif transmis dans l'email quand l'annulation vient d'un gestionnaire. */
+    reason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
     const reservation = await ctx.db.get(args.reservationId);
     if (!reservation) return;
-    const isManager = await hasCrmPermission(ctx, PAGE_KEY, "manage");
-    if (!isReservationParticipant(reservation, identity.subject) && !isManager) {
+    const isOwner = isReservationParticipant(reservation, identity.subject);
+    const isManager =
+      (await hasCrmPermission(ctx, PAGE_KEY, "manage")) ||
+      (await hasCrmPermission(ctx, ROOMS_PAGE_KEY, "manage"));
+    if (!isOwner && !isManager) {
       throw new Error("Annulation non autorisée.");
     }
     const room = await ctx.db.get(reservation.roomId);
-    if (canPermanentlyDelete(identity)) {
-      await ctx.db.delete(args.reservationId);
-      return;
-    }
-    await ctx.db.patch(args.reservationId, { status: "cancelled" });
     const recipientClerkId = reservation.bookedForClerkId ?? reservation.clerkId;
     const email = await emailForClerkId(ctx, recipientClerkId);
     if (email) {
+      const reason = args.reason?.trim();
       await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendReservationEmail, {
         email,
         name: reservation.userName,
@@ -493,10 +508,19 @@ export const cancelRoomReservation = mutation({
         start: reservation.start,
         end: reservation.end,
         state: "cancelled",
+        note: reason || undefined,
+        // Son propre désistement n'a pas à être signé : on ne nomme l'auteur
+        // que lorsque l'annulation vient d'ailleurs.
+        cancelledBy: isOwner ? undefined : formatUserName(identity),
         photoUrl: (await photoForClerkId(ctx, recipientClerkId)) ?? undefined,
         ...(room ? assetImageArgs(room) : {}),
       });
     }
+    if (canPermanentlyDelete(identity)) {
+      await ctx.db.delete(args.reservationId);
+      return;
+    }
+    await ctx.db.patch(args.reservationId, { status: "cancelled" });
   },
 });
 

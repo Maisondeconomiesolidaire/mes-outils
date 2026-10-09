@@ -248,6 +248,8 @@ export const sendReservationEmail = internalAction({
       v.literal("cancelled"),
     ),
     note: v.optional(v.string()),
+    /** Auteur de l'annulation, quand elle ne vient pas de la personne concernée. */
+    cancelledBy: v.optional(v.string()),
     // Photo de profil du demandeur + photo de l'actif (véhicule / salle).
     photoUrl: v.optional(v.string()),
     assetImageUrl: v.optional(v.string()),
@@ -264,7 +266,10 @@ export const sendReservationEmail = internalAction({
       [args.assetKind === "vehicle" ? "Motif" : "Objet", args.label],
       ["Créneau", formatRange(args.start, args.end)],
     ];
-    if (args.note) rows.push(["Note", args.note]);
+    if (args.cancelledBy) rows.push(["Annulée par", args.cancelledBy]);
+    if (args.note) {
+      rows.push([args.state === "cancelled" ? "Motif de l'annulation" : "Note", args.note]);
+    }
 
     const heroUrl = resolveImageUrl({
       imageUrl: args.assetImageUrl,

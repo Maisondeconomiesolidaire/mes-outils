@@ -8,7 +8,7 @@ import { SectionHeader } from "../components/SectionHeader";
 import { usePermissionsAccess } from "../components/RequirePermission";
 import { Button } from "../components/ui/Button";
 import { EmptyState } from "../components/ui/EmptyState";
-import { Field, Input, Select } from "../components/ui/Field";
+import { Field, Input, Select, Textarea } from "../components/ui/Field";
 import { Modal } from "../components/ui/Modal";
 import { SinglePhotoUpload } from "../components/ui/SinglePhotoUpload";
 import { FullSpinner } from "../components/ui/Spinner";
@@ -17,7 +17,6 @@ import { canAccess } from "../lib/permissions";
 import { CalendarBoard, type CalendarEvent } from "../components/ui/CalendarBoard";
 import { SectionTabs } from "../components/ui/SectionTabs";
 import { ReservationRemarks } from "../components/ReservationRemarks";
-import { confirmPermanentDelete } from "../lib/confirm";
 
 type Room = {
   _id: Id<"rooms">;
@@ -266,6 +265,7 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
   const [selectedDay, setSelectedDay] = useState(dayStart);
   const [dayPanelOpen, setDayPanelOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [cancelTarget, setCancelTarget] = useState<RoomReservation | null>(null);
 
   if (reservations === undefined) return <FullSpinner label="Chargement du planning..." />;
 
@@ -399,6 +399,16 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
           }}
           canDeleteForever={canDeleteForever}
         />
+        <CancelRoomReservationModal
+          reservation={cancelTarget}
+          room={cancelTarget ? roomName.get(String(cancelTarget.roomId)) ?? null : null}
+          permanent={canDeleteForever}
+          onClose={() => setCancelTarget(null)}
+          onConfirm={async (reason) => {
+            await cancel({ reservationId: cancelTarget!._id, reason: reason || undefined });
+            setCancelTarget(null);
+          }}
+        />
       </div>
     );
   }
@@ -417,12 +427,13 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
     (a, b) => b._creationTime - a._creationTime,
   );
 
-  async function cancelReservationWithConfirmation(reservationId: Id<"roomReservations">) {
-    const message = canDeleteForever
-      ? "Êtes-vous sûr(e) de vouloir supprimer définitivement cette réservation de salle ?"
-      : "Annuler cette réservation de salle ? Elle restera conservée en base.";
-    if (!(await confirmPermanentDelete(message))) return;
-    void cancel({ reservationId });
+  /**
+   * L'annulation d'un créneau posé par quelqu'un d'autre passe par une fiche :
+   * le motif saisi part dans l'email qui prévient la personne concernée.
+   */
+  function cancelReservationWithConfirmation(reservationId: Id<"roomReservations">) {
+    const reservation = (reservations ?? []).find((item) => item._id === reservationId);
+    if (reservation) setCancelTarget(reservation);
   }
 
   return (
@@ -478,7 +489,96 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
         }}
         canDeleteForever={canDeleteForever}
       />
+      <CancelRoomReservationModal
+        reservation={cancelTarget}
+        room={cancelTarget ? roomName.get(String(cancelTarget.roomId)) ?? null : null}
+        permanent={canDeleteForever}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={async (reason) => {
+          await cancel({ reservationId: cancelTarget!._id, reason: reason || undefined });
+          setCancelTarget(null);
+        }}
+      />
     </div>
+  );
+}
+
+/**
+ * Annulation d'une réservation de salle par un responsable.
+ *
+ * Le motif est facultatif mais il part dans l'email : une annulation sans
+ * explication oblige la personne à venir demander pourquoi.
+ */
+function CancelRoomReservationModal({
+  reservation,
+  room,
+  permanent,
+  onClose,
+  onConfirm,
+}: {
+  reservation: RoomReservation | null;
+  room: Room | null;
+  permanent: boolean;
+  onClose: () => void;
+  onConfirm: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // La fiche se rouvre sur une autre réservation : le motif repart à zéro.
+  useEffect(() => {
+    setReason("");
+    setError(null);
+  }, [reservation?._id]);
+
+  if (!reservation) return null;
+
+  async function confirm() {
+    setError(null);
+    setSaving(true);
+    try {
+      await onConfirm(reason.trim());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Annulation impossible.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={permanent ? "Supprimer la réservation" : "Annuler la réservation"} className="max-w-lg">
+      <div className="space-y-4">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--muted)] p-3">
+          <p className="text-sm font-semibold text-[var(--foreground)]">
+            {reservation.title} · {room?.name ?? "Salle"}
+          </p>
+          <p className="mt-1 text-sm text-[var(--muted-foreground)]">
+            {reservation.userName} · {formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}
+          </p>
+        </div>
+        <Field label="Motif (facultatif)" hint="Il figure dans l'email envoyé à la personne concernée.">
+          <Textarea
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Salle réquisitionnée pour une réunion de direction…"
+            rows={3}
+          />
+        </Field>
+        <p className="text-sm text-[var(--muted-foreground)]">
+          {reservation.userName} recevra un email l'informant que le créneau est annulé
+          {permanent ? ", puis la réservation sera supprimée définitivement." : "."}
+        </p>
+        {error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>Fermer</Button>
+          <Button variant="outline" onClick={() => void confirm()} disabled={saving}>
+            <Trash2 className="h-4 w-4" />
+            {saving ? "Envoi…" : permanent ? "Supprimer et prévenir" : "Annuler et prévenir"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 
