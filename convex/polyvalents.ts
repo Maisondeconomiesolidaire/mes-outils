@@ -510,7 +510,7 @@ export const importPlanningLcp = mutation({
         workerByName.set(key, worker);
         createdWorkers++;
       } else {
-        await ctx.db.patch(worker._id, { active: true, sites: Array.from(new Set([...(worker.sites ?? []), "60"])) });
+        await ctx.db.patch(worker._id, { active: true, sites: Array.from(new Set<"60" | "76">([...(worker.sites ?? []), "60"])) });
       }
       const schedule = scheduleByWorker.get(String(worker._id));
       if (schedule) await ctx.db.patch(schedule._id, { availability: imported.availability });
