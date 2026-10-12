@@ -1146,3 +1146,39 @@ export const deleteAbsence = mutation({
     await ctx.db.delete(args.id);
   },
 });
+
+/**
+ * Demandes déjà datées (aérogommage, collecte…), pour la vue générale du
+ * planning.
+ *
+ * Requête distincte de `requests.scheduled`, qui relève de la permission du
+ * calendrier : exiger les deux droits rendrait la vue inaccessible à ceux qui
+ * tiennent le planning sans toucher au calendrier des demandes.
+ */
+export const listScheduledRequests = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const requests = await ctx.db
+      .query("requests")
+      .withIndex("by_scheduledDate", (q) =>
+        q.gte("scheduledDate", args.from).lte("scheduledDate", args.to),
+      )
+      .collect();
+    return requests
+      // Les dépôts ont leur propre vue : ils encombreraient le planning des
+      // ressources sans mobiliser l'équipe polyvalente.
+      .filter((request) => request.type !== "depot" && request.scheduledDate !== undefined)
+      .map((request) => ({
+        id: String(request._id),
+        reference: request.reference,
+        type: request.type,
+        scheduledDate: request.scheduledDate!,
+        customerName: request.customer
+          ? `${request.customer.firstName} ${request.customer.lastName}`.trim()
+          : undefined,
+        site: request.site,
+      }))
+      .sort((a, b) => a.scheduledDate - b.scheduledDate);
+  },
+});
