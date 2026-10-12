@@ -1053,3 +1053,96 @@ export const setEventWorkers = mutation({
     await ctx.db.patch(id, { workerIds });
   },
 });
+
+/* ─── Indisponibilités RH ──────────────────────────────────────────────────
+ *
+ * Congé, absence, formation, PMSMP, récupération : ce qui empêche un salarié
+ * d'être planifié. Elles se posent sur la grille comme les tâches, mais ne
+ * comptent dans aucune charge — une absence n'est pas un travail.
+ */
+
+const absenceKind = v.union(
+  v.literal("conge"),
+  v.literal("absence"),
+  v.literal("formation"),
+  v.literal("pmsmp"),
+  v.literal("recup"),
+);
+
+export const listAbsences = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const absences = await ctx.db
+      .query("polyvalentAbsences")
+      .withIndex("by_startAt", (q) => q.gte("startAt", args.from).lte("startAt", args.to))
+      .collect();
+    const workers = await ctx.db.query("polyvalentWorkers").take(1000);
+    const nameById = new Map(
+      workers.map((worker) => [String(worker._id), `${worker.firstName} ${worker.lastName}`.trim()]),
+    );
+    return absences
+      .map((absence) => ({
+        ...absence,
+        workerName: nameById.get(String(absence.workerId)) ?? "Salarié supprimé",
+      }))
+      .sort((a, b) => a.startAt - b.startAt);
+  },
+});
+
+function ensureAbsenceRange(startAt: number, endAt: number) {
+  if (!Number.isFinite(startAt) || !Number.isFinite(endAt) || endAt <= startAt) {
+    throw new Error("La fin doit être après le début.");
+  }
+}
+
+export const createAbsence = mutation({
+  args: {
+    workerId: v.id("polyvalentWorkers"),
+    kind: absenceKind,
+    startAt: v.number(),
+    endAt: v.number(),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "create");
+    const identity = await requireUser(ctx);
+    ensureAbsenceRange(args.startAt, args.endAt);
+    if (!await ctx.db.get(args.workerId)) throw new Error("Salarié introuvable.");
+    return await ctx.db.insert("polyvalentAbsences", {
+      ...args,
+      note: args.note?.trim() || undefined,
+      createdBy: formatUserName(identity),
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/** Déplacement par glissement : autre salarié, autre jour, même durée. */
+export const moveAbsence = mutation({
+  args: {
+    id: v.id("polyvalentAbsences"),
+    workerId: v.id("polyvalentWorkers"),
+    startAt: v.number(),
+    endAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    ensureAbsenceRange(args.startAt, args.endAt);
+    if (!await ctx.db.get(args.id)) throw new Error("Indisponibilité introuvable.");
+    if (!await ctx.db.get(args.workerId)) throw new Error("Salarié introuvable.");
+    await ctx.db.patch(args.id, {
+      workerId: args.workerId,
+      startAt: args.startAt,
+      endAt: args.endAt,
+    });
+  },
+});
+
+export const deleteAbsence = mutation({
+  args: { id: v.id("polyvalentAbsences") },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "delete");
+    await ctx.db.delete(args.id);
+  },
+});

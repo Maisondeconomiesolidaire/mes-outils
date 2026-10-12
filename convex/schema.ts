@@ -2966,6 +2966,32 @@ export default defineSchema(
     .index("by_originalStartAt", ["originalStartAt"])
     .index("by_recurrenceId_and_originalStartAt", ["recurrenceId", "originalStartAt"]),
 
+  /**
+   * Indisponibilités RH d'un salarié : ce qui l'empêche d'être planifié.
+   *
+   * Elles vivent à côté des créneaux de tâches plutôt que dedans : une absence
+   * n'est pas un travail, elle ne compte dans aucune charge et ne réclame aucun
+   * effectif. Les horaires sont stockés comme ceux d'un créneau, pour qu'une
+   * demi-journée reste possible.
+   */
+  polyvalentAbsences: defineTable({
+    workerId: v.id("polyvalentWorkers"),
+    kind: v.union(
+      v.literal("conge"),
+      v.literal("absence"),
+      v.literal("formation"),
+      v.literal("pmsmp"),
+      v.literal("recup"),
+    ),
+    startAt: v.number(),
+    endAt: v.number(),
+    note: v.optional(v.string()),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_startAt", ["startAt"])
+    .index("by_worker", ["workerId"]),
+
   polyvalentActivities: defineTable({
     taskId: v.id("polyvalentTasks"),
     /** Une tâche peut être planifiée avant qu'un salarié lui soit affecté. */
