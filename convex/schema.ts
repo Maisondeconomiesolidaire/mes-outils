@@ -2150,6 +2150,26 @@ export default defineSchema(
     .index("by_boutiquePublished", ["publishedOnBoutique"])
     .index("by_featured", ["featured"]),
 
+  /**
+   * Mode vacances de Klyd : la boutique Vinted tourne au ralenti.
+   *
+   * Une ligne par période, ouverte tant que `endedAt` est absent. Pendant une
+   * période, l'ancienneté des annonces cesse de courir et l'alerte des trois
+   * semaines ne part pas : rien ne sert de prévenir qu'un article traîne quand
+   * personne n'est là pour le retirer.
+   *
+   * L'historique est conservé plutôt que de décaler les dates de mise en ligne :
+   * une date de publication déplacée ne se retrouve plus, et deux congés
+   * successifs deviendraient impossibles à démêler.
+   */
+  klydeVacations: defineTable({
+    startedAt: v.number(),
+    endedAt: v.optional(v.number()),
+    note: v.optional(v.string()),
+    createdByClerkId: v.optional(v.string()),
+    createdAt: v.number(),
+  }).index("by_startedAt", ["startedAt"]),
+
   /** Visuels éditoriaux du header de la boutique Klyde. */
   klydeStorefront: defineTable({
     key: v.string(),

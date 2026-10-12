@@ -12,6 +12,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireAnyCrmPermission, requireCrmPermission } from "./lib";
 import { esc, resendSend } from "./emails";
+import { isOnVacation, vintedElapsedMs } from "./lib/klydeVacations";
 import { KLYDE_GENDERS, KLYDE_TAXONOMY, isKlydeTaxonomyChoice, klydeAverageWeightKg, klydeCategories, klydeSubcategories, klydeSubsubcategories } from "./klydeTaxonomy";
 
 const CONDITIONS = [
@@ -1448,13 +1449,80 @@ export const generateTryOn = action({
 
 const VINTED_ALERT_RECIPIENT = "s.maccioni@eco-solidaire.fr";
 const VINTED_ALERT_AFTER_MS = 21 * 24 * 60 * 60 * 1000; // 3 semaines
+
+/* ─── Mode vacances ────────────────────────────────────────────────────────
+ *
+ * Pendant les congés, l'ancienneté des annonces Vinted cesse de courir et
+ * l'alerte des trois semaines ne part pas. Les règles de calcul vivent dans
+ * `lib/klydeVacations.ts`, partagées avec l'application.
+ */
+
+export const vacationState = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "klyde:stock", "read");
+    const periods = await ctx.db.query("klydeVacations").withIndex("by_startedAt").collect();
+    const now = Date.now();
+    const current = periods.find((period) => period.startedAt <= now && period.endedAt === undefined);
+    return {
+      active: current !== undefined,
+      startedAt: current?.startedAt,
+      note: current?.note,
+      periods: periods
+        .slice()
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .slice(0, 20)
+        .map((period) => ({
+          id: period._id,
+          startedAt: period.startedAt,
+          endedAt: period.endedAt,
+          note: period.note,
+        })),
+    };
+  },
+});
+
+export const startVacation = mutation({
+  args: { note: v.optional(v.string()) },
+  handler: async (ctx, { note }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const identity = await ctx.auth.getUserIdentity();
+    const periods = await ctx.db.query("klydeVacations").collect();
+    const now = Date.now();
+    // Deux périodes ouvertes se chevaucheraient : la seconde demande est sans
+    // effet plutôt que de créer un historique impossible à relire.
+    if (isOnVacation(periods, now)) return;
+    await ctx.db.insert("klydeVacations", {
+      startedAt: now,
+      note: note?.trim() || undefined,
+      createdByClerkId: identity?.subject,
+      createdAt: now,
+    });
+  },
+});
+
+export const endVacation = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const periods = await ctx.db.query("klydeVacations").collect();
+    const now = Date.now();
+    const current = periods.find((period) => period.startedAt <= now && period.endedAt === undefined);
+    if (!current) return;
+    await ctx.db.patch(current._id, { endedAt: now });
+  },
+});
 const KLYD_FROM = "Klyd <no-reply@mesoutils.eco-solidaire.fr>";
 
 /** Articles en vente sur Vinted depuis 3 semaines, non gagnés, sans alerte encore envoyée. */
 export const listVintedAlertCandidates = internalQuery({
   args: {},
   handler: async (ctx) => {
-    const cutoff = Date.now() - VINTED_ALERT_AFTER_MS;
+    const now = Date.now();
+    const periods = await ctx.db.query("klydeVacations").collect();
+    // Pendant les vacances, aucune alerte : prévenir qu'un article traîne alors
+    // que personne n'est là pour le retirer ne sert qu'à encombrer la boîte.
+    if (isOnVacation(periods, now)) return [];
     const items = await ctx.db
       .query("klydeItems")
       .withIndex("by_status")
@@ -1464,7 +1532,9 @@ export const listVintedAlertCandidates = internalQuery({
         (item) =>
           item.vinted === true &&
           item.vintedAt != null &&
-          item.vintedAt <= cutoff &&
+          // L'ancienneté se compte vacances déduites : l'horloge de l'annonce
+          // s'arrête pendant les congés et reprend au retour.
+          vintedElapsedMs(item.vintedAt, periods, now) >= VINTED_ALERT_AFTER_MS &&
           item.status !== "gagne" &&
           item.status !== "archive" &&
           item.archivedAt === undefined &&
