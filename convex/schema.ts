@@ -2081,6 +2081,25 @@ export default defineSchema(
     // Nombre de fois où l'annonce Vinted a été prolongée après l'alerte de 3 semaines.
     vintedExtensionCount: v.optional(v.number()),
     vintedLastExtendedAt: v.optional(v.number()),
+    /**
+     * Vente annulée : l'article revient, ou l'acheteur est remboursé.
+     *
+     * - `retour_client` : retour aux frais de l'acheteur — ni gain ni perte ;
+     * - `retour_vendeur` : retour à nos frais (erreur de notre côté) — le port
+     *   reste à notre charge ;
+     * - `remboursement` : somme rendue intégralement, l'acheteur garde l'article.
+     *
+     * Dans tous les cas la vente sort du chiffre d'affaires ; `returnAmount`
+     * porte ce qui reste réellement à notre charge (nul pour `retour_client`).
+     */
+    returnKind: v.optional(v.union(
+      v.literal("retour_client"),
+      v.literal("retour_vendeur"),
+      v.literal("remboursement"),
+    )),
+    returnAmount: v.optional(v.number()),
+    returnedAt: v.optional(v.number()),
+    returnNote: v.optional(v.string()),
     /** Date historique d'encaissement, conservée pour les anciens articles. */
     soldAt: v.optional(v.number()),
     /**

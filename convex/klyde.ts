@@ -811,6 +811,64 @@ export const setActualSalePrice = mutation({
   },
 });
 
+/**
+ * Retour ou remboursement d'une vente.
+ *
+ * Trois situations, qui ne coûtent pas la même chose :
+ * - l'article ne convient pas et l'acheteur paie son retour — ni gain ni perte ;
+ * - l'erreur vient de nous et le retour est à nos frais — le port est à notre
+ *   charge ;
+ * - l'acheteur est remboursé et garde l'article — la somme rendue est perdue.
+ *
+ * Dans les trois cas la vente sort du chiffre d'affaires. Le montant saisi est
+ * ce qui reste réellement à notre charge, et il est ignoré pour un retour aux
+ * frais de l'acheteur, qui ne nous coûte rien.
+ */
+export const setReturn = mutation({
+  args: {
+    id: v.id("klydeItems"),
+    kind: v.union(
+      v.literal("retour_client"),
+      v.literal("retour_vendeur"),
+      v.literal("remboursement"),
+    ),
+    amount: v.optional(v.number()),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, kind, amount, note }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    if (amount !== undefined && (!Number.isFinite(amount) || amount < 0)) {
+      throw new Error("Le montant doit être positif.");
+    }
+    await ctx.db.patch(id, {
+      returnKind: kind,
+      returnAmount: kind === "retour_client" ? undefined : normalizePrice(amount),
+      returnedAt: item.returnedAt ?? Date.now(),
+      returnNote: note?.trim() || undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Annulation d'un retour saisi par erreur : la vente réintègre le rapport. */
+export const clearReturn = mutation({
+  args: { id: v.id("klydeItems") },
+  handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, "klyde:stock", "update");
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Article introuvable.");
+    await ctx.db.patch(id, {
+      returnKind: undefined,
+      returnAmount: undefined,
+      returnedAt: undefined,
+      returnNote: undefined,
+      updatedAt: Date.now(),
+    });
+  },
+});
+
 /** Compteur Vinted relevé à la vente, modifiable même une fois l'article gagné. */
 export const setViewsAtSale = mutation({
   args: { id: v.id("klydeItems"), viewsAtSale: v.optional(v.number()) },

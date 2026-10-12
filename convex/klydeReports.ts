@@ -12,7 +12,12 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import { requireCrmPermission } from "./lib";
-import { isRecordedKlydeSale as isRecordedSale, klydeSaleAmount as saleAmount } from "./lib/klydeSalesRevenue";
+import {
+  isRecordedKlydeSale as isRecordedSale,
+  isReturnedKlydeSale,
+  klydeReturnCost,
+  klydeSaleAmount as saleAmount,
+} from "./lib/klydeSalesRevenue";
 import { summarizeStoreRevenue } from "./lib/klydeStoreRevenue";
 import { klydeAverageWeightKg } from "./klydeTaxonomy";
 import { bytesToBase64, esc, resendSend } from "./emails";
@@ -86,6 +91,11 @@ export type SalesReport = {
   /** Ventes en attente d'encaissement (expédiées, pas encore gagnées). */
   pendingRevenue: number;
   pendingCount: number;
+  /** Retours et remboursements de la période : ce qu'ils laissent à notre charge. */
+  returnsCost: number;
+  returnsCount: number;
+  /** Chiffre d'affaires une fois les retours déduits. */
+  netRevenue: number;
   sales: ReportSale[];
   generatedAt: number;
 };
@@ -153,6 +163,21 @@ async function buildReport(
   const items = await ctx.db.query("klydeItems").collect();
   const sold = items.filter(isRecordedSale);
 
+  // Retours et remboursements de la période : la vente est sortie du chiffre
+  // d'affaires par `isRecordedSale`, ce qui reste à notre charge se compte ici.
+  let returnsCost = 0;
+  let returnsCount = 0;
+  for (const item of items) {
+    if (!isReturnedKlydeSale(item)) continue;
+    const itemOutlet = item.outlet === "mobifrip" ? "mobifrip" : "klyd";
+    if (outlet && itemOutlet !== outlet) continue;
+    const when = inParis(item.returnedAt ?? saleDate(item));
+    if (when.year !== year) continue;
+    if (month !== null && when.month !== month) continue;
+    returnsCost += klydeReturnCost(item);
+    returnsCount += 1;
+  }
+
   const monthly = new Array(12).fill(0) as number[];
   const monthlyWeight = new Array(12).fill(0) as number[];
   const sales: ReportSale[] = [];
@@ -196,6 +221,9 @@ async function buildReport(
     month,
     label: periodLabel(year, month),
     revenue: Math.round(revenue * 100) / 100,
+    returnsCost: Math.round(returnsCost * 100) / 100,
+    returnsCount,
+    netRevenue: Math.round((revenue - returnsCost) * 100) / 100,
     salesCount: sales.length,
     averageBasket: sales.length ? Math.round((revenue / sales.length) * 100) / 100 : 0,
     weightKg: Math.round(weightKg * 100) / 100,
