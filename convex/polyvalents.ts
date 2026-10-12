@@ -966,3 +966,90 @@ export const setWorkerEmploymentType = mutation({
     await ctx.db.patch(args.id, { employmentType: args.employmentType });
   },
 });
+
+/* ─── Évènements à staffer ─────────────────────────────────────────────────
+ *
+ * Un évènement se crée dans deux applications — le calendrier de la Recyclerie
+ * (`recycappCalendarEvents`) et l'espace partagé de Mes Outils (`events`) — mais
+ * il mobilise la même équipe. Le planning des ressources les lit donc tous les
+ * deux, et signale ceux auxquels personne n'est encore affecté : c'est là que
+ * le travail de staffing se fait, pas dans le calendrier d'origine.
+ */
+
+/** Évènement du planning, quelle que soit l'application qui l'a créé. */
+const plannerEventSource = v.union(v.literal("recyclerie"), v.literal("mesoutils"));
+
+export const listPlannerEvents = query({
+  args: { from: v.number(), to: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const workers = await ctx.db.query("polyvalentWorkers").take(1000);
+    const nameById = new Map(
+      workers.map((worker) => [String(worker._id), `${worker.firstName} ${worker.lastName}`.trim()]),
+    );
+    const names = (ids: Id<"polyvalentWorkers">[] | undefined) =>
+      (ids ?? []).map((id) => nameById.get(String(id)) ?? "Salarié supprimé");
+
+    const recyclerie = await ctx.db
+      .query("recycappCalendarEvents")
+      .withIndex("by_startAt", (q) => q.gte("startAt", args.from).lte("startAt", args.to))
+      .collect();
+    // Les évènements sans date n'ont pas de place au planning : l'index les
+    // range avant toute valeur numérique, la borne basse les écarte donc.
+    const mesoutils = await ctx.db
+      .query("events")
+      .withIndex("by_start", (q) => q.gte("start", args.from).lte("start", args.to))
+      .collect();
+
+    return [
+      ...recyclerie.map((event) => ({
+        source: "recyclerie" as const,
+        id: String(event._id),
+        title: event.title,
+        startAt: event.startAt,
+        endAt: event.endAt,
+        location: event.location,
+        workerIds: event.workerIds ?? [],
+        workerNames: names(event.workerIds),
+      })),
+      ...mesoutils.map((event) => ({
+        source: "mesoutils" as const,
+        id: String(event._id),
+        title: event.title,
+        startAt: event.start!,
+        endAt: event.end ?? event.start!,
+        location: event.location,
+        workerIds: event.workerIds ?? [],
+        workerNames: names(event.workerIds),
+      })),
+    ].sort((a, b) => a.startAt - b.startAt);
+  },
+});
+
+/**
+ * Affecte des salariés à un évènement, d'où qu'il vienne.
+ *
+ * La permission est celle du planning (`agents-polyvalents`) et non celle du
+ * calendrier d'origine : mobiliser l'équipe est le métier de cette page, et
+ * demander en plus les droits de Mes Outils y rendrait l'action inutilisable.
+ */
+export const setEventWorkers = mutation({
+  args: {
+    source: plannerEventSource,
+    eventId: v.string(),
+    workerIds: v.array(v.id("polyvalentWorkers")),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    const workerIds = args.workerIds.length ? args.workerIds : undefined;
+    if (args.source === "recyclerie") {
+      const id = ctx.db.normalizeId("recycappCalendarEvents", args.eventId);
+      if (!id) throw new Error("Évènement introuvable.");
+      await ctx.db.patch(id, { workerIds });
+      return;
+    }
+    const id = ctx.db.normalizeId("events", args.eventId);
+    if (!id) throw new Error("Évènement introuvable.");
+    await ctx.db.patch(id, { workerIds });
+  },
+});
