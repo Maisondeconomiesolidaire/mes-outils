@@ -656,6 +656,14 @@ export default defineSchema(
     assignedTo: v.optional(v.id("teamMembers")),
     /** Équipe opérationnelle Recyclerie (remplace progressivement assignedTo). */
     assignedWorkerId: v.optional(v.id("polyvalentWorkers")),
+    /**
+     * Équipe complète mobilisée sur la demande, depuis le planning.
+     *
+     * Une collecte part rarement seule. `assignedWorkerId` reste renseigné avec
+     * le premier de la liste : les vues et l'index `by_assignedWorkerId` qui
+     * s'appuient dessus continuent de fonctionner sans rien changer.
+     */
+    assignedWorkerIds: v.optional(v.array(v.id("polyvalentWorkers"))),
     estimatedHours: v.optional(v.number()),
     actualHours: v.optional(v.number()),
     quoteAmount: v.optional(v.number()),

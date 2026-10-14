@@ -1165,20 +1165,62 @@ export const listScheduledRequests = query({
         q.gte("scheduledDate", args.from).lte("scheduledDate", args.to),
       )
       .collect();
+    const workers = await ctx.db.query("polyvalentWorkers").take(1000);
+    const nameById = new Map(
+      workers.map((worker) => [String(worker._id), `${worker.firstName} ${worker.lastName}`.trim()]),
+    );
     return requests
       // Les dépôts ont leur propre vue : ils encombreraient le planning des
       // ressources sans mobiliser l'équipe polyvalente.
       .filter((request) => request.type !== "depot" && request.scheduledDate !== undefined)
-      .map((request) => ({
-        id: String(request._id),
-        reference: request.reference,
-        type: request.type,
-        scheduledDate: request.scheduledDate!,
-        customerName: request.customer
-          ? `${request.customer.firstName} ${request.customer.lastName}`.trim()
-          : undefined,
-        site: request.site,
-      }))
+      .map((request) => {
+        // L'équipe complète prime ; à défaut, le salarié unique des demandes
+        // attribuées avant que le planning ne sache en mobiliser plusieurs.
+        const workerIds = request.assignedWorkerIds?.length
+          ? request.assignedWorkerIds
+          : request.assignedWorkerId
+            ? [request.assignedWorkerId]
+            : [];
+        return {
+          id: String(request._id),
+          reference: request.reference,
+          type: request.type,
+          scheduledDate: request.scheduledDate!,
+          customerName: request.customer
+            ? `${request.customer.firstName} ${request.customer.lastName}`.trim()
+            : undefined,
+          site: request.site,
+          workerIds,
+          workerNames: workerIds.map((id) => nameById.get(String(id)) ?? "Salarié supprimé"),
+        };
+      })
       .sort((a, b) => a.scheduledDate - b.scheduledDate);
+  },
+});
+
+/**
+ * Mobilise une équipe sur une demande datée, depuis le planning.
+ *
+ * `assignedWorkerId` garde le premier de la liste : les vues du CRM et l'index
+ * `by_assignedWorkerId` s'appuient dessus, les laisser dériver ferait
+ * disparaître la demande des filtres par salarié.
+ *
+ * La permission est celle du planning, et non celle des demandes : mobiliser
+ * l'équipe est le métier de cette page.
+ */
+export const setRequestWorkers = mutation({
+  args: {
+    requestId: v.id("requests"),
+    workerIds: v.array(v.id("polyvalentWorkers")),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "update");
+    const request = await ctx.db.get(args.requestId);
+    if (!request) throw new Error("Demande introuvable.");
+    await ctx.db.patch(args.requestId, {
+      assignedWorkerIds: args.workerIds.length ? args.workerIds : undefined,
+      assignedWorkerId: args.workerIds[0],
+      updatedAt: Date.now(),
+    });
   },
 });
