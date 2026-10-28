@@ -213,6 +213,14 @@ export const bpBilling = v.object({
   /** Dernier changement manuel du statut de règlement : qui et quand. */
   paymentStatusUpdatedBy: v.optional(v.string()),
   paymentStatusUpdatedAt: v.optional(v.number()),
+  /**
+   * Dépôt facturé au mois (dépôts du 1er novembre 2026 et après) : pas de
+   * facture Stripe au dépôt, le montant attend la facture groupée du 1er du
+   * mois suivant.
+   */
+  monthly: v.optional(v.boolean()),
+  /** Facture mensuelle groupée qui a repris ce dépôt. */
+  monthlyInvoiceId: v.optional(v.id("bpMonthlyInvoices")),
   /** Horodatage de la dernière relance de règlement envoyée par email. */
   lastReminderAt: v.optional(v.number()),
   error: v.optional(v.string()),
@@ -2577,6 +2585,31 @@ export default defineSchema(
     .index("by_number", ["depotNumber"])
     .index("by_profile", ["createdByProfileId"])
     .index("by_createdAt", ["createdAt"]),
+
+  /**
+   * Facture mensuelle groupée Bennes & Pro : le 1er du mois, une facture
+   * Stripe par entreprise reprend tous ses dépôts DIB / bois du mois écoulé.
+   */
+  bpMonthlyInvoices: defineTable({
+    companyId: v.id("bpCompanies"),
+    /** Mois facturé, « AAAA-MM » (heure de Paris). */
+    period: v.string(),
+    depotIds: v.array(v.id("bpDepots")),
+    /** Totaux par matière sur le mois (prix moyen si le tarif a changé). */
+    items: v.array(bpBillingLine),
+    weightKg: v.number(),
+    /** Montant HT en centimes d'euro. */
+    amountCents: v.number(),
+    vatRate: v.number(),
+    status: v.union(v.literal("pending"), v.literal("invoiced"), v.literal("error")),
+    stripeInvoiceId: v.optional(v.string()),
+    stripeInvoiceUrl: v.optional(v.string()),
+    error: v.optional(v.string()),
+    createdAt: v.number(),
+    invoicedAt: v.optional(v.number()),
+  })
+    .index("by_company_and_period", ["companyId", "period"])
+    .index("by_period", ["period"]),
 
   // ───────────────────────── App « Pointeuse LSDB » ─────────────────────────
   // Suivi des salariés et des chantiers : clients, projets, pointages,
