@@ -1275,6 +1275,8 @@ export const saveInvoicePaymentStatus = internalMutation({
   handler: async (ctx, { depotId, paymentStatus, stripeInvoiceUrl, paidAt }) => {
     const depot = await ctx.db.get(depotId);
     if (!depot?.billing) return;
+    // Un statut posé à la main que Stripe ne sait pas refléter prime.
+    if (depot.billing.paymentStatusManual) return;
     await ctx.db.patch(depotId, {
       billing: {
         ...depot.billing,
@@ -1567,6 +1569,96 @@ export const refreshInvoiceStatus = action({
   },
 });
 
+/* ─── Statut de règlement posé à la main ──────────────────────────────────── */
+
+const manualPaymentStatus = v.union(
+  v.literal("open"),
+  v.literal("paid"),
+  v.literal("uncollectible"),
+  v.literal("void"),
+);
+
+export const saveManualPaymentStatus = internalMutation({
+  args: {
+    depotId: v.id("bpDepots"),
+    paymentStatus: manualPaymentStatus,
+    manual: v.boolean(),
+    updatedBy: v.optional(v.string()),
+  },
+  handler: async (ctx, { depotId, paymentStatus, manual, updatedBy }) => {
+    const depot = await ctx.db.get(depotId);
+    if (!depot?.billing) return;
+    const { paidAt, paymentStatusManual: _manual, ...rest } = depot.billing;
+    await ctx.db.patch(depotId, {
+      billing: {
+        ...rest,
+        paymentStatus,
+        // La date de règlement n'a de sens que pour une facture payée.
+        ...(paymentStatus === "paid" ? { paidAt: paidAt ?? Date.now() } : {}),
+        ...(manual ? { paymentStatusManual: true } : {}),
+        ...(updatedBy ? { paymentStatusUpdatedBy: updatedBy } : {}),
+        paymentStatusUpdatedAt: Date.now(),
+      },
+    });
+  },
+});
+
+/**
+ * Change le statut de règlement d'une facture (ex. réglée par virement ou
+ * chèque, hors Stripe). Stripe suit quand il le peut — payée hors ligne,
+ * annulée, irrécouvrable — pour que le lien de paiement ne reste pas ouvert.
+ * Sinon (ex. remettre « en attente » une facture payée), le statut est gardé
+ * localement et l'actualisation Stripe ne l'écrase plus.
+ */
+export const setInvoicePaymentStatus = action({
+  args: { depotId: v.id("bpDepots"), paymentStatus: manualPaymentStatus },
+  handler: async (ctx, { depotId, paymentStatus }): Promise<{ syncedWithStripe: boolean }> => {
+    const access: {
+      isAdmin?: boolean;
+      bootstrapMode?: boolean;
+      grants: Array<{ pageKey: string; actions: string[] }>;
+    } = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, "bennespro:depots", "update")) {
+      throw new Error("Accès insuffisant.");
+    }
+    const identity = await ctx.auth.getUserIdentity();
+    const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
+      await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
+    const billing = data?.depot.billing;
+    if (!billing || billing.status !== "invoiced") {
+      throw new Error("Ce dépôt n'a pas de facture émise.");
+    }
+
+    let syncedWithStripe = false;
+    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
+    if (secretKey && billing.stripeInvoiceId) {
+      const invoiceId = billing.stripeInvoiceId;
+      const current = stripeStatus((await stripeGet(secretKey, `invoices/${invoiceId}`)).status);
+      const collectible = current === "open" || current === "uncollectible";
+      if (current === paymentStatus) {
+        syncedWithStripe = true;
+      } else if (collectible && paymentStatus === "paid") {
+        await stripeRequest(secretKey, `invoices/${invoiceId}/pay`, { paid_out_of_band: "true" });
+        syncedWithStripe = true;
+      } else if (collectible && paymentStatus === "void") {
+        await stripeRequest(secretKey, `invoices/${invoiceId}/void`, {});
+        syncedWithStripe = true;
+      } else if (current === "open" && paymentStatus === "uncollectible") {
+        await stripeRequest(secretKey, `invoices/${invoiceId}/mark_uncollectible`, {});
+        syncedWithStripe = true;
+      }
+    }
+
+    await ctx.runMutation(internal.bennespro.saveManualPaymentStatus, {
+      depotId,
+      paymentStatus,
+      manual: !syncedWithStripe,
+      updatedBy: identity?.name ?? identity?.email ?? undefined,
+    });
+    return { syncedWithStripe };
+  },
+});
+
 /* ─── Suppression définitive (permission « delete ») ──────────────────────── */
 
 async function requireAccess(
@@ -1717,6 +1809,9 @@ export const sendInvoiceEmail = action({
     const { depot, company } = data;
     if (!depot.billing?.stripeInvoiceUrl || !depot.billing.stripeInvoiceId) {
       throw new Error("Aucune facture Stripe pour ce dépôt.");
+    }
+    if (depot.billing.paymentStatus === "paid" || depot.billing.paymentStatus === "void") {
+      throw new Error("Cette facture est déjà réglée ou annulée.");
     }
     const email = company?.contactEmail?.trim();
     if (!email) {
