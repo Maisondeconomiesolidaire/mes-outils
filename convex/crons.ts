@@ -72,12 +72,4 @@ crons.hourly(
 
 // Social mirrors are refreshed on demand from the sharing workspace.
 
-// Bennes & Pro : le 1er du mois, une facture Stripe groupée par entreprise
-// pour ses dépôts DIB / bois du mois écoulé (06h15 ou 07h15 à Paris).
-crons.monthly(
-  "factures mensuelles bennes et pro",
-  { day: 1, hourUTC: 5, minuteUTC: 15 },
-  internal.bennespro.prepareMonthlyInvoices,
-);
-
 export default crons;

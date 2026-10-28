@@ -1067,8 +1067,7 @@ export const createDepot = mutation({
       .first();
     const depotNumber = (last?.depotNumber ?? 0) + 1;
 
-    const createdAt = Date.now();
-    const billing = await buildBilling(ctx, args.items, createdAt);
+    const billing = await buildBilling(ctx, args.items);
 
     const depotId = await ctx.db.insert("bpDepots", {
       ...depotArgs,
@@ -1076,10 +1075,9 @@ export const createDepot = mutation({
       billing,
       createdBy: identity.email ?? undefined,
       ...actingProfile,
-      createdAt,
+      createdAt: Date.now(),
     });
-    // Facturation au mois : le montant attend la facture groupée du 1er.
-    if (billing && !billing.monthly) {
+    if (billing) {
       await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
     }
     return { depotId, depotNumber };
@@ -1113,13 +1111,7 @@ function materialWeightKg(items: DepotItems, material: string): number {
   return Math.round(kg * 100) / 100;
 }
 
-/**
- * Début de la facturation mensuelle groupée : 1er novembre 2026, 00:00 à Paris.
- * Les dépôts antérieurs gardent leur facture Stripe au dépôt.
- */
-const MONTHLY_BILLING_START = Date.UTC(2026, 9, 31, 23, 0, 0);
-
-async function buildBilling(ctx: QueryCtx | MutationCtx, items: DepotItems, depotCreatedAt: number) {
+async function buildBilling(ctx: QueryCtx | MutationCtx, items: DepotItems) {
   const [dibPriceCentsPerKg, woodPriceCentsPerKg] = await Promise.all([readDibPrice(ctx), readWoodPrice(ctx)]);
   const billableItems = ([
     { material: DIB_MATERIAL, weightKg: materialWeightKg(items, DIB_MATERIAL), priceCentsPerKg: dibPriceCentsPerKg },
@@ -1142,7 +1134,6 @@ async function buildBilling(ctx: QueryCtx | MutationCtx, items: DepotItems, depo
     items: billableItems,
     vatRate: DIB_VAT_RATE,
     status: "pending" as const,
-    ...(depotCreatedAt >= MONTHLY_BILLING_START ? { monthly: true } : {}),
   };
 }
 
@@ -1233,19 +1224,14 @@ export const billDepot = mutation({
     if (depot.billing?.status === "invoiced") {
       throw new Error("Ce dépôt est déjà facturé.");
     }
-    if (depot.billing?.monthlyInvoiceId) {
-      throw new Error("Ce dépôt est repris dans une facture mensuelle groupée.");
-    }
-    const billing = await buildBilling(ctx, depot.items, depot.createdAt);
+    const billing = await buildBilling(ctx, depot.items);
     if (!billing) {
       throw new Error("Aucun poids de DIB ou de bois facturable (kg ou tonne) sur ce dépôt.");
     }
     await ctx.db.patch(depotId, {
       billing,
     });
-    if (!billing.monthly) {
-      await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
-    }
+    await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
   },
 });
 
@@ -1255,8 +1241,7 @@ export const depotForBilling = internalQuery({
     const depot = await ctx.db.get(depotId);
     if (!depot) return null;
     const company = await ctx.db.get(depot.companyId);
-    const monthlyInvoice = depot.billing?.monthlyInvoiceId ? await ctx.db.get(depot.billing.monthlyInvoiceId) : null;
-    return { depot, company, monthlyInvoice };
+    return { depot, company };
   },
 });
 
@@ -1292,34 +1277,16 @@ export const saveInvoicePaymentStatus = internalMutation({
     if (!depot?.billing) return;
     // Un statut posé à la main que Stripe ne sait pas refléter prime.
     if (depot.billing.paymentStatusManual) return;
-    for (const shared of await depotsSharingInvoice(ctx, depot)) {
-      if (!shared.billing) continue;
-      await ctx.db.patch(shared._id, {
-        billing: {
-          ...shared.billing,
-          paymentStatus,
-          ...(stripeInvoiceUrl ? { stripeInvoiceUrl } : {}),
-          ...(paidAt ? { paidAt } : {}),
-        },
-      });
-    }
+    await ctx.db.patch(depotId, {
+      billing: {
+        ...depot.billing,
+        paymentStatus,
+        ...(stripeInvoiceUrl ? { stripeInvoiceUrl } : {}),
+        ...(paidAt ? { paidAt } : {}),
+      },
+    });
   },
 });
-
-/**
- * Dépôts portés par la même facture Stripe : une facture mensuelle en regroupe
- * plusieurs, leur statut de règlement avance d'un bloc.
- */
-async function depotsSharingInvoice(ctx: MutationCtx, depot: Doc<"bpDepots">) {
-  const monthlyInvoiceId = depot.billing?.monthlyInvoiceId;
-  if (!monthlyInvoiceId) return [depot];
-  const monthly = await ctx.db.get(monthlyInvoiceId);
-  if (!monthly) return [depot];
-  const depots = await Promise.all(monthly.depotIds.map((id) => ctx.db.get(id)));
-  return depots.filter(
-    (item): item is Doc<"bpDepots"> => item !== null && item.billing?.monthlyInvoiceId === monthlyInvoiceId,
-  );
-}
 
 /** Enregistre l'horodatage de la dernière relance envoyée. */
 export const recordReminderSent = internalMutation({
@@ -1427,45 +1394,6 @@ async function refreshStripeInvoiceBilling(
   return { paymentStatus, invoice };
 }
 
-/** Client Stripe de l'entreprise : retrouvé ou créé, puis mémorisé sur sa fiche. */
-async function ensureStripeCustomer(
-  ctx: Pick<ActionCtx, "runMutation">,
-  secretKey: string,
-  company: Doc<"bpCompanies">,
-): Promise<string> {
-  let customerId = company.stripeCustomerId;
-  // Pas encore mémorisé : on cherche d'abord un client Stripe existant avec
-  // la même adresse email avant d'en créer un — évite qu'un nouveau client
-  // Stripe soit créé à chaque facture.
-  if (!customerId && company.contactEmail) {
-    const search = await stripeGet(
-      secretKey,
-      `customers?email=${encodeURIComponent(company.contactEmail)}&limit=1`,
-    );
-    const existing = Array.isArray(search.data) ? search.data[0] : undefined;
-    const existingId = (existing as { id?: unknown } | undefined)?.id;
-    if (typeof existingId === "string") customerId = existingId;
-  }
-  if (!customerId) {
-    const customer = await stripeRequest(secretKey, "customers", {
-      name: company.name,
-      ...(company.contactEmail ? { email: company.contactEmail } : {}),
-      ...(company.contactPhone ? { phone: company.contactPhone } : {}),
-      "metadata[bpCompanyId]": company._id,
-      ...(company.siret ? { "metadata[siret]": company.siret } : {}),
-    });
-    customerId = customer.id as string;
-  }
-  // Mémorise l'id (retrouvé ou créé) sur l'entreprise pour les prochaines fois.
-  if (customerId !== company.stripeCustomerId) {
-    await ctx.runMutation(internal.bennespro.saveCompanyStripeCustomer, {
-      companyId: company._id,
-      stripeCustomerId: customerId,
-    });
-  }
-  return customerId;
-}
-
 /**
  * Facture les matières payantes d'un dépôt via Stripe : client (créé au besoin et mémorisé
  * sur l'entreprise), facture `send_invoice` à 30 jours, envoi par email si
@@ -1499,7 +1427,36 @@ export const invoiceDepotDib = internalAction({
 
     try {
       // 1. Client Stripe de l'entreprise (réutilisé, jamais dupliqué).
-      const customerId = await ensureStripeCustomer(ctx, secretKey, company);
+      let customerId = company.stripeCustomerId;
+      // Pas encore mémorisé : on cherche d'abord un client Stripe existant avec
+      // la même adresse email avant d'en créer un — évite qu'un nouveau client
+      // Stripe soit créé à chaque facture.
+      if (!customerId && company.contactEmail) {
+        const search = await stripeGet(
+          secretKey,
+          `customers?email=${encodeURIComponent(company.contactEmail)}&limit=1`,
+        );
+        const existing = Array.isArray(search.data) ? search.data[0] : undefined;
+        const existingId = (existing as { id?: unknown } | undefined)?.id;
+        if (typeof existingId === "string") customerId = existingId;
+      }
+      if (!customerId) {
+        const customer = await stripeRequest(secretKey, "customers", {
+          name: company.name,
+          ...(company.contactEmail ? { email: company.contactEmail } : {}),
+          ...(company.contactPhone ? { phone: company.contactPhone } : {}),
+          "metadata[bpCompanyId]": company._id,
+          ...(company.siret ? { "metadata[siret]": company.siret } : {}),
+        });
+        customerId = customer.id as string;
+      }
+      // Mémorise l'id (retrouvé ou créé) sur l'entreprise pour les prochaines fois.
+      if (customerId && customerId !== company.stripeCustomerId) {
+        await ctx.runMutation(internal.bennespro.saveCompanyStripeCustomer, {
+          companyId: company._id,
+          stripeCustomerId: customerId,
+        });
+      }
 
       const depotRef = `Bon de dépôt n° ${String(depot.depotNumber).padStart(4, "0")}`;
       const taxRateId = await stripeVatTaxRateId(secretKey);
@@ -1568,328 +1525,6 @@ export const invoiceDepotDib = internalAction({
   },
 });
 
-/* ─── Facture mensuelle groupée ───────────────────────────────────────────── */
-
-function billingMaterialLabel(material: string): string {
-  return material === DIB_MATERIAL ? "DIB (tout-venant non trié)" : material === WOOD_MATERIAL ? "Bois" : material;
-}
-
-function formatKg(value: number): string {
-  return new Intl.NumberFormat("fr-FR", { maximumFractionDigits: 2 }).format(value);
-}
-
-/** Décalage de Paris sur UTC à un instant donné (1 h l'hiver, 2 h l'été). */
-function parisOffsetMs(at: number): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Europe/Paris",
-    hourCycle: "h23",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(new Date(at));
-  const part = (type: string) => Number(parts.find((item) => item.type === type)?.value);
-  const local = Date.UTC(part("year"), part("month") - 1, part("day"), part("hour"), part("minute"), part("second"));
-  return local - Math.floor(at / 1000) * 1000;
-}
-
-/** Année et mois (0-11) d'un instant, à l'heure de Paris. */
-function parisYearMonth(at: number): { year: number; month: number } {
-  const local = new Date(at + parisOffsetMs(at));
-  return { year: local.getUTCFullYear(), month: local.getUTCMonth() };
-}
-
-/** Le 1er du mois à 00:00, heure de Paris. */
-function parisMonthStart(year: number, month: number): number {
-  const guess = Date.UTC(year, month, 1);
-  return guess - parisOffsetMs(guess);
-}
-
-/** « 2026-11 » → « novembre 2026 ». */
-function periodLabel(period: string): string {
-  const [year, month] = period.split("-").map(Number);
-  return new Intl.DateTimeFormat("fr-FR", { month: "long", year: "numeric", timeZone: "UTC" }).format(
-    new Date(Date.UTC(year, month - 1, 15)),
-  );
-}
-
-/**
- * Le 1er du mois : regroupe, par entreprise, les dépôts facturés au mois et
- * pas encore facturés (mois écoulé, ou reliquat d'un mois en erreur), puis
- * lance une facture Stripe par entreprise. Rejouable sans doublon.
- */
-export const prepareMonthlyInvoices = internalMutation({
-  args: {},
-  handler: async (ctx): Promise<number> => {
-    const now = Date.now();
-    const current = parisYearMonth(now);
-    const cutoff = parisMonthStart(current.year, current.month);
-    const previous = parisYearMonth(cutoff - 1);
-    const period = `${previous.year}-${String(previous.month + 1).padStart(2, "0")}`;
-
-    const depots = await ctx.db
-      .query("bpDepots")
-      .withIndex("by_createdAt", (q) => q.gte("createdAt", MONTHLY_BILLING_START).lt("createdAt", cutoff))
-      .collect();
-    const byCompany = new Map<Id<"bpCompanies">, Array<Doc<"bpDepots">>>();
-    for (const depot of depots) {
-      const billing = depot.billing;
-      if (!billing?.monthly || billing.monthlyInvoiceId || billing.status === "invoiced") continue;
-      const list = byCompany.get(depot.companyId) ?? [];
-      list.push(depot);
-      byCompany.set(depot.companyId, list);
-    }
-
-    let scheduled = 0;
-    for (const [companyId, companyDepots] of byCompany) {
-      const totals = new Map<Infer<typeof bpMaterial>, { weightKg: number; amountCents: number }>();
-      for (const depot of companyDepots) {
-        for (const item of depot.billing?.items ?? []) {
-          const total = totals.get(item.material) ?? { weightKg: 0, amountCents: 0 };
-          total.weightKg += item.weightKg;
-          total.amountCents += item.amountCents;
-          totals.set(item.material, total);
-        }
-      }
-      const items = Array.from(totals, ([material, total]) => ({
-        material,
-        weightKg: Math.round(total.weightKg * 100) / 100,
-        amountCents: total.amountCents,
-        // Prix moyen : le tarif a pu changer en cours de mois.
-        priceCentsPerKg: Math.round((total.amountCents / total.weightKg) * 100) / 100,
-      }));
-      const amountCents = items.reduce((sum, item) => sum + item.amountCents, 0);
-      if (amountCents <= 0) continue;
-
-      const existing = await ctx.db
-        .query("bpMonthlyInvoices")
-        .withIndex("by_company_and_period", (q) => q.eq("companyId", companyId).eq("period", period))
-        .unique();
-      if (existing?.status === "invoiced") continue;
-      const record = {
-        companyId,
-        period,
-        depotIds: companyDepots.map((depot) => depot._id),
-        items,
-        weightKg: Math.round(items.reduce((sum, item) => sum + item.weightKg, 0) * 100) / 100,
-        amountCents,
-        vatRate: DIB_VAT_RATE,
-        status: "pending" as const,
-        createdAt: now,
-      };
-      let monthlyInvoiceId = existing?._id;
-      if (monthlyInvoiceId) await ctx.db.patch(monthlyInvoiceId, { ...record, error: undefined });
-      else monthlyInvoiceId = await ctx.db.insert("bpMonthlyInvoices", record);
-      await ctx.scheduler.runAfter(0, internal.bennespro.invoiceMonthly, { monthlyInvoiceId });
-      scheduled++;
-    }
-    return scheduled;
-  },
-});
-
-export const monthlyInvoiceForBilling = internalQuery({
-  args: { monthlyInvoiceId: v.id("bpMonthlyInvoices") },
-  handler: async (ctx, { monthlyInvoiceId }) => {
-    const invoice = await ctx.db.get(monthlyInvoiceId);
-    if (!invoice) return null;
-    const company = await ctx.db.get(invoice.companyId);
-    const depots = (await Promise.all(invoice.depotIds.map((id) => ctx.db.get(id)))).filter(
-      (depot): depot is Doc<"bpDepots"> => depot !== null,
-    );
-    return { invoice, company, depots };
-  },
-});
-
-export const saveMonthlyInvoiceError = internalMutation({
-  args: { monthlyInvoiceId: v.id("bpMonthlyInvoices"), error: v.string() },
-  handler: async (ctx, { monthlyInvoiceId, error }) => {
-    await ctx.db.patch(monthlyInvoiceId, { status: "error", error });
-  },
-});
-
-/** Facture émise : la fiche mensuelle et chacun de ses dépôts la portent. */
-export const saveMonthlyInvoiceResult = internalMutation({
-  args: {
-    monthlyInvoiceId: v.id("bpMonthlyInvoices"),
-    stripeInvoiceId: v.string(),
-    stripeInvoiceUrl: v.optional(v.string()),
-    paymentStatus: v.union(
-      v.literal("draft"),
-      v.literal("open"),
-      v.literal("paid"),
-      v.literal("void"),
-      v.literal("uncollectible"),
-    ),
-    paidAt: v.optional(v.number()),
-  },
-  handler: async (ctx, { monthlyInvoiceId, stripeInvoiceId, stripeInvoiceUrl, paymentStatus, paidAt }) => {
-    const monthly = await ctx.db.get(monthlyInvoiceId);
-    if (!monthly) return;
-    const invoicedAt = Date.now();
-    await ctx.db.patch(monthlyInvoiceId, {
-      status: "invoiced",
-      stripeInvoiceId,
-      stripeInvoiceUrl,
-      invoicedAt,
-      error: undefined,
-    });
-    for (const depotId of monthly.depotIds) {
-      const depot = await ctx.db.get(depotId);
-      if (!depot?.billing) continue;
-      const { error: _error, ...billing } = depot.billing;
-      await ctx.db.patch(depotId, {
-        billing: {
-          ...billing,
-          status: "invoiced",
-          stripeInvoiceId,
-          ...(stripeInvoiceUrl ? { stripeInvoiceUrl } : {}),
-          paymentStatus,
-          ...(paidAt ? { paidAt } : {}),
-          invoicedAt,
-          monthlyInvoiceId,
-        },
-      });
-    }
-  },
-});
-
-/**
- * Émet la facture mensuelle Stripe d'une entreprise : une ligne par matière et
- * par bon de dépôt (le client retrouve chaque passage), les totaux DIB / bois
- * du mois en description, règlement à 30 jours.
- */
-export const invoiceMonthly = internalAction({
-  args: { monthlyInvoiceId: v.id("bpMonthlyInvoices") },
-  handler: async (ctx, { monthlyInvoiceId }) => {
-    const data: {
-      invoice: Doc<"bpMonthlyInvoices">;
-      company: Doc<"bpCompanies"> | null;
-      depots: Array<Doc<"bpDepots">>;
-    } | null = await ctx.runQuery(internal.bennespro.monthlyInvoiceForBilling, { monthlyInvoiceId });
-    if (!data || data.invoice.status === "invoiced") return;
-    const { invoice: monthly, company, depots } = data;
-
-    async function fail(message: string) {
-      await ctx.runMutation(internal.bennespro.saveMonthlyInvoiceError, { monthlyInvoiceId, error: message });
-    }
-
-    const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
-    if (!secretKey) {
-      await fail("Clé Stripe non configurée (BENNESPRO_STRIPE_SECRET_KEY).");
-      return;
-    }
-    if (!company) {
-      await fail("Entreprise introuvable.");
-      return;
-    }
-    // Une fiche en erreur relancée après qu'un mois suivant a repris ses
-    // dépôts ne doit pas les facturer deux fois.
-    if (depots.some((depot) => depot.billing?.status === "invoiced" || depot.billing?.monthlyInvoiceId)) {
-      await fail("Certains dépôts de cette facture ont déjà été facturés ailleurs.");
-      return;
-    }
-
-    try {
-      const customerId = await ensureStripeCustomer(ctx, secretKey, company);
-      const taxRateId = await stripeVatTaxRateId(secretKey);
-      const label = periodLabel(monthly.period);
-      const totals = monthly.items
-        .map((item) => `${billingMaterialLabel(item.material)} : ${formatKg(item.weightKg)} kg`)
-        .join(" · ");
-
-      const invoice = await stripeRequest(secretKey, "invoices", {
-        customer: customerId,
-        collection_method: "send_invoice",
-        days_until_due: "30",
-        currency: "eur",
-        description: `Facture mensuelle — dépôts de ${label} (${depots.length} dépôt${depots.length > 1 ? "s" : ""}). ${totals}.`,
-        pending_invoice_items_behavior: "exclude",
-        "metadata[bpMonthlyInvoiceId]": monthlyInvoiceId,
-        "metadata[bpCompanyId]": company._id,
-        "metadata[period]": monthly.period,
-      });
-      const invoiceId = invoice.id as string;
-
-      const lines = depots
-        .slice()
-        .sort((a, b) => a.createdAt - b.createdAt)
-        .flatMap((depot) => (depot.billing?.items ?? []).map((item) => ({ depot, item })));
-      // Stripe plafonne le nombre de lignes : au-delà, une ligne par matière.
-      if (lines.length <= 200) {
-        for (const { depot, item } of lines) {
-          const priceEuros = (item.priceCentsPerKg / 100).toFixed(2).replace(".", ",");
-          const date = new Date(depot.createdAt).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" });
-          await stripeRequest(secretKey, "invoiceitems", {
-            customer: customerId,
-            invoice: invoiceId,
-            amount: String(item.amountCents),
-            currency: "eur",
-            "tax_rates[0]": taxRateId,
-            description: `${billingMaterialLabel(item.material)} — ${formatKg(item.weightKg)} kg × ${priceEuros} €/kg HT — Bon de dépôt n° ${String(depot.depotNumber).padStart(4, "0")} du ${date}`,
-          });
-        }
-      } else {
-        for (const item of monthly.items) {
-          await stripeRequest(secretKey, "invoiceitems", {
-            customer: customerId,
-            invoice: invoiceId,
-            amount: String(item.amountCents),
-            currency: "eur",
-            "tax_rates[0]": taxRateId,
-            description: `${billingMaterialLabel(item.material)} — ${formatKg(item.weightKg)} kg — dépôts de ${label}`,
-          });
-        }
-      }
-
-      const finalized = await stripeRequest(secretKey, `invoices/${invoiceId}/finalize`, {
-        auto_advance: "false",
-      });
-      if (company.contactEmail) {
-        await stripeRequest(secretKey, `invoices/${invoiceId}/send`, {});
-      }
-      const hostedUrl = finalized.hosted_invoice_url;
-      await ctx.runMutation(internal.bennespro.saveMonthlyInvoiceResult, {
-        monthlyInvoiceId,
-        stripeInvoiceId: invoiceId,
-        ...(typeof hostedUrl === "string" ? { stripeInvoiceUrl: hostedUrl } : {}),
-        paymentStatus: stripeStatus(finalized.status) ?? "open",
-        ...(stripePaidAt(finalized) ? { paidAt: stripePaidAt(finalized) } : {}),
-      });
-    } catch (err) {
-      await fail(err instanceof Error ? err.message : "Erreur Stripe inconnue.");
-    }
-  },
-});
-
-/** Factures mensuelles d'une entreprise, de la plus récente à la plus ancienne. */
-export const listCompanyMonthlyInvoices = query({
-  args: { companyId: v.id("bpCompanies") },
-  handler: async (ctx, { companyId }) => {
-    await requireCrmPermission(ctx, "bennespro:depots", "read");
-    const invoices = await ctx.db
-      .query("bpMonthlyInvoices")
-      .withIndex("by_company_and_period", (q) => q.eq("companyId", companyId))
-      .order("desc")
-      .take(60);
-    return invoices.map((invoice) => ({ ...invoice, periodLabel: periodLabel(invoice.period) }));
-  },
-});
-
-/** Relance l'émission d'une facture mensuelle restée en erreur. */
-export const retryMonthlyInvoice = mutation({
-  args: { monthlyInvoiceId: v.id("bpMonthlyInvoices") },
-  handler: async (ctx, { monthlyInvoiceId }) => {
-    await requireCrmPermission(ctx, "bennespro:depots", "update");
-    const invoice = await ctx.db.get(monthlyInvoiceId);
-    if (!invoice) throw new Error("Facture mensuelle introuvable.");
-    if (invoice.status === "invoiced") throw new Error("Cette facture mensuelle est déjà émise.");
-    await ctx.db.patch(monthlyInvoiceId, { status: "pending", error: undefined });
-    await ctx.scheduler.runAfter(0, internal.bennespro.invoiceMonthly, { monthlyInvoiceId });
-  },
-});
-
 /* ─── Email de facture ────────────────────────────────────────────────────── */
 
 const BP_TEAL = "#2aa79b";
@@ -1953,21 +1588,18 @@ export const saveManualPaymentStatus = internalMutation({
   handler: async (ctx, { depotId, paymentStatus, manual, updatedBy }) => {
     const depot = await ctx.db.get(depotId);
     if (!depot?.billing) return;
-    for (const shared of await depotsSharingInvoice(ctx, depot)) {
-      if (!shared.billing) continue;
-      const { paidAt, paymentStatusManual: _manual, ...rest } = shared.billing;
-      await ctx.db.patch(shared._id, {
-        billing: {
-          ...rest,
-          paymentStatus,
-          // La date de règlement n'a de sens que pour une facture payée.
-          ...(paymentStatus === "paid" ? { paidAt: paidAt ?? Date.now() } : {}),
-          ...(manual ? { paymentStatusManual: true } : {}),
-          ...(updatedBy ? { paymentStatusUpdatedBy: updatedBy } : {}),
-          paymentStatusUpdatedAt: Date.now(),
-        },
-      });
-    }
+    const { paidAt, paymentStatusManual: _manual, ...rest } = depot.billing;
+    await ctx.db.patch(depotId, {
+      billing: {
+        ...rest,
+        paymentStatus,
+        // La date de règlement n'a de sens que pour une facture payée.
+        ...(paymentStatus === "paid" ? { paidAt: paidAt ?? Date.now() } : {}),
+        ...(manual ? { paymentStatusManual: true } : {}),
+        ...(updatedBy ? { paymentStatusUpdatedBy: updatedBy } : {}),
+        paymentStatusUpdatedAt: Date.now(),
+      },
+    });
   },
 });
 
@@ -2067,15 +1699,11 @@ export const deleteDepot = action({
     const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     if (!data) return null;
-    // Une facture mensuelle porte aussi les autres dépôts du mois : l'annuler
-    // pour un seul dépôt les effacerait tous.
-    if (!data.depot.billing?.monthlyInvoiceId) {
-      await voidInvoiceIfPossible(
-        env.BENNESPRO_STRIPE_SECRET_KEY,
-        data.depot.billing?.stripeInvoiceId,
-        data.depot.billing?.paymentStatus,
-      );
-    }
+    await voidInvoiceIfPossible(
+      env.BENNESPRO_STRIPE_SECRET_KEY,
+      data.depot.billing?.stripeInvoiceId,
+      data.depot.billing?.paymentStatus,
+    );
     await ctx.runMutation(internal.bennespro.adminWipeDepot, { depotId, alsoCompany: false });
     return null;
   },
@@ -2175,13 +1803,10 @@ export const sendInvoiceEmail = action({
     if (!accessAllows(access, "bennespro:depots", "read")) {
       throw new Error("Accès insuffisant.");
     }
-    const data: {
-      depot: Doc<"bpDepots">;
-      company: Doc<"bpCompanies"> | null;
-      monthlyInvoice: Doc<"bpMonthlyInvoices"> | null;
-    } | null = await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
+    const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
+      await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     if (!data) throw new Error("Dépôt introuvable.");
-    const { depot, company, monthlyInvoice } = data;
+    const { depot, company } = data;
     if (!depot.billing?.stripeInvoiceUrl || !depot.billing.stripeInvoiceId) {
       throw new Error("Aucune facture Stripe pour ce dépôt.");
     }
@@ -2194,21 +1819,13 @@ export const sendInvoiceEmail = action({
     }
 
     const number = String(depot.depotNumber).padStart(4, "0");
-    // Dépôt repris dans une facture mensuelle : l'email porte sur tout le mois.
-    const ref = monthlyInvoice
-      ? `Facture mensuelle — ${periodLabel(monthlyInvoice.period)}`
-      : `Bon de dépôt n° ${number}`;
-    const amountCents = monthlyInvoice?.amountCents ?? depot.billing.amountCents;
-    const weightKg = monthlyInvoice?.weightKg ?? depot.billing.weightKg;
-    const amountHt = (amountCents / 100).toFixed(2).replace(".", ",");
+    const ref = `Bon de dépôt n° ${number}`;
+    const amountHt = (depot.billing.amountCents / 100).toFixed(2).replace(".", ",");
     const vatRate = depot.billing.vatRate ?? DIB_VAT_RATE;
-    const amountTtc = (Math.round(amountCents * (1 + vatRate / 100)) / 100)
+    const amountTtc = (Math.round(depot.billing.amountCents * (1 + vatRate / 100)) / 100)
       .toFixed(2)
       .replace(".", ",");
     const date = new Date(depot.createdAt).toLocaleDateString("fr-FR");
-    const subject = monthlyInvoice
-      ? `vos dépôts de ${periodLabel(monthlyInvoice.period)}`
-      : `le dépôt du ${date}`;
     const secretKey = env.BENNESPRO_STRIPE_SECRET_KEY;
     let stripeInvoice: Record<string, unknown> | null = null;
     if (secretKey) {
@@ -2234,7 +1851,7 @@ export const sendInvoiceEmail = action({
           const res = await fetch(pdfUrl);
           if (res.ok) {
             attachments.push({
-              filename: monthlyInvoice ? `facture-mensuelle-${monthlyInvoice.period}.pdf` : `facture-depot-${number}.pdf`,
+              filename: `facture-depot-${number}.pdf`,
               content: bytesToBase64(new Uint8Array(await res.arrayBuffer())),
             });
           }
@@ -2243,7 +1860,7 @@ export const sendInvoiceEmail = action({
         console.warn("Facture PDF Stripe indisponible :", err);
       }
     }
-    if (bonPdfBase64 && !monthlyInvoice) {
+    if (bonPdfBase64) {
       attachments.push({ filename: `bon-depot-${number}.pdf`, content: bonPdfBase64 });
     }
 
@@ -2265,9 +1882,9 @@ export const sendInvoiceEmail = action({
         <p style="margin:0 0 14px;font-size:19px;font-weight:bold;color:${BP_DARK};">${ref}</p>
         <p style="margin:0 0 12px;font-size:14px;line-height:22px;color:#3d4a46;">Bonjour${company?.contactName ? ` ${company.contactName}` : ""},</p>
         <p style="margin:0 0 18px;font-size:14px;line-height:22px;color:#3d4a46;">
-          ${reminder ? "Nous nous permettons de vous relancer concernant votre facture pour" : "Veuillez trouver votre facture pour"} ${subject}
-          (matières facturées&nbsp;: ${formatKg(weightKg)}&nbsp;kg — <strong style="color:${BP_DARK};">${amountHt}&nbsp;€ HT / ${amountTtc}&nbsp;€ TTC</strong>, TVA ${vatRate}%).
-          ${monthlyInvoice ? "La facture est jointe à cet email au format PDF." : "La facture et le bon de dépôt sont joints à cet email au format PDF."}
+          ${reminder ? "Nous nous permettons de vous relancer concernant votre facture pour le dépôt du" : "Veuillez trouver votre facture pour le dépôt du"} ${date}
+          (matières facturées&nbsp;: ${depot.billing.weightKg}&nbsp;kg — <strong style="color:${BP_DARK};">${amountHt}&nbsp;€ HT / ${amountTtc}&nbsp;€ TTC</strong>, TVA ${vatRate}%).
+          La facture et le bon de dépôt sont joints à cet email au format PDF.
         </p>
         <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 22px;"><tr><td style="border-radius:10px;background:${BP_TEAL};">
           <a href="${depot.billing.stripeInvoiceUrl}" style="display:inline-block;padding:13px 26px;font-size:14px;font-weight:bold;color:#ffffff;text-decoration:none;">
