@@ -273,17 +273,22 @@ export const btUnit = v.union(
 );
 
 export const btCondition = v.union(
+  /* Référentiel actuel : les cinq états de Leboncoin, mot pour mot, pour que
+   * l'extension Bâtire → Leboncoin les reporte sans traduction. */
+  v.literal("État neuf"),
+  v.literal("Très bon état"),
+  v.literal("Bon état"),
+  v.literal("État satisfaisant"),
+  v.literal("Pour pièces"),
+  /** @deprecated Anciens référentiels (quatre valeurs, puis la liste
+   *  d'origine). Conservés pour les fiches créées avant le changement :
+   *  retirer ces valeurs les rendrait invalides. */
   v.literal("Neuf"),
   v.literal("Très bon"),
   v.literal("Bon"),
   v.literal("Usagé"),
-  /** @deprecated Référentiel d'états d'avant la simplification en quatre
-   *  valeurs. Conservé pour les fiches créées avant le changement : retirer
-   *  ces valeurs les rendrait invalides. */
   v.literal("Déstockage"),
   v.literal("Reconditionné"),
-  v.literal("Très bon état"),
-  v.literal("Bon état"),
   v.literal("À reconditionner"),
   v.literal("À rénover"),
 );

@@ -2111,7 +2111,26 @@ export const BT_MATERIALS = [
 
 /** Unité dans laquelle sont saisies les dimensions. */
 export const BT_DIMENSION_UNITS = ["mm", "cm", "m"];
-const CONDITIONS = ["Neuf", "Très bon", "Bon", "Usagé"];
+/** Les cinq états de Leboncoin, mot pour mot (voir `btCondition`). */
+const CONDITIONS = ["État neuf", "Très bon état", "Bon état", "État satisfaisant", "Pour pièces"];
+
+/**
+ * Ancien état → état actuel. Sert à l'import Excel (un fichier préparé avec
+ * l'ancienne liste reste importable) et à la migration des fiches existantes.
+ */
+const LEGACY_CONDITIONS: Record<string, string> = {
+  Neuf: "État neuf",
+  Déstockage: "État neuf",
+  "Très bon": "Très bon état",
+  Reconditionné: "Très bon état",
+  Bon: "Bon état",
+  Usagé: "État satisfaisant",
+  "À reconditionner": "État satisfaisant",
+  "À rénover": "État satisfaisant",
+};
+
+const currentCondition = (value: string | undefined) =>
+  value && CONDITIONS.includes(value) ? value : (value && LEGACY_CONDITIONS[value]) || "Bon état";
 
 
 /** Appel OpenAI en JSON strict, partagé par les deux passes du classement. */
@@ -2538,7 +2557,7 @@ La liste est classée par proximité de vocabulaire, pas par justesse : lis-la e
     ];
     if (result.materials.length > 0) result.material = result.materials.join(", ");
 
-    if (!CONDITIONS.includes(result.condition)) result.condition = "Bon";
+    result.condition = currentCondition(result.condition);
     if (!UNITS.includes(result.unit)) result.unit = "unité";
     const positive = (value: unknown) => {
       const parsed = Number(value);
@@ -2793,7 +2812,6 @@ export const importMaterials = mutation({
     if (rows.length > 500) throw new ConvexError("500 lignes au maximum par import.");
 
     const units = ["unité", "m²", "m³", "ml", "kg", "tonne", "palette", "sac", "lot"];
-    const conditions = CONDITIONS;
     const now = Date.now();
     const errors: Array<{ line: number; reason: string }> = [];
     let imported = 0;
@@ -2814,7 +2832,7 @@ export const importMaterials = mutation({
           ? row.subcategory
           : undefined;
       const unit = units.includes(row.unit ?? "") ? row.unit! : "unité";
-      const condition = conditions.includes(row.condition ?? "") ? row.condition! : "Bon";
+      const condition = currentCondition(row.condition);
 
       await ctx.db.insert("btMaterials", {
         title,
@@ -2843,5 +2861,40 @@ export const importMaterials = mutation({
       imported++;
     }
     return { imported, errors };
+  },
+});
+
+/**
+ * Migration ponctuelle : passe les états des fiches et des dons sur les
+ * libellés Leboncoin. Interne (lancée à la main), et en simulation par
+ * défaut :
+ *   npx convex run batire:migrateConditionsToLeboncoin '{}' --prod
+ *   npx convex run batire:migrateConditionsToLeboncoin '{"apply": true}' --prod
+ * Idempotente : une fiche déjà migrée n'est plus touchée.
+ */
+export const migrateConditionsToLeboncoin = internalMutation({
+  args: { apply: v.optional(v.boolean()) },
+  handler: async (ctx, { apply }) => {
+    // Une liste plutôt qu'un objet : Convex refuse les clés non ASCII (« é »).
+    const changes: Array<{ table: string; from: string; to: string; count: number }> = [];
+    const count = (table: string, from: string, to: string) => {
+      const entry = changes.find((change) => change.table === table && change.from === from);
+      if (entry) entry.count += 1;
+      else changes.push({ table, from, to, count: 1 });
+    };
+
+    for (const material of await ctx.db.query("btMaterials").collect()) {
+      const next = LEGACY_CONDITIONS[material.condition];
+      if (!next) continue;
+      count("btMaterials", material.condition, next);
+      if (apply) await ctx.db.patch(material._id, { condition: next as Doc<"btMaterials">["condition"] });
+    }
+    for (const donation of await ctx.db.query("btDonations").collect()) {
+      const next = donation.condition && LEGACY_CONDITIONS[donation.condition];
+      if (!next) continue;
+      count("btDonations", donation.condition!, next);
+      if (apply) await ctx.db.patch(donation._id, { condition: next as Doc<"btMaterials">["condition"] });
+    }
+    return { applied: Boolean(apply), changes };
   },
 });
