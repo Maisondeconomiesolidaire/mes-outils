@@ -533,6 +533,8 @@ export default defineSchema(
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    /** Hiérarchie Label Emmaüs complète, de l'univers au niveau le plus précis. */
+    categoryPath: v.optional(v.array(v.string())),
     condition: v.string(),
     keywords: v.optional(v.array(v.string())),
     themeKey: v.optional(v.string()),

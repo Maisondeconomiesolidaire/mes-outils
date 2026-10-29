@@ -611,6 +611,7 @@ export const create = mutation({
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    categoryPath: v.optional(v.array(v.string())),
     condition: v.string(),
     keywords: v.optional(v.array(v.string())),
     themeKey: v.optional(v.string()),
@@ -630,6 +631,7 @@ export const create = mutation({
       ...articleArgs,
       weightKg: normalizeWeightKg(args.weightKg),
       location: args.location?.trim() || undefined,
+      categoryPath: args.categoryPath?.map((part) => part.trim()).filter(Boolean),
       gdrReference: args.gdrReference?.trim() || undefined,
       internalReference,
       keywords: args.keywords?.length ? uniqueKeywords(args.keywords) : undefined,
@@ -712,6 +714,7 @@ export const applyAiListing = mutation({
     weightKg: v.optional(v.number()),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    categoryPath: v.optional(v.array(v.string())),
     condition: v.string(),
     keywords: v.optional(v.array(v.string())),
     themeKey: v.optional(v.string()),
@@ -873,6 +876,7 @@ export const update = mutation({
     site: v.optional(v.union(v.literal("60"), v.literal("76"))),
     category: v.string(),
     subcategory: v.optional(v.string()),
+    categoryPath: v.optional(v.array(v.string())),
     condition: v.string(),
     keywords: v.optional(v.array(v.string())),
     themeKey: v.optional(v.string()),
@@ -897,6 +901,7 @@ export const update = mutation({
       // (`undefined` retire le champ, alors qu'un argument absent le garderait).
       caisseId: rest.caisseId ?? undefined,
       site: rest.site ?? undefined,
+      categoryPath: rest.categoryPath?.map((part) => part.trim()).filter(Boolean),
       keywords: rest.keywords?.length ? uniqueKeywords(rest.keywords) : undefined,
       themeKey: rest.themeKey
         ? normalizeKeyword(rest.themeKey).replace(/\s+/g, "-")
