@@ -3239,7 +3239,13 @@ export default defineSchema(
       ),
     ),
     channel: v.union(v.literal("boutique"), v.literal("terminal")),
-    status: v.union(v.literal("en_attente"), v.literal("payee"), v.literal("annulee")),
+    status: v.union(
+      v.literal("en_attente"),
+      v.literal("payee"),
+      v.literal("annulee"),
+      /** Réservée en ligne, réglée au retrait : pas de paiement Stripe. */
+      v.literal("reservee"),
+    ),
     stripeSessionId: v.optional(v.string()),
     stripePaymentIntentId: v.optional(v.string()),
     paidAt: v.optional(v.number()),

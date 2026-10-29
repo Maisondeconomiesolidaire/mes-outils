@@ -829,6 +829,55 @@ async function nextOrderReference(ctx: { db: { query: (t: "btOrders") => any } }
   return `BT${String(all.length + 1).padStart(5, "0")}`;
 }
 
+/** Fige prix et quantité d'une commande, payée en ligne ou réservée. */
+async function insertOrder(
+  ctx: MutationCtx,
+  args: {
+    materialId: Id<"btMaterials">;
+    quantity: number;
+    customer: Doc<"btOrders">["customer"];
+    channel: Doc<"btOrders">["channel"];
+    pickupLocation?: Doc<"btOrders">["pickupLocation"];
+    userId?: string;
+  },
+  status: "en_attente" | "reservee",
+) {
+  const material = await ctx.db.get(args.materialId);
+  if (!material) throw new ConvexError("Matériau introuvable.");
+  if (material.status !== "disponible") {
+    throw new ConvexError(`« ${material.title} » n'est plus disponible.`);
+  }
+  if (material.price <= 0) throw new ConvexError("Ce matériau n'a pas de prix.");
+  const quantity = Math.max(0, Number(args.quantity) || 0);
+  if (quantity <= 0) throw new ConvexError("Indiquez une quantité.");
+  if (quantity > material.quantity) {
+    throw new ConvexError(
+      `Stock insuffisant : ${material.quantity} ${material.unit} disponible.`,
+    );
+  }
+
+  const amountCents = Math.round(material.price * quantity * 100);
+  if (amountCents <= 0) throw new ConvexError("Le montant doit être supérieur à 0 €.");
+
+  const reference = await nextOrderReference(ctx);
+  const orderId = await ctx.db.insert("btOrders", {
+    reference,
+    materialId: args.materialId,
+    materialTitle: material.title,
+    quantity,
+    unit: material.unit,
+    unitPrice: material.price,
+    amountCents,
+    customer: { ...args.customer, email: args.customer.email.trim().toLowerCase() },
+    pickupLocation: args.pickupLocation,
+    channel: args.channel,
+    status,
+    userId: args.userId,
+    createdAt: Date.now(),
+  });
+  return { orderId, reference, amountCents, title: material.title, unit: material.unit };
+}
+
 /** Commande en attente de paiement : c'est elle qui fige prix et quantité. */
 export const createOrder = internalMutation({
   args: {
@@ -840,39 +889,53 @@ export const createOrder = internalMutation({
     userId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const material = await ctx.db.get(args.materialId);
-    if (!material) throw new ConvexError("Matériau introuvable.");
-    if (material.status !== "disponible") {
-      throw new ConvexError(`« ${material.title} » n'est plus disponible.`);
-    }
-    if (material.price <= 0) throw new ConvexError("Ce matériau n'a pas de prix.");
-    const quantity = Math.max(0, Number(args.quantity) || 0);
-    if (quantity <= 0) throw new ConvexError("Indiquez une quantité.");
-    if (quantity > material.quantity) {
-      throw new ConvexError(
-        `Stock insuffisant : ${material.quantity} ${material.unit} disponible.`,
-      );
-    }
+    const { orderId, amountCents, title, unit } = await insertOrder(ctx, args, "en_attente");
+    return { orderId, amountCents, title, unit };
+  },
+});
 
-    const amountCents = Math.round(material.price * quantity * 100);
-    if (amountCents <= 0) throw new ConvexError("Le montant doit être supérieur à 0 €.");
-
-    const orderId = await ctx.db.insert("btOrders", {
-      reference: await nextOrderReference(ctx),
-      materialId: args.materialId,
-      materialTitle: material.title,
-      quantity,
-      unit: material.unit,
-      unitPrice: material.price,
-      amountCents,
-      customer: { ...args.customer, email: args.customer.email.trim().toLowerCase() },
-      pickupLocation: args.pickupLocation,
-      channel: args.channel,
-      status: "en_attente",
-      userId: args.userId,
-      createdAt: Date.now(),
+/**
+ * Réservation depuis la boutique : le client choisit son lieu de retrait et
+ * règle sur place. Le stock n'est pas décompté ici — il l'est à l'encaissement.
+ */
+export const reserveMaterial = mutation({
+  args: {
+    materialId: v.id("btMaterials"),
+    quantity: v.number(),
+    customer: customerValidator,
+    pickupLocation: pickupLocationValidator,
+  },
+  handler: async (ctx, args): Promise<{ reference: string }> => {
+    const email = args.customer.email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email)) throw new ConvexError("Adresse email invalide.");
+    if (!args.customer.firstName.trim() || !args.customer.lastName.trim()) {
+      throw new ConvexError("Indiquez votre prénom et votre nom.");
+    }
+    const identity = await ctx.auth.getUserIdentity();
+    const order = await insertOrder(
+      ctx,
+      {
+        materialId: args.materialId,
+        quantity: args.quantity,
+        customer: { ...args.customer, email },
+        channel: "boutique",
+        pickupLocation: args.pickupLocation,
+        userId: identity?.subject,
+      },
+      "reservee",
+    );
+    const { reference } = order;
+    await ctx.scheduler.runAfter(0, internal.batireEmails.sendReservationConfirmation, {
+      to: email,
+      firstName: args.customer.firstName,
+      reference,
+      title: order.title,
+      quantity: args.quantity,
+      unit: order.unit,
+      amountCents: order.amountCents,
+      pickupLocation: pickupLocations[args.pickupLocation],
     });
-    return { orderId, amountCents, title: material.title, unit: material.unit };
+    return { reference };
   },
 });
 
