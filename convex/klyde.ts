@@ -6,10 +6,11 @@ import {
   mutation,
   query,
 } from "./_generated/server";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { thumbnailUrl } from "./thumbnails";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { requireAnyCrmPermission, requireCrmPermission } from "./lib";
 import { esc, resendSend } from "./emails";
 import { isOnVacation, vintedElapsedMs } from "./lib/klydeVacations";
@@ -81,20 +82,17 @@ async function requireSignedIn(ctx: {
  * autant d'URL signées à produire et à transmettre à chaque frappe dans la
  * recherche, alors que les cartes n'affichent que la première.
  */
-async function withCoverPhotoUrl(
-  ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
-  item: Doc<"klydeItems">,
-) {
+async function withCoverPhotoUrl(ctx: QueryCtx, item: Doc<"klydeItems">) {
   const cover = item.photos[0] ? await ctx.storage.getUrl(item.photos[0]) : null;
-  return { ...item, photoUrls: cover ? [cover] : [] };
+  const thumbUrl = item.photos[0] ? await thumbnailUrl(ctx, item.photos[0]) : null;
+  return { ...item, photoUrls: cover ? [cover] : [], thumbUrl };
 }
 
-async function withPhotoUrls(
-  ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
-  item: Doc<"klydeItems">,
-) {
+/** `thumbUrl` : miniature de la couverture pour les grilles (repli : la photo). */
+async function withPhotoUrls(ctx: QueryCtx, item: Doc<"klydeItems">) {
   const photoUrls = await Promise.all(item.photos.map((id) => ctx.storage.getUrl(id)));
-  return { ...item, photoUrls: photoUrls.filter((url): url is string => Boolean(url)) };
+  const thumbUrl = item.photos[0] ? await thumbnailUrl(ctx, item.photos[0]) : null;
+  return { ...item, photoUrls: photoUrls.filter((url): url is string => Boolean(url)), thumbUrl };
 }
 
 function cleanOptional(value?: string | null) {

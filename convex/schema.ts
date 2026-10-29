@@ -3491,6 +3491,12 @@ export default defineSchema(
   })
     .index("by_projectId", ["projectId"])
     .index("by_taskId", ["taskId"]),
+
+  /** Miniature (~480 px) d'une photo du stockage, pour les grilles. Voir thumbnails.ts. */
+  storageThumbnails: defineTable({
+    source: v.id("_storage"),
+    thumb: v.id("_storage"),
+  }).index("by_source", ["source"]),
   },
   { schemaValidation: false },
 );

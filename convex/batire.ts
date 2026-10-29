@@ -11,7 +11,8 @@
 import { ConvexError, v } from "convex/values";
 import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
+import { thumbnailUrl } from "./thumbnails";
 import { api, internal } from "./_generated/api";
 import {
   accessAllows,
@@ -27,14 +28,12 @@ const PAGE_MATERIAUX = "batire:materiaux";
 const PAGE_DEMANDES = "batire:demandes";
 
 /** Photos et fiche technique signées : un identifiant de stockage ne s'ouvre pas. */
-async function withPhotoUrls(
-  ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
-  material: Doc<"btMaterials">,
-) {
+async function withPhotoUrls(ctx: QueryCtx, material: Doc<"btMaterials">) {
   const photoUrls = await Promise.all(material.photos.map((id) => ctx.storage.getUrl(id)));
   return {
     ...material,
     photoUrls: photoUrls.filter((url): url is string => Boolean(url)),
+    thumbUrl: material.photos[0] ? await thumbnailUrl(ctx, material.photos[0]) : null,
     datasheetUrl: material.datasheet ? await ctx.storage.getUrl(material.datasheet) : null,
   };
 }
@@ -449,10 +448,7 @@ export const removeMaterial = mutation({
  * vient un lot et par qui il est passé : elles regardent l'équipe, pas
  * l'acheteur.
  */
-async function publicMaterial(
-  ctx: { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } },
-  material: Doc<"btMaterials">,
-) {
+async function publicMaterial(ctx: QueryCtx, material: Doc<"btMaterials">) {
   const photoUrls = await Promise.all(material.photos.map((id) => ctx.storage.getUrl(id)));
   return {
     _id: material._id,
@@ -491,6 +487,8 @@ async function publicMaterial(
     /** Mise en ligne, pour classer les nouveautés. À défaut, la création. */
     publishedAt: material.publishedAt ?? material.createdAt,
     photoUrls: photoUrls.filter((url): url is string => Boolean(url)),
+    /** Miniature de la couverture pour les cartes (repli : la photo). */
+    thumbUrl: material.photos[0] ? await thumbnailUrl(ctx, material.photos[0]) : null,
   };
 }
 

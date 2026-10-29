@@ -70,6 +70,14 @@ crons.hourly(
   internal.klydeGmail.syncAll,
 );
 
+// Miniatures de grille : on supprime celles dont la photo d'origine a disparu.
+crons.daily(
+  "nettoyage miniatures",
+  { hourUTC: 2, minuteUTC: 40 },
+  internal.thumbnails.cleanup,
+  {},
+);
+
 // Social mirrors are refreshed on demand from the sharing workspace.
 
 export default crons;
