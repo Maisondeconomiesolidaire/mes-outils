@@ -9,7 +9,7 @@
  * vente, ni le prix ni le stock ne veulent dire quoi que ce soit.
  */
 import { ConvexError, v } from "convex/values";
-import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { action, env, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { thumbnailUrl } from "./thumbnails";
@@ -26,6 +26,17 @@ import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
 const PAGE_DEMANDES = "batire:demandes";
+const OFFICE_FURNITURE_CATEGORY = "Mobilier de bureau";
+
+/** Le mobilier appartient à la filière Recyclerie ; les autres matériaux à Bennes & Pro. */
+function stripeKeyForCategory(category: string) {
+  if (category === OFFICE_FURNITURE_CATEGORY) return recycappSecretKey();
+  if (!env.BENNESPRO_STRIPE_SECRET_KEY) throw new Error("Paiement en ligne indisponible : BENNESPRO_STRIPE_SECRET_KEY n'est pas configurée côté Convex.");
+  return env.BENNESPRO_STRIPE_SECRET_KEY;
+}
+function stripeProviderForCategory(category: string): "recycapp" | "bennespro" {
+  return category === OFFICE_FURNITURE_CATEGORY ? "recycapp" : "bennespro";
+}
 
 /** Photos et fiche technique signées : un identifiant de stockage ne s'ouvre pas. */
 async function withPhotoUrls(ctx: QueryCtx, material: Doc<"btMaterials">) {
@@ -1093,11 +1104,101 @@ export const confirmCheckout = action({
   },
 });
 
+/** Matériau privé, utilisé pour figer puis aiguiller le paiement. */
+export const materialForCheckout = internalQuery({
+  args: { materialId: v.id("btMaterials") },
+  handler: async (ctx, { materialId }) => await ctx.db.get(materialId),
+});
+
+/**
+ * Un panier mixte est séparé par compte marchand : Stripe ne permet pas de
+ * placer dans une même session Checkout des lignes de deux comptes distincts.
+ */
+export const startCartCheckout = action({
+  args: {
+    items: v.array(v.object({ materialId: v.id("btMaterials"), quantity: v.number() })),
+    customer: customerValidator,
+    pickupLocation: pickupLocationValidator,
+    returnUrl: v.string(),
+  },
+  handler: async (ctx, args): Promise<{ checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }> }> => {
+    if (!args.items.length) throw new ConvexError("Votre panier est vide.");
+    const email = args.customer.email.trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(email) || !args.customer.firstName.trim() || !args.customer.lastName.trim()) throw new ConvexError("Indiquez vos coordonnées complètes.");
+    const identity = await ctx.auth.getUserIdentity();
+    const groups = new Map<"recycapp" | "bennespro", Array<{ materialId: Id<"btMaterials">; quantity: number; category: string }>>();
+    for (const item of args.items) {
+      const material = await ctx.runQuery(internal.batire.materialForCheckout, { materialId: item.materialId });
+      if (!material) throw new ConvexError("Un matériau du panier n'existe plus.");
+      const provider = stripeProviderForCategory(material.category);
+      groups.set(provider, [...(groups.get(provider) ?? []), { ...item, category: material.category }]);
+    }
+    const checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }> = [];
+    for (const [provider, items] of groups) {
+      const orders: Array<{ orderId: Id<"btOrders">; amountCents: number; title: string; unit: string; quantity: number }> = [];
+      for (const item of items) {
+        const order: { orderId: Id<"btOrders">; amountCents: number; title: string; unit: string } = await ctx.runMutation(internal.batire.createOrder, { materialId: item.materialId, quantity: item.quantity, customer: { ...args.customer, email }, channel: "boutique", pickupLocation: args.pickupLocation, userId: identity?.subject });
+        orders.push({ ...order, quantity: item.quantity });
+      }
+      const returnUrl = new URL(args.returnUrl);
+      returnUrl.searchParams.set("provider", provider);
+      const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer_email: email, "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(",") };
+      orders.forEach((order, index) => {
+        body[`line_items[${index}][quantity]`] = "1";
+        body[`line_items[${index}][price_data][currency]`] = "eur";
+        body[`line_items[${index}][price_data][unit_amount]`] = String(order.amountCents);
+        body[`line_items[${index}][price_data][product_data][name]`] = order.title;
+        body[`line_items[${index}][price_data][product_data][description]`] = `${order.quantity} ${order.unit}`;
+      });
+      const session = await stripeRequest<{ id: string; url: string }>("checkout/sessions", stripeKeyForCategory(items[0]!.category), body);
+      for (const order of orders) await ctx.runMutation(internal.batire.attachStripeSession, { orderId: order.orderId, stripeSessionId: session.id });
+      checkouts.push({ provider, checkoutUrl: session.url });
+    }
+    return { checkouts };
+  },
+});
+
+export const ordersByStripeSession = internalQuery({
+  args: { stripeSessionId: v.string() },
+  handler: async (ctx, { stripeSessionId }) => await ctx.db.query("btOrders").withIndex("by_stripeSession", (q) => q.eq("stripeSessionId", stripeSessionId)).collect(),
+});
+
+export const confirmCartCheckout = action({
+  args: { provider: v.union(v.literal("recycapp"), v.literal("bennespro")), sessionId: v.string() },
+  handler: async (ctx, args): Promise<{ materialIds: Id<"btMaterials">[] }> => {
+    const orders: Doc<"btOrders">[] = await ctx.runQuery(internal.batire.ordersByStripeSession, { stripeSessionId: args.sessionId });
+    if (!orders.length) throw new ConvexError("Commande introuvable.");
+    const material = await ctx.runQuery(internal.batire.materialForCheckout, { materialId: orders[0]!.materialId });
+    if (!material || stripeProviderForCategory(material.category) !== args.provider) throw new ConvexError("Ce paiement ne correspond pas au compte Stripe attendu.");
+    const session = await stripeRequest<{ payment_status?: string; payment_intent?: string }>(`checkout/sessions/${args.sessionId}`, stripeKeyForCategory(material.category));
+    if (session.payment_status !== "paid") throw new ConvexError("Paiement non confirmé par Stripe.");
+    for (const order of orders) await ctx.runMutation(internal.batire.markOrderPaid, { orderId: order._id, stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined });
+    return { materialIds: orders.map((order) => order.materialId) };
+  },
+});
+
 export const listOrders = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
     return await ctx.db.query("btOrders").order("desc").take(300);
+  },
+});
+
+/** Tableau de suivi des demandes Bâtire, même colonnes opérationnelles que Recycapp. */
+export const listRequests = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    return await ctx.db.query("btRequests").order("desc").take(300);
+  },
+});
+
+export const updateRequestOutcome = mutation({
+  args: { id: v.id("btRequests"), outcome: v.union(v.literal("nouveau"), v.literal("en_cours"), v.literal("gagnee"), v.literal("perdue")) },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    await ctx.db.patch(args.id, { outcome: args.outcome, updatedAt: Date.now() });
   },
 });
 
@@ -1276,6 +1377,14 @@ type MaterialAnalysis = {
  * 15 catégories · 114 familles · 578 sous-familles.
  */
 export const BT_TAXONOMY: Record<string, Record<string, string[]>> = {
+  "Mobilier de bureau": {
+    "Bureaux": ["Bureaux d'angle & arrondis", "Bureaux avec caisson intégré", "Bureaux droits", "Accessoires & pièces (dessus)"],
+    "Rangement": ["Caissons mobiles", "Armoires métalliques", "Armoires & meubles bois", "Rayonnages", "Dessertes & chariots"],
+    "Assises": ["Fauteuils de bureau", "Chaises visiteurs", "Chaises de collectivité (réfectoire)"],
+    "Tables": ["Tables pliantes & diverses", "Tables de réfectoire", "Tables de réunion", "Ensembles table + assises", "Tables rondes"],
+    "Électroménager & divers": ["Froid (réfrigérateurs)", "Micro-ondes", "Présentoirs"],
+    "Cloisons acoustiques": ["Cloisons pleines", "Cloisons vitrées & ensembles"]
+  },
   "Équipement de protection, sécurité": {
     "Vêtements & pantalon de travail": [
       "Pantalons",
