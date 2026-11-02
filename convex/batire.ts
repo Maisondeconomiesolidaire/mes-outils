@@ -1241,31 +1241,6 @@ export const updateRequestOutcome = mutation({
   },
 });
 
-/** Normalise les anciens noms de sites dans le stock réel. */
-export const normalizeStorageLocations = mutation({
-  args: {},
-  handler: async (ctx) => {
-    await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
-    const canonical = (value?: string) => {
-      const normalized = value?.trim().toLocaleLowerCase("fr-FR") ?? "";
-      if (normalized.includes("beauvais") || normalized.includes("comptoir")) return "Comptoir C";
-      if (normalized.includes("lachapelle") || normalized.includes("solidarium") || normalized.includes("usine")) return "Recyclerie du Pays de Bray";
-      return undefined;
-    };
-    const materials = await ctx.db.query("btMaterials").take(500);
-    let updated = 0;
-    for (const material of materials) {
-      const depot = canonical(material.depot);
-      const location = canonical(material.location);
-      if ((depot && depot !== material.depot) || (location && location !== material.location)) {
-        await ctx.db.patch(material._id, { ...(depot ? { depot } : {}), ...(location ? { location } : {}), updatedAt: Date.now() });
-        updated++;
-      }
-    }
-    return { inspected: materials.length, updated };
-  },
-});
-
 /** La livraison est chiffrée par l'équipe : elle ouvre donc une demande, jamais un paiement estimé. */
 export const requestHomeDelivery = mutation({
   args: {
