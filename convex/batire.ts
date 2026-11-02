@@ -1023,7 +1023,11 @@ export const startCheckout = action({
     returnUrl: v.string(),
   },
   handler: async (ctx, args): Promise<{ checkoutUrl: string; orderId: Id<"btOrders"> }> => {
-    const secretKey = recycappSecretKey();
+    const material = await ctx.runQuery(internal.batire.materialForCheckout, {
+      materialId: args.materialId,
+    });
+    if (!material) throw new ConvexError("Matériau introuvable.");
+    const secretKey = stripeKeyForCategory(material.category);
     const email = args.customer.email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email)) throw new ConvexError("Adresse email invalide.");
     if (!args.customer.firstName.trim() || !args.customer.lastName.trim()) {
@@ -1080,7 +1084,13 @@ export const startCheckout = action({
 export const confirmCheckout = action({
   args: { orderId: v.id("btOrders"), sessionId: v.string() },
   handler: async (ctx, args): Promise<{ reference: string }> => {
-    const secretKey = recycappSecretKey();
+    const order = await ctx.runQuery(internal.batire.orderById, { orderId: args.orderId });
+    if (!order) throw new ConvexError("Commande introuvable.");
+    const material = await ctx.runQuery(internal.batire.materialForCheckout, {
+      materialId: order.materialId,
+    });
+    if (!material) throw new ConvexError("Matériau introuvable.");
+    const secretKey = stripeKeyForCategory(material.category);
     const session = await stripeRequest<{
       payment_status?: string;
       payment_intent?: string;
@@ -1099,8 +1109,8 @@ export const confirmCheckout = action({
       stripePaymentIntentId:
         typeof session.payment_intent === "string" ? session.payment_intent : undefined,
     });
-    const order = await ctx.runQuery(internal.batire.orderById, { orderId: args.orderId });
-    return { reference: order?.reference ?? "" };
+    const paidOrder = await ctx.runQuery(internal.batire.orderById, { orderId: args.orderId });
+    return { reference: paidOrder?.reference ?? "" };
   },
 });
 
