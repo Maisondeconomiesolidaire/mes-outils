@@ -1138,8 +1138,8 @@ export const materialForCheckout = internalQuery({
 });
 
 /**
- * Un panier mixte est séparé par compte marchand : Stripe ne permet pas de
- * placer dans une même session Checkout des lignes de deux comptes distincts.
+ * Un panier ne peut contenir qu'un seul vendeur : les deux comptes Stripe
+ * encaissent séparément, ce qui évite un parcours de paiement ambigu.
  */
 export const startCartCheckout = action({
   args: {
@@ -1159,6 +1159,9 @@ export const startCartCheckout = action({
       if (!material) throw new ConvexError("Un matériau du panier n'existe plus.");
       const provider = stripeProviderForCategory(material.category);
       groups.set(provider, [...(groups.get(provider) ?? []), { ...item, category: material.category, depot: material.depot }]);
+    }
+    if (groups.size > 1) {
+      throw new ConvexError("Votre panier contient des articles de vendeurs différents. Finalisez d'abord le panier en cours, puis créez un second panier pour les autres articles.");
     }
     const checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }> = [];
     let transferFeeCharged = false;
