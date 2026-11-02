@@ -174,7 +174,6 @@ async function createNewRequestNotification(
       reference: request.reference ?? String(request._id).slice(-6),
       customerName: customerFullName(request.customer),
       article: await emailArticlePreview(ctx, request),
-      site: request.depot?.site ?? request.site,
     });
   }
 }
