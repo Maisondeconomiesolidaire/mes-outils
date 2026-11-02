@@ -3222,6 +3222,8 @@ export default defineSchema(
     unitPrice: v.number(),
     /** Montant total en centimes, tel qu'encaissé par Stripe. */
     amountCents: v.number(),
+    /** Transfert du lot vers un autre point de retrait (facturé une seule fois par panier). */
+    pickupFeeCents: v.optional(v.number()),
     customer: v.object({
       firstName: v.string(),
       lastName: v.string(),

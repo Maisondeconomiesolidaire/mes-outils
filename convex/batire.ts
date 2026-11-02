@@ -826,14 +826,27 @@ const pickupLocationValidator = v.union(
 );
 
 const pickupLocations = {
-  usine_agile: { name: "Usine Agile", address: "31 Rue de l'Industrie, 60000 Beauvais" },
+  usine_agile: { name: "Recyclerie du Solidarium", address: "31 Rue de l'Industrie, 60000 Beauvais" },
   comptoir_c: { name: "Comptoir C", address: "13 Av. Pierre Bérégovoy, 60000 Beauvais" },
   recyclerie_pays_de_bray: {
     name: "Recyclerie du Pays de Bray",
     address: "4 Rue de la Prairie, 60650 Lachapelle-aux-Pots",
   },
-  esspace_150: { name: "Esspace 150", address: "150 Rte de Paris, 76220 Gournay-en-Bray" },
+  esspace_150: { name: "Esspace 150 / Recyclerie de Gournay", address: "150 Rte de Paris, 76220 Gournay-en-Bray" },
 } as const;
+
+const PICKUP_TRANSFER_FEE_CENTS = 3500;
+
+/** Accepte les anciens libellés saisis librement, tout en comparant les lieux canoniques. */
+function storageLocationId(depot?: string): keyof typeof pickupLocations | undefined {
+  const value = depot?.trim().toLocaleLowerCase("fr-FR") ?? "";
+  if (!value) return undefined;
+  if (value.includes("comptoir")) return "comptoir_c";
+  if (value.includes("solidarium") || value.includes("usine agile")) return "usine_agile";
+  if (value.includes("pays de bray") || value.includes("lachapelle")) return "recyclerie_pays_de_bray";
+  if (value.includes("esspace") || value.includes("gournay")) return "esspace_150";
+  return undefined;
+}
 
 async function nextOrderReference(ctx: { db: { query: (t: "btOrders") => any } }) {
   const all = await ctx.db.query("btOrders").collect();
@@ -849,6 +862,7 @@ async function insertOrder(
     customer: Doc<"btOrders">["customer"];
     channel: Doc<"btOrders">["channel"];
     pickupLocation?: Doc<"btOrders">["pickupLocation"];
+    pickupFeeCents?: number;
     userId?: string;
   },
   status: "en_attente" | "reservee",
@@ -867,7 +881,8 @@ async function insertOrder(
     );
   }
 
-  const amountCents = Math.round(material.price * quantity * 100);
+  const pickupFeeCents = Math.max(0, Math.round(args.pickupFeeCents ?? 0));
+  const amountCents = Math.round(material.price * quantity * 100) + pickupFeeCents;
   if (amountCents <= 0) throw new ConvexError("Le montant doit être supérieur à 0 €.");
 
   const reference = await nextOrderReference(ctx);
@@ -879,6 +894,7 @@ async function insertOrder(
     unit: material.unit,
     unitPrice: material.price,
     amountCents,
+    pickupFeeCents: pickupFeeCents || undefined,
     customer: { ...args.customer, email: args.customer.email.trim().toLowerCase() },
     pickupLocation: args.pickupLocation,
     channel: args.channel,
@@ -886,7 +902,7 @@ async function insertOrder(
     userId: args.userId,
     createdAt: Date.now(),
   });
-  return { orderId, reference, amountCents, title: material.title, unit: material.unit };
+  return { orderId, reference, amountCents, pickupFeeCents, title: material.title, unit: material.unit };
 }
 
 /** Commande en attente de paiement : c'est elle qui fige prix et quantité. */
@@ -897,11 +913,12 @@ export const createOrder = internalMutation({
     customer: customerValidator,
     channel: v.union(v.literal("boutique"), v.literal("terminal")),
     pickupLocation: v.optional(pickupLocationValidator),
+    pickupFeeCents: v.optional(v.number()),
     userId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { orderId, amountCents, title, unit } = await insertOrder(ctx, args, "en_attente");
-    return { orderId, amountCents, title, unit };
+    const { orderId, amountCents, pickupFeeCents, title, unit } = await insertOrder(ctx, args, "en_attente");
+    return { orderId, amountCents, pickupFeeCents, title, unit };
   },
 });
 
@@ -1136,18 +1153,22 @@ export const startCartCheckout = action({
     const email = args.customer.email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email) || !args.customer.firstName.trim() || !args.customer.lastName.trim()) throw new ConvexError("Indiquez vos coordonnées complètes.");
     const identity = await ctx.auth.getUserIdentity();
-    const groups = new Map<"recycapp" | "bennespro", Array<{ materialId: Id<"btMaterials">; quantity: number; category: string }>>();
+    const groups = new Map<"recycapp" | "bennespro", Array<{ materialId: Id<"btMaterials">; quantity: number; category: string; depot?: string }>>();
     for (const item of args.items) {
       const material = await ctx.runQuery(internal.batire.materialForCheckout, { materialId: item.materialId });
       if (!material) throw new ConvexError("Un matériau du panier n'existe plus.");
       const provider = stripeProviderForCategory(material.category);
-      groups.set(provider, [...(groups.get(provider) ?? []), { ...item, category: material.category }]);
+      groups.set(provider, [...(groups.get(provider) ?? []), { ...item, category: material.category, depot: material.depot }]);
     }
     const checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }> = [];
+    let transferFeeCharged = false;
     for (const [provider, items] of groups) {
-      const orders: Array<{ orderId: Id<"btOrders">; amountCents: number; title: string; unit: string; quantity: number }> = [];
+      const orders: Array<{ orderId: Id<"btOrders">; amountCents: number; pickupFeeCents: number; title: string; unit: string; quantity: number }> = [];
       for (const item of items) {
-        const order: { orderId: Id<"btOrders">; amountCents: number; title: string; unit: string } = await ctx.runMutation(internal.batire.createOrder, { materialId: item.materialId, quantity: item.quantity, customer: { ...args.customer, email }, channel: "boutique", pickupLocation: args.pickupLocation, userId: identity?.subject });
+        const needsTransfer = storageLocationId(item.depot) !== undefined && storageLocationId(item.depot) !== args.pickupLocation;
+        const pickupFeeCents = needsTransfer && !transferFeeCharged ? PICKUP_TRANSFER_FEE_CENTS : 0;
+        const order: { orderId: Id<"btOrders">; amountCents: number; pickupFeeCents: number; title: string; unit: string } = await ctx.runMutation(internal.batire.createOrder, { materialId: item.materialId, quantity: item.quantity, customer: { ...args.customer, email }, channel: "boutique", pickupLocation: args.pickupLocation, pickupFeeCents, userId: identity?.subject });
+        if (pickupFeeCents) transferFeeCharged = true;
         orders.push({ ...order, quantity: item.quantity });
       }
       const returnUrl = new URL(args.returnUrl);
@@ -1156,10 +1177,18 @@ export const startCartCheckout = action({
       orders.forEach((order, index) => {
         body[`line_items[${index}][quantity]`] = "1";
         body[`line_items[${index}][price_data][currency]`] = "eur";
-        body[`line_items[${index}][price_data][unit_amount]`] = String(order.amountCents);
+        body[`line_items[${index}][price_data][unit_amount]`] = String(order.amountCents - order.pickupFeeCents);
         body[`line_items[${index}][price_data][product_data][name]`] = order.title;
         body[`line_items[${index}][price_data][product_data][description]`] = `${order.quantity} ${order.unit}`;
       });
+      const pickupFee = orders.find((order) => order.pickupFeeCents > 0)?.pickupFeeCents;
+      if (pickupFee) {
+        const index = orders.length;
+        body[`line_items[${index}][quantity]`] = "1";
+        body[`line_items[${index}][price_data][currency]`] = "eur";
+        body[`line_items[${index}][price_data][unit_amount]`] = String(pickupFee);
+        body[`line_items[${index}][price_data][product_data][name]`] = "Transfert vers le lieu de retrait";
+      }
       const session = await stripeRequest<{ id: string; url: string }>("checkout/sessions", stripeKeyForCategory(items[0]!.category), body);
       for (const order of orders) await ctx.runMutation(internal.batire.attachStripeSession, { orderId: order.orderId, stripeSessionId: session.id });
       checkouts.push({ provider, checkoutUrl: session.url });
@@ -1209,6 +1238,39 @@ export const updateRequestOutcome = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
     await ctx.db.patch(args.id, { outcome: args.outcome, updatedAt: Date.now() });
+  },
+});
+
+/** La livraison est chiffrée par l'équipe : elle ouvre donc une demande, jamais un paiement estimé. */
+export const requestHomeDelivery = mutation({
+  args: {
+    items: v.array(v.object({ materialId: v.id("btMaterials"), quantity: v.number() })),
+    customer: customerValidator,
+    address: v.string(),
+  },
+  handler: async (ctx, args) => {
+    if (!args.items.length || !args.address.trim()) throw new ConvexError("Indiquez les articles et l'adresse de livraison.");
+    const items = [] as Array<{ materialId: Id<"btMaterials">; title: string; quantity: number; unit: Doc<"btMaterials">["unit"] }>;
+    for (const line of args.items) {
+      const material = await ctx.db.get(line.materialId);
+      if (!material || material.status !== "disponible" || line.quantity <= 0 || line.quantity > material.quantity) throw new ConvexError("Un article demandé n'est plus disponible.");
+      items.push({ materialId: material._id, title: material.title, quantity: line.quantity, unit: material.unit });
+    }
+    const identity = await ctx.auth.getUserIdentity();
+    const count = await ctx.db.query("btRequests").take(500);
+    const reference = `BTD${String(count.length + 1).padStart(5, "0")}`;
+    await ctx.db.insert("btRequests", {
+      reference,
+      type: "devis",
+      customer: { ...args.customer, email: args.customer.email.trim().toLowerCase(), phone: args.customer.phone ?? "" },
+      items,
+      message: `Livraison à domicile demandée : ${args.address.trim()}`,
+      outcome: "nouveau",
+      userId: identity?.subject,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { reference };
   },
 });
 
