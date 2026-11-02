@@ -826,7 +826,8 @@ const pickupLocationValidator = v.union(
 );
 
 const pickupLocations = {
-  usine_agile: { name: "Recyclerie du Solidarium", address: "31 Rue de l'Industrie, 60000 Beauvais" },
+  // Ancien identifiant conservé pour les commandes historiques.
+  usine_agile: { name: "Recyclerie du Pays de Bray", address: "4 Rue de la Prairie, 60650 Lachapelle-aux-Pots" },
   comptoir_c: { name: "Comptoir C", address: "13 Av. Pierre Bérégovoy, 60000 Beauvais" },
   recyclerie_pays_de_bray: {
     name: "Recyclerie du Pays de Bray",
@@ -842,8 +843,7 @@ function storageLocationId(depot?: string): keyof typeof pickupLocations | undef
   const value = depot?.trim().toLocaleLowerCase("fr-FR") ?? "";
   if (!value) return undefined;
   if (value.includes("comptoir")) return "comptoir_c";
-  if (value.includes("solidarium") || value.includes("usine agile")) return "usine_agile";
-  if (value.includes("pays de bray") || value.includes("lachapelle")) return "recyclerie_pays_de_bray";
+  if (value.includes("solidarium") || value.includes("usine") || value.includes("pays de bray") || value.includes("lachapelle")) return "recyclerie_pays_de_bray";
   if (value.includes("esspace") || value.includes("gournay")) return "esspace_150";
   return undefined;
 }
@@ -1238,6 +1238,31 @@ export const updateRequestOutcome = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
     await ctx.db.patch(args.id, { outcome: args.outcome, updatedAt: Date.now() });
+  },
+});
+
+/** Normalise les anciens noms de sites dans le stock réel. */
+export const normalizeStorageLocations = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
+    const canonical = (value?: string) => {
+      const normalized = value?.trim().toLocaleLowerCase("fr-FR") ?? "";
+      if (normalized.includes("beauvais") || normalized.includes("comptoir")) return "Comptoir C";
+      if (normalized.includes("lachapelle") || normalized.includes("solidarium") || normalized.includes("usine")) return "Recyclerie du Pays de Bray";
+      return undefined;
+    };
+    const materials = await ctx.db.query("btMaterials").take(500);
+    let updated = 0;
+    for (const material of materials) {
+      const depot = canonical(material.depot);
+      const location = canonical(material.location);
+      if ((depot && depot !== material.depot) || (location && location !== material.location)) {
+        await ctx.db.patch(material._id, { ...(depot ? { depot } : {}), ...(location ? { location } : {}), updatedAt: Date.now() });
+        updated++;
+      }
+    }
+    return { inspected: materials.length, updated };
   },
 });
 
