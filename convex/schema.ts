@@ -177,6 +177,8 @@ export const bpBillingLine = v.object({
 
 /** App « Bennes & Pro » — facturation Stripe des matières payantes d'un dépôt. */
 export const bpBilling = v.object({
+  groupingId: v.optional(v.id("bpMonthlyInvoices")),
+  replacedStripeInvoiceIds: v.optional(v.array(v.string())),
   month: v.optional(v.string()),
   monthlyInvoiceId: v.optional(v.id("bpMonthlyInvoices")),
   /** Poids total facturable en kg (lignes kg + tonnes converties). */
@@ -2553,17 +2555,33 @@ export default defineSchema(
 
   /** Dépôts de déchets. Les lignes de déchets sont embarquées dans le doc. */
   bpMonthlyInvoices: defineTable({
+    kind: v.optional(v.union(v.literal("monthly"), v.literal("manual"))),
+    details: v.optional(v.array(v.object({
+      depotId: v.id("bpDepots"),
+      description: v.string(),
+      amountCents: v.number(),
+      vatRate: v.number(),
+    }))),
+    sources: v.optional(v.array(v.object({
+      invoiceId: v.string(),
+      depotIds: v.array(v.id("bpDepots")),
+      amountCents: v.number(),
+      outcome: v.optional(v.union(v.literal("voided"), v.literal("excluded"))),
+      reason: v.optional(v.string()),
+    }))),
+    stripeInvoiceUrl: v.optional(v.string()),
     companyId: v.id("bpCompanies"),
     month: v.string(),
     depotIds: v.array(v.id("bpDepots")),
     lines: v.array(bpBillingLine),
-    status: v.union(v.literal("pending"), v.literal("sent")),
+    status: v.union(v.literal("pending"), v.literal("sent"), v.literal("canceled")),
     leaseUntil: v.number(),
     stripeInvoiceId: v.optional(v.string()),
     error: v.optional(v.string()),
     sentAt: v.optional(v.number()),
   }).index("by_company_month", ["companyId", "month"])
-    .index("by_status", ["status"]),
+      .index("by_status", ["status"])
+      .index("by_company", ["companyId"]),
 
   bpDepots: defineTable({
     depotNumber: v.number(),

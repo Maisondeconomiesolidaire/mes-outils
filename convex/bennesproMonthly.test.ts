@@ -51,6 +51,10 @@ test("one monthly claim per company, locking all deposits atomically", async () 
   const first = await t.mutation(internal.bennesproMonthly.claim, args);
   expect(first?.batch.depotIds).toEqual(depotIds);
   expect(first?.batch.lines[0].amountCents).toBe(200);
+  expect(first?.batch.details).toHaveLength(2);
+  expect(first?.batch.details?.[0].description).toContain("Dépôt n° 0001 du 01/01/1970");
+  expect(first?.batch.details?.[0].description).toContain("Bois : 10 kg");
+  expect(first?.batch.details?.[0].description).toContain("Chantier : Site");
   expect(await t.mutation(internal.bennesproMonthly.claim, args)).toBeNull();
   expect(await t.mutation(internal.bennesproMonthly.claim, { companyId, month: "2099-01" })).toBeNull();
 });
@@ -76,7 +80,7 @@ test("Stripe failure resumes same invoice and sends to billing email", async () 
   vi.stubEnv("BENNESPRO_STRIPE_TVA_TAX_RATE_ID", "txr_test");
   let creates = 0, sends = 0, lineCreates = 0, failSend = true, customerEmail = "";
   let invoice: Record<string, unknown> | undefined;
-  const lines: Array<{ metadata: { bpMonthlyMaterial: string } }> = [];
+  const lines: Array<{ metadata: { bpDetailKey: string } }> = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
     const path = url.replace("https://api.stripe.com/v1/", "");
     const body = new URLSearchParams(init?.body as string);
@@ -90,7 +94,7 @@ test("Stripe failure resumes same invoice and sends to billing email", async () 
       invoice = { id: "in_test", status: "draft", metadata: { bpMonthlyInvoiceId: body.get("metadata[bpMonthlyInvoiceId]") }, hosted_invoice_url: "https://example.com/invoice" };
       response = invoice;
     } else if (path.includes("/lines")) response = { data: lines };
-    else if (path === "invoiceitems") { lineCreates++; lines.push({ metadata: { bpMonthlyMaterial: body.get("metadata[bpMonthlyMaterial]")! } }); }
+    else if (path === "invoiceitems") { lineCreates++; lines.push({ metadata: { bpDetailKey: body.get("metadata[bpDetailKey]")! } }); }
     else if (path.endsWith("/finalize")) { invoice!.status = "open"; response = invoice; }
     else if (path.endsWith("/send")) {
       if (failSend) { failSend = false; return new Response(JSON.stringify({ error: { message: "temporary" } }), { status: 503 }); }
@@ -104,7 +108,7 @@ test("Stripe failure resumes same invoice and sends to billing email", async () 
   expect(creates).toBe(1);
   await t.action(internal.bennesproMonthly.process, args);
   await t.action(internal.bennesproMonthly.process, args);
-  expect({ creates, sends, lineCreates, customerEmail }).toEqual({ creates: 1, sends: 1, lineCreates: 1, customerEmail: "billing@example.com" });
+  expect({ creates, sends, lineCreates, customerEmail }).toEqual({ creates: 1, sends: 1, lineCreates: 2, customerEmail: "billing@example.com" });
   for (const id of depotIds) expect((await t.run(ctx => ctx.db.get(id)))?.billing).toMatchObject({ status: "invoiced", stripeInvoiceId: "in_test", amountCents: 100 });
   await t.mutation(internal.bennespro.saveInvoicePaymentStatus, { depotId: depotIds[0], paymentStatus: "paid" });
   for (const id of depotIds) expect((await t.run(ctx => ctx.db.get(id)))?.billing?.paymentStatus).toBe("paid");

@@ -1220,7 +1220,7 @@ export const billDepot = mutation({
     await requireCrmPermission(ctx, "bennespro:depots", "update");
     const depot = await ctx.db.get(depotId);
     if (!depot) throw new Error("Dépôt introuvable.");
-    if (depot.billing?.status === "invoiced" || depot.billing?.monthlyInvoiceId || depot.billing?.stripeInvoiceId) {
+    if (depot.billing?.status === "invoiced" || depot.billing?.monthlyInvoiceId || depot.billing?.groupingId || depot.billing?.stripeInvoiceId) {
       throw new Error("Ce dépôt est déjà facturé.");
     }
     if (depot.billing?.month) return;
@@ -1261,6 +1261,7 @@ export const saveDepotBilling = internalMutation({
 export const saveInvoicePaymentStatus = internalMutation({
   args: {
     depotId: v.id("bpDepots"),
+    expectedInvoiceId: v.optional(v.string()),
     paymentStatus: v.union(
       v.literal("draft"),
       v.literal("open"),
@@ -1271,13 +1272,14 @@ export const saveInvoicePaymentStatus = internalMutation({
     stripeInvoiceUrl: v.optional(v.string()),
     paidAt: v.optional(v.number()),
   },
-  handler: async (ctx, { depotId, paymentStatus, stripeInvoiceUrl, paidAt }) => {
+  handler: async (ctx, { depotId, expectedInvoiceId, paymentStatus, stripeInvoiceUrl, paidAt }) => {
     const depot = await ctx.db.get(depotId);
     if (!depot?.billing) return;
+    if (expectedInvoiceId && depot.billing.stripeInvoiceId !== expectedInvoiceId) return;
     const monthly = depot.billing.monthlyInvoiceId ? await ctx.db.get(depot.billing.monthlyInvoiceId) : null;
     for (const id of monthly?.depotIds ?? [depotId]) {
       const target = await ctx.db.get(id);
-      if (!target?.billing || target.billing.paymentStatusManual) continue;
+      if (!target?.billing || target.billing.paymentStatusManual || target.billing.groupingId || target.billing.stripeInvoiceId !== depot.billing.stripeInvoiceId) continue;
       await ctx.db.patch(id, {
         billing: {
           ...target.billing,
@@ -1302,14 +1304,19 @@ export const recordReminderSent = internalMutation({
   },
 });
 
+export class StripeApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
 export async function stripeRequest(
   secretKey: string,
   path: string,
   params: Record<string, string>,
   idempotencyKey?: string,
+  method: "POST" | "DELETE" = "POST",
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
-    method: "POST",
+    method,
     headers: {
       Authorization: `Bearer ${secretKey}`,
       "Content-Type": "application/x-www-form-urlencoded",
@@ -1322,7 +1329,7 @@ export async function stripeRequest(
     [key: string]: unknown;
   };
   if (!res.ok) {
-    throw new Error(json.error?.message ?? `Stripe ${path} a échoué (${res.status}).`);
+    throw new StripeApiError(json.error?.message ?? `Stripe ${path} a échoué (${res.status}).`, res.status);
   }
   return json;
 }
@@ -1385,10 +1392,11 @@ async function refreshStripeInvoiceBilling(
   if (paymentStatus) {
     const args: {
       depotId: Id<"bpDepots">;
+      expectedInvoiceId: string;
       paymentStatus: StripeInvoiceStatus;
       stripeInvoiceUrl?: string;
       paidAt?: number;
-    } = { depotId, paymentStatus };
+    } = { depotId, expectedInvoiceId: invoiceId, paymentStatus };
     const hostedUrl = invoice.hosted_invoice_url;
     if (typeof hostedUrl === "string") args.stripeInvoiceUrl = hostedUrl;
     const paidAt = stripePaidAt(invoice);
@@ -1409,7 +1417,7 @@ export const invoiceDepotDib = internalAction({
     const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     if (!data?.depot.billing || data.depot.billing.status === "invoiced") return;
-    if (data.depot.billing.month) return;
+    if (data.depot.billing.month || data.depot.billing.groupingId) return;
     const { depot, company } = data;
     const billing: Infer<typeof bpBilling> = { ...depot.billing! };
 
@@ -1541,7 +1549,7 @@ export async function stripeGet(secretKey: string, path: string): Promise<Record
   });
   const json = (await res.json()) as { error?: { message?: string }; [key: string]: unknown };
   if (!res.ok) {
-    throw new Error(json.error?.message ?? `Stripe ${path} a échoué (${res.status}).`);
+    throw new StripeApiError(json.error?.message ?? `Stripe ${path} a échoué (${res.status}).`, res.status);
   }
   return json;
 }
@@ -1630,6 +1638,7 @@ export const setInvoicePaymentStatus = action({
     const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     const billing = data?.depot.billing;
+    if (billing?.groupingId) throw new Error("Regroupement en cours : règlement verrouillé.");
     if (billing?.monthlyInvoiceId) throw new Error("Modifiez le règlement de la facture mensuelle dans Stripe, puis actualisez son statut.");
     if (!billing || billing.status !== "invoiced") {
       throw new Error("Ce dépôt n'a pas de facture émise.");
@@ -1705,7 +1714,7 @@ export const deleteDepot = action({
     const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     if (!data) return null;
-    if (data.depot.billing?.monthlyInvoiceId) throw new Error("Ce dépôt appartient à une facture mensuelle et ne peut pas être supprimé.");
+    if (data.depot.billing?.monthlyInvoiceId || data.depot.billing?.groupingId) throw new Error("Ce dépôt appartient à une facture mensuelle et ne peut pas être supprimé.");
     await voidInvoiceIfPossible(
       env.BENNESPRO_STRIPE_SECRET_KEY,
       data.depot.billing?.stripeInvoiceId,
@@ -1723,7 +1732,7 @@ export const companyDepotsForDeletion = internalQuery({
       .query("bpDepots")
       .withIndex("by_company", (q) => q.eq("companyId", companyId))
       .collect();
-    if (depots.some(d => d.billing?.monthlyInvoiceId)) throw new Error("Cette entreprise possède des factures mensuelles et ne peut pas être supprimée.");
+    if (depots.some(d => d.billing?.monthlyInvoiceId || d.billing?.groupingId)) throw new Error("Cette entreprise possède des factures mensuelles et ne peut pas être supprimée.");
     return depots.map((d) => ({
       stripeInvoiceId: d.billing?.stripeInvoiceId,
       paymentStatus: d.billing?.paymentStatus,
@@ -1739,7 +1748,7 @@ export const wipeCompanyCascade = internalMutation({
       .query("bpDepots")
       .withIndex("by_company", (q) => q.eq("companyId", companyId))
       .collect();
-    if (depots.some(d => d.billing?.monthlyInvoiceId)) throw new Error("Cette entreprise possède des factures mensuelles et ne peut pas être supprimée.");
+    if (depots.some(d => d.billing?.monthlyInvoiceId || d.billing?.groupingId)) throw new Error("Cette entreprise possède des factures mensuelles et ne peut pas être supprimée.");
     for (const depot of depots) {
       const files = [
         depot.ticketPhoto,
@@ -1819,6 +1828,7 @@ export const sendInvoiceEmail = action({
     if (!depot.billing?.stripeInvoiceUrl || !depot.billing.stripeInvoiceId) {
       throw new Error("Aucune facture Stripe pour ce dépôt.");
     }
+    if (depot.billing.groupingId) throw new Error("Regroupement en cours : attendez la nouvelle facture.");
     if (depot.billing.paymentStatus === "paid" || depot.billing.paymentStatus === "void") {
       throw new Error("Cette facture est déjà réglée ou annulée.");
     }
@@ -2305,7 +2315,7 @@ export const adminWipeDepot = internalMutation({
   handler: async (ctx, { depotId, alsoCompany }) => {
     const depot = await ctx.db.get(depotId);
     if (!depot) return;
-    if (depot.billing?.monthlyInvoiceId) throw new Error("Dépôt rattaché à une facture mensuelle.");
+    if (depot.billing?.monthlyInvoiceId || depot.billing?.groupingId) throw new Error("Dépôt rattaché à une facture mensuelle.");
     const files = [
       depot.ticketPhoto,
       depot.truckExteriorPhoto,
