@@ -80,7 +80,7 @@ function shell(opts: { preheader: string; heading: string; intro: string; conten
           <tr>
             <td class="px" style="padding:20px 32px;background:#faf7f2;border-top:1px solid #f1e9dd;">
               <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#b8b0a4;">
-                Message automatique — merci de ne pas y répondre. Écrivez-nous depuis la messagerie de votre espace client.
+                Message automatique — merci de ne pas y répondre. Une question ? Appelez BâtiRe au <a href="tel:+33375150475" style="color:${BRAND};font-weight:700;text-decoration:none;">03 75 15 04 75</a> ou écrivez-nous depuis la messagerie de votre espace client.
               </p>
             </td>
           </tr>

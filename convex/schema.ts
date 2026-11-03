@@ -3209,7 +3209,8 @@ export default defineSchema(
   })
     .index("by_outcome", ["outcome"])
     .index("by_reference", ["reference"])
-    .index("by_createdAt", ["createdAt"]),
+    .index("by_createdAt", ["createdAt"])
+    .index("by_user_createdAt", ["userId", "createdAt"]),
 
   /** Ventes Bâtire : paiement en ligne (boutique) ou au terminal (kiosque). */
   btOrders: defineTable({
@@ -3257,7 +3258,8 @@ export default defineSchema(
     .index("by_status", ["status"])
     .index("by_reference", ["reference"])
     .index("by_material", ["materialId"])
-    .index("by_stripeSession", ["stripeSessionId"]),
+    .index("by_stripeSession", ["stripeSessionId"])
+    .index("by_user_createdAt", ["userId", "createdAt"]),
 
   /**
    * Messagerie Bâtire : un fil par client et par matériau.

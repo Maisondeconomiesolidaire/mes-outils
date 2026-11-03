@@ -1238,6 +1238,33 @@ export const listOrders = query({
   },
 });
 
+/** Commandes et demandes de livraison visibles par le client qui les a créées. */
+export const myOrderActivity = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return { orders: [], deliveryRequests: [] };
+
+    const [orders, requests] = await Promise.all([
+      ctx.db
+        .query("btOrders")
+        .withIndex("by_user_createdAt", (q) => q.eq("userId", identity.subject))
+        .order("desc")
+        .take(100),
+      ctx.db
+        .query("btRequests")
+        .withIndex("by_user_createdAt", (q) => q.eq("userId", identity.subject))
+        .order("desc")
+        .take(100),
+    ]);
+
+    return {
+      orders,
+      deliveryRequests: requests.filter((request) => request.type === "devis"),
+    };
+  },
+});
+
 /** Tableau de suivi des demandes Bâtire, même colonnes opérationnelles que Recycapp. */
 export const listRequests = query({
   args: {},
