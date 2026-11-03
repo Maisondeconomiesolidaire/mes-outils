@@ -26,16 +26,26 @@ import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
 const PAGE_DEMANDES = "batire:demandes";
-const OFFICE_FURNITURE_CATEGORY = "Mobilier de bureau";
+/** Toute famille de mobilier est vendue par la Recyclerie. */
+function isRecyclerieFurniture(category: string) {
+  return category.trim().toLocaleLowerCase("fr-FR").startsWith("mobilier");
+}
 
-/** Le mobilier appartient à la filière Recyclerie ; les autres matériaux à Bennes & Pro. */
+/**
+ * Mobilier → compte Stripe Recyclerie. Tout le reste → compte Stripe
+ * MatériauSol / Déchet'Lab, dont la clé est administrée par Bennes Pro.
+ */
 function stripeKeyForCategory(category: string) {
-  if (category === OFFICE_FURNITURE_CATEGORY) return recycappSecretKey();
-  if (!env.BENNESPRO_STRIPE_SECRET_KEY) throw new Error("Paiement en ligne indisponible : BENNESPRO_STRIPE_SECRET_KEY n'est pas configurée côté Convex.");
+  if (isRecyclerieFurniture(category)) return recycappSecretKey();
+  if (!env.BENNESPRO_STRIPE_SECRET_KEY) {
+    throw new ConvexError(
+      "Paiement en ligne indisponible : la clé Stripe MatériauSol / Déchet'Lab n'est pas configurée côté Convex.",
+    );
+  }
   return env.BENNESPRO_STRIPE_SECRET_KEY;
 }
 function stripeProviderForCategory(category: string): "recycapp" | "bennespro" {
-  return category === OFFICE_FURNITURE_CATEGORY ? "recycapp" : "bennespro";
+  return isRecyclerieFurniture(category) ? "recycapp" : "bennespro";
 }
 
 /** Photos et fiche technique signées : un identifiant de stockage ne s'ouvre pas. */
