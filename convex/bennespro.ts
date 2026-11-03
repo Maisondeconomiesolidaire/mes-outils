@@ -17,6 +17,7 @@ import { accessAllows, livePhotosByClerkId, requireCrmPermission, requireUser } 
 import { bytesToBase64, resendSend, storageImageUrl, type EmailAttachment } from "./emails";
 import { bpBilling, bpCompanyType, bpMaterial, bpTradeCategory, bpUnit } from "./schema";
 import { resolveActingProfile } from "./bennesproProfiles";
+import { billingMonth } from "./lib/bpMonthlyBilling";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
 
@@ -1077,9 +1078,6 @@ export const createDepot = mutation({
       ...actingProfile,
       createdAt: Date.now(),
     });
-    if (billing) {
-      await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
-    }
     return { depotId, depotNumber };
   },
 });
@@ -1134,6 +1132,7 @@ async function buildBilling(ctx: QueryCtx | MutationCtx, items: DepotItems) {
     items: billableItems,
     vatRate: DIB_VAT_RATE,
     status: "pending" as const,
+    month: billingMonth(Date.now()),
   };
 }
 
@@ -1221,9 +1220,10 @@ export const billDepot = mutation({
     await requireCrmPermission(ctx, "bennespro:depots", "update");
     const depot = await ctx.db.get(depotId);
     if (!depot) throw new Error("Dépôt introuvable.");
-    if (depot.billing?.status === "invoiced") {
+    if (depot.billing?.status === "invoiced" || depot.billing?.monthlyInvoiceId || depot.billing?.stripeInvoiceId) {
       throw new Error("Ce dépôt est déjà facturé.");
     }
+    if (depot.billing?.month) return;
     const billing = await buildBilling(ctx, depot.items);
     if (!billing) {
       throw new Error("Aucun poids de DIB ou de bois facturable (kg ou tonne) sur ce dépôt.");
@@ -1231,7 +1231,6 @@ export const billDepot = mutation({
     await ctx.db.patch(depotId, {
       billing,
     });
-    await ctx.scheduler.runAfter(0, internal.bennespro.invoiceDepotDib, { depotId });
   },
 });
 
@@ -1275,16 +1274,19 @@ export const saveInvoicePaymentStatus = internalMutation({
   handler: async (ctx, { depotId, paymentStatus, stripeInvoiceUrl, paidAt }) => {
     const depot = await ctx.db.get(depotId);
     if (!depot?.billing) return;
-    // Un statut posé à la main que Stripe ne sait pas refléter prime.
-    if (depot.billing.paymentStatusManual) return;
-    await ctx.db.patch(depotId, {
-      billing: {
-        ...depot.billing,
-        paymentStatus,
-        ...(stripeInvoiceUrl ? { stripeInvoiceUrl } : {}),
-        ...(paidAt ? { paidAt } : {}),
-      },
-    });
+    const monthly = depot.billing.monthlyInvoiceId ? await ctx.db.get(depot.billing.monthlyInvoiceId) : null;
+    for (const id of monthly?.depotIds ?? [depotId]) {
+      const target = await ctx.db.get(id);
+      if (!target?.billing || target.billing.paymentStatusManual) continue;
+      await ctx.db.patch(id, {
+        billing: {
+          ...target.billing,
+          paymentStatus,
+          ...(stripeInvoiceUrl ? { stripeInvoiceUrl } : {}),
+          ...(paidAt ? { paidAt } : {}),
+        },
+      });
+    }
   },
 });
 
@@ -1300,16 +1302,18 @@ export const recordReminderSent = internalMutation({
   },
 });
 
-async function stripeRequest(
+export async function stripeRequest(
   secretKey: string,
   path: string,
   params: Record<string, string>,
+  idempotencyKey?: string,
 ): Promise<Record<string, unknown>> {
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${secretKey}`,
       "Content-Type": "application/x-www-form-urlencoded",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     body: new URLSearchParams(params),
   });
@@ -1342,7 +1346,7 @@ function stripePaidAt(invoice: Record<string, unknown>): number | undefined {
   return typeof paidAt === "number" ? paidAt * 1000 : undefined;
 }
 
-async function stripeVatTaxRateId(secretKey: string): Promise<string> {
+export async function stripeVatTaxRateId(secretKey: string): Promise<string> {
   if (env.BENNESPRO_STRIPE_TVA_TAX_RATE_ID) return env.BENNESPRO_STRIPE_TVA_TAX_RATE_ID;
 
   const existing = await stripeGet(secretKey, "tax_rates?active=true&limit=100");
@@ -1405,6 +1409,7 @@ export const invoiceDepotDib = internalAction({
     const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     if (!data?.depot.billing || data.depot.billing.status === "invoiced") return;
+    if (data.depot.billing.month) return;
     const { depot, company } = data;
     const billing: Infer<typeof bpBilling> = { ...depot.billing! };
 
@@ -1530,7 +1535,7 @@ export const invoiceDepotDib = internalAction({
 const BP_TEAL = "#2aa79b";
 const BP_DARK = "#14332f";
 
-async function stripeGet(secretKey: string, path: string): Promise<Record<string, unknown>> {
+export async function stripeGet(secretKey: string, path: string): Promise<Record<string, unknown>> {
   const res = await fetch(`https://api.stripe.com/v1/${path}`, {
     headers: { Authorization: `Bearer ${secretKey}` },
   });
@@ -1625,6 +1630,7 @@ export const setInvoicePaymentStatus = action({
     const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     const billing = data?.depot.billing;
+    if (billing?.monthlyInvoiceId) throw new Error("Modifiez le règlement de la facture mensuelle dans Stripe, puis actualisez son statut.");
     if (!billing || billing.status !== "invoiced") {
       throw new Error("Ce dépôt n'a pas de facture émise.");
     }
@@ -1699,6 +1705,7 @@ export const deleteDepot = action({
     const data: { depot: Doc<"bpDepots">; company: Doc<"bpCompanies"> | null } | null =
       await ctx.runQuery(internal.bennespro.depotForBilling, { depotId });
     if (!data) return null;
+    if (data.depot.billing?.monthlyInvoiceId) throw new Error("Ce dépôt appartient à une facture mensuelle et ne peut pas être supprimé.");
     await voidInvoiceIfPossible(
       env.BENNESPRO_STRIPE_SECRET_KEY,
       data.depot.billing?.stripeInvoiceId,
@@ -1716,6 +1723,7 @@ export const companyDepotsForDeletion = internalQuery({
       .query("bpDepots")
       .withIndex("by_company", (q) => q.eq("companyId", companyId))
       .collect();
+    if (depots.some(d => d.billing?.monthlyInvoiceId)) throw new Error("Cette entreprise possède des factures mensuelles et ne peut pas être supprimée.");
     return depots.map((d) => ({
       stripeInvoiceId: d.billing?.stripeInvoiceId,
       paymentStatus: d.billing?.paymentStatus,
@@ -1731,6 +1739,7 @@ export const wipeCompanyCascade = internalMutation({
       .query("bpDepots")
       .withIndex("by_company", (q) => q.eq("companyId", companyId))
       .collect();
+    if (depots.some(d => d.billing?.monthlyInvoiceId)) throw new Error("Cette entreprise possède des factures mensuelles et ne peut pas être supprimée.");
     for (const depot of depots) {
       const files = [
         depot.ticketPhoto,
@@ -1813,9 +1822,16 @@ export const sendInvoiceEmail = action({
     if (depot.billing.paymentStatus === "paid" || depot.billing.paymentStatus === "void") {
       throw new Error("Cette facture est déjà réglée ou annulée.");
     }
-    const email = company?.contactEmail?.trim();
+    const email = company?.billingEmail?.trim() || company?.contactEmail?.trim();
     if (!email) {
       throw new Error("Cette entreprise n'a pas d'email de contact. Ajoutez-le dans sa fiche.");
+    }
+    if (depot.billing.monthlyInvoiceId) {
+      const secret = env.BENNESPRO_STRIPE_SECRET_KEY;
+      if (!secret) throw new Error("Clé Stripe non configurée.");
+      await stripeRequest(secret, `invoices/${depot.billing.stripeInvoiceId}/send`, {});
+      await ctx.runMutation(internal.bennespro.recordReminderSent, { depotId, at: Date.now() });
+      return { sentTo: email, reminder: reminder ?? false, sentAt: Date.now() };
     }
 
     const number = String(depot.depotNumber).padStart(4, "0");
@@ -2289,6 +2305,7 @@ export const adminWipeDepot = internalMutation({
   handler: async (ctx, { depotId, alsoCompany }) => {
     const depot = await ctx.db.get(depotId);
     if (!depot) return;
+    if (depot.billing?.monthlyInvoiceId) throw new Error("Dépôt rattaché à une facture mensuelle.");
     const files = [
       depot.ticketPhoto,
       depot.truckExteriorPhoto,

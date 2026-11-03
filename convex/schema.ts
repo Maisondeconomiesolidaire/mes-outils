@@ -177,6 +177,8 @@ export const bpBillingLine = v.object({
 
 /** App « Bennes & Pro » — facturation Stripe des matières payantes d'un dépôt. */
 export const bpBilling = v.object({
+  month: v.optional(v.string()),
+  monthlyInvoiceId: v.optional(v.id("bpMonthlyInvoices")),
   /** Poids total facturable en kg (lignes kg + tonnes converties). */
   weightKg: v.number(),
   /** Prix appliqué, en centimes d'euro par kg (HT). */
@@ -2550,6 +2552,19 @@ export default defineSchema(
   }).index("by_company", ["companyId"]),
 
   /** Dépôts de déchets. Les lignes de déchets sont embarquées dans le doc. */
+  bpMonthlyInvoices: defineTable({
+    companyId: v.id("bpCompanies"),
+    month: v.string(),
+    depotIds: v.array(v.id("bpDepots")),
+    lines: v.array(bpBillingLine),
+    status: v.union(v.literal("pending"), v.literal("sent")),
+    leaseUntil: v.number(),
+    stripeInvoiceId: v.optional(v.string()),
+    error: v.optional(v.string()),
+    sentAt: v.optional(v.number()),
+  }).index("by_company_month", ["companyId", "month"])
+    .index("by_status", ["status"]),
+
   bpDepots: defineTable({
     depotNumber: v.number(),
     companyId: v.id("bpCompanies"),
@@ -2584,7 +2599,9 @@ export default defineSchema(
   })
     .index("by_company", ["companyId"])
     .index("by_number", ["depotNumber"])
-    .index("by_profile", ["createdByProfileId"])
+      .index("by_monthly_pending", ["billing.status", "billing.month"])
+      .index("by_company_month", ["companyId", "billing.month"])
+      .index("by_profile", ["createdByProfileId"])
     .index("by_createdAt", ["createdAt"]),
 
   // ───────────────────────── App « Pointeuse LSDB » ─────────────────────────
