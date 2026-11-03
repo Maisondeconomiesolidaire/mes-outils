@@ -389,7 +389,7 @@ export const BENNESPRO_PAGES: PermissionPage[] = [
     key: "bennespro:depots",
     label: "Dépôts",
     description: "Enregistrement des dépôts de déchets et bons de dépôt.",
-    actions: ["read", "create"],
+    actions: ["read", "create", "update"],
   },
   {
     app: "bennespro",
