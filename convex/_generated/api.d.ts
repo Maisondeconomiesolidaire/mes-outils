@@ -77,7 +77,6 @@ import type * as socialEnhancements from "../socialEnhancements.js";
 import type * as socialManage from "../socialManage.js";
 import type * as socialSync from "../socialSync.js";
 import type * as sorties from "../sorties.js";
-import type * as storageMaintenance from "../storageMaintenance.js";
 import type * as stripe from "../stripe.js";
 import type * as stripeCatalog from "../stripeCatalog.js";
 import type * as team from "../team.js";
@@ -164,7 +163,6 @@ declare const fullApi: ApiFromModules<{
   socialManage: typeof socialManage;
   socialSync: typeof socialSync;
   sorties: typeof sorties;
-  storageMaintenance: typeof storageMaintenance;
   stripe: typeof stripe;
   stripeCatalog: typeof stripeCatalog;
   team: typeof team;
