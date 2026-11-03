@@ -1153,6 +1153,7 @@ export const startCartCheckout = action({
     const email = args.customer.email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email) || !args.customer.firstName.trim() || !args.customer.lastName.trim()) throw new ConvexError("Indiquez vos coordonnées complètes.");
     const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Connectez-vous pour finaliser votre commande.");
     const groups = new Map<"recycapp" | "bennespro", Array<{ materialId: Id<"btMaterials">; quantity: number; category: string; depot?: string }>>();
     for (const item of args.items) {
       const material = await ctx.runQuery(internal.batire.materialForCheckout, { materialId: item.materialId });
@@ -1260,6 +1261,7 @@ export const requestHomeDelivery = mutation({
       items.push({ materialId: material._id, title: material.title, quantity: line.quantity, unit: material.unit });
     }
     const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Connectez-vous pour demander une livraison.");
     const count = await ctx.db.query("btRequests").take(500);
     const reference = `BTD${String(count.length + 1).padStart(5, "0")}`;
     await ctx.db.insert("btRequests", {
