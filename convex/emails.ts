@@ -318,7 +318,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
   }
   return btoa(binary);
 }
-type ResendSendOptions = { bcc?: string[] };
+type ResendSendOptions = { bcc?: string[]; idempotencyKey?: string };
 
 export async function resendSend(
   to: string | string[],
@@ -349,6 +349,7 @@ export async function resendSend(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
+      ...(options?.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {}),
     },
     body: JSON.stringify({
       from,

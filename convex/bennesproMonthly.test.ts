@@ -77,11 +77,16 @@ test("recording DIB and wood saves the amount without scheduling Stripe", async 
 test("Stripe failure resumes same invoice and sends to billing email", async () => {
   const { t, companyId, depotIds } = await fixture();
   vi.stubEnv("BENNESPRO_STRIPE_SECRET_KEY", "sk_test_fake");
+  vi.stubEnv("RESEND_API_KEY", "re_test_fake");
   vi.stubEnv("BENNESPRO_STRIPE_TVA_TAX_RATE_ID", "txr_test");
-  let creates = 0, sends = 0, lineCreates = 0, failSend = true, customerEmail = "";
+  let creates = 0, sends = 0, lineCreates = 0, failSend = true, failReceipts = true, customerEmail = "";
   let invoice: Record<string, unknown> | undefined;
   const lines: Array<{ metadata: { bpDetailKey: string } }> = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "https://api.resend.com/emails") {
+      if (failReceipts) { failReceipts = false; return new Response("temporary mail failure", { status: 503 }); }
+      return new Response(JSON.stringify({ id: "mail_test" }));
+    }
     const path = url.replace("https://api.stripe.com/v1/", "");
     const body = new URLSearchParams(init?.body as string);
     let response: unknown = {};
@@ -99,7 +104,10 @@ test("Stripe failure resumes same invoice and sends to billing email", async () 
     else if (path.endsWith("/send")) {
       if (failSend) { failSend = false; return new Response(JSON.stringify({ error: { message: "temporary" } }), { status: 503 }); }
       sends++; response = invoice;
-    } else if (path === "invoices/in_test") response = invoice;
+    } else if (path === "invoices/in_test") {
+      if (body.get("metadata[bpMonthlySent]")) (invoice!.metadata as Record<string, string>).bpMonthlySent = "true";
+      response = invoice;
+    }
     else throw new Error(`Unexpected Stripe request ${path}`);
     return new Response(JSON.stringify(response));
   }));
@@ -107,6 +115,7 @@ test("Stripe failure resumes same invoice and sends to billing email", async () 
   await t.action(internal.bennesproMonthly.process, args);
   expect(creates).toBe(1);
   await t.action(internal.bennesproMonthly.process, args);
+  expect((await t.run(ctx => ctx.db.get(depotIds[0])))?.billing?.status).toBe("pending");
   await t.action(internal.bennesproMonthly.process, args);
   expect({ creates, sends, lineCreates, customerEmail }).toEqual({ creates: 1, sends: 1, lineCreates: 2, customerEmail: "billing@example.com" });
   for (const id of depotIds) expect((await t.run(ctx => ctx.db.get(id)))?.billing).toMatchObject({ status: "invoiced", stripeInvoiceId: "in_test", amountCents: 100 });

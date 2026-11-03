@@ -210,6 +210,7 @@ async function runBatch(ctx: ActionCtx, claimed: { batch: Doc<"bpMonthlyInvoices
       await stripeRequest(secret, `invoices/${invoiceId}/send`, {}, `${key}-send`);
       await stripeRequest(secret, `invoices/${invoiceId}`, { "metadata[bpMonthlySent]": "true" });
     }
+    await ctx.runAction(internal.bennesproReceiptEmails.send, { id: batch._id });
     await ctx.runMutation(internal.bennesproMonthly.saveProgress, { id: batch._id, sent: true, paid: invoice.status === "paid", url: typeof invoice.hosted_invoice_url === "string" ? invoice.hosted_invoice_url : undefined });
   } catch (error) {
     await ctx.runMutation(internal.bennesproMonthly.saveProgress, { id: batch._id, error: error instanceof Error ? error.message : String(error) });

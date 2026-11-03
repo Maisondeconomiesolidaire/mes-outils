@@ -1840,6 +1840,7 @@ export const sendInvoiceEmail = action({
       const secret = env.BENNESPRO_STRIPE_SECRET_KEY;
       if (!secret) throw new Error("Clé Stripe non configurée.");
       await stripeRequest(secret, `invoices/${depot.billing.stripeInvoiceId}/send`, {});
+      await ctx.runAction(internal.bennesproReceiptEmails.send, { id: depot.billing.monthlyInvoiceId, reminderKey: String(Date.now()) });
       await ctx.runMutation(internal.bennespro.recordReminderSent, { depotId, at: Date.now() });
       return { sentTo: email, reminder: reminder ?? false, sentAt: Date.now() };
     }

@@ -2555,6 +2555,8 @@ export default defineSchema(
 
   /** Dépôts de déchets. Les lignes de déchets sont embarquées dans le doc. */
   bpMonthlyInvoices: defineTable({
+    receiptPartsSent: v.optional(v.array(v.number())),
+    receiptRecipient: v.optional(v.string()),
     kind: v.optional(v.union(v.literal("monthly"), v.literal("manual"))),
     details: v.optional(v.array(v.object({
       depotId: v.id("bpDepots"),

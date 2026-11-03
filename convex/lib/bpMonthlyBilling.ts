@@ -24,6 +24,13 @@ export function aggregateBillingLines<T extends { material: string; weightKg: nu
 export const DIB = "Tout venant/DIB non triés";
 export const WOOD = "Bois";
 
+export function billingTotals(depots: Array<Pick<Doc<"bpDepots">, "billing">>) {
+  return depots.reduce((total, d) => {
+    const ht = d.billing?.amountCents ?? 0;
+    return { ht: total.ht + ht, ttc: total.ttc + ht + Math.round(ht * (d.billing?.vatRate ?? 20) / 100) };
+  }, { ht: 0, ttc: 0 });
+}
+
 /** One invoice line per deposit, including its original quantities and units. */
 export function depositInvoiceDetails(depots: Doc<"bpDepots">[]) {
   return [...depots].sort((a, b) => a.createdAt - b.createdAt || a.depotNumber - b.depotNumber).map(d => {

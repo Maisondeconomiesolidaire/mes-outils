@@ -12,6 +12,7 @@ async function fixture() {
   vi.useFakeTimers();
   vi.stubEnv("ADMIN_EMAILS", "admin@example.com");
   vi.stubEnv("BENNESPRO_STRIPE_SECRET_KEY", "sk_test_fake");
+  vi.stubEnv("RESEND_API_KEY", "re_test_fake");
   vi.stubEnv("BENNESPRO_STRIPE_TVA_TAX_RATE_ID", "txr_test");
   const t = convexTest(schema, modules);
   const admin = t.withIdentity({ subject: "admin", email: "admin@example.com" });
@@ -38,6 +39,7 @@ function stripeMock(options: { failFinalize?: boolean; failVoidOnce?: string; pa
   const events: string[] = [];
   let createCount = 0, sends = 0;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "https://api.resend.com/emails") return new Response(JSON.stringify({ id: "mail_test" }));
     const path = url.replace("https://api.stripe.com/v1/", "");
     const body = new URLSearchParams(init?.body as string);
     const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status });
