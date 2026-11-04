@@ -1,3 +1,4 @@
+import { ConvexError } from "convex/values";
 import { useAction, useMutation, useQuery } from "convex/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, CheckCircle2, ChevronDown, ExternalLink, FileText, Loader2, Lock, Search, Sparkles, UserPlus, Users, X } from "lucide-react";
@@ -43,7 +44,7 @@ type ContractHistoryItem = {
   payload: {
     structure: string;
     numero_contrat?: string;
-    type_contrat: "CDDI" | "CDI-Inclusion" | "CDD-Pec" | "CDI";
+    type_contrat: (typeof CONTRACT_TYPES)[number];
     type_document: "contrat_initial" | "avenant_prolong";
     poste: string;
     date_debut_contrat: string;
@@ -70,6 +71,7 @@ const CONTRACT_TYPES = [
   "CDDI",
   "CDI-Inclusion",
   "CDD-Pec",
+  "CDD",
   "CDI",
 ] as const;
 
@@ -413,7 +415,9 @@ function RhWorkspace({ canViewDashboard }: { canViewDashboard: boolean }) {
       }));
     } catch (error) {
       setContractError(
-        error instanceof Error ? error.message : "Envoi du contrat impossible.",
+        error instanceof ConvexError && typeof error.data === "string"
+          ? error.data
+          : error instanceof Error ? error.message : "Envoi du contrat impossible.",
       );
     } finally {
       setSendingContract(false);

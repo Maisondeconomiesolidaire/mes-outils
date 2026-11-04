@@ -1,4 +1,4 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import {
   action,
   internalMutation,
@@ -19,6 +19,9 @@ import {
 import { bytesToBase64, type EmailAttachment } from "./emails";
 import type { Doc, Id } from "./_generated/dataModel";
 import { drivingRoute, drivingRouteGeometry, geocode } from "./livraison";
+
+const CDD_TEMPLATE_ERROR =
+  "Le modèle de contrat CDD n’a pas encore été créé. La génération du contrat est momentanément indisponible.";
 
 const RH_PAGE_KEY = "mesoutils:rh";
 const RH_DASHBOARD_PAGE_KEY = "mesoutils:rh-tableau-de-bord";
@@ -54,6 +57,7 @@ const contractPayloadArgs = {
     v.literal("CDDI"),
     v.literal("CDI-Inclusion"),
     v.literal("CDD-Pec"),
+    v.literal("CDD"),
     v.literal("CDI"),
   ),
   type_document: v.union(
@@ -194,7 +198,7 @@ function contractPayloadFromEmployee(
   args: {
     employeeId: Id<"hrEmployees">;
     numero_contrat: string;
-    type_contrat: "CDDI" | "CDI-Inclusion" | "CDD-Pec" | "CDI";
+    type_contrat: "CDDI" | "CDI-Inclusion" | "CDD-Pec" | "CDD" | "CDI";
     type_document: "contrat_initial" | "avenant_prolong";
     date_fin_contrat: string;
     duree_contrat: string;
@@ -801,12 +805,21 @@ export const generateContract = action({
     });
 
     const payload = contractPayloadFromEmployee(employee, args);
-    const response = await fetch(CONTRACT_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const responseText = await response.text();
+    let response: Response;
+    let responseText: string;
+    try {
+      response = await fetch(CONTRACT_WEBHOOK_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      responseText = await response.text();
+    } catch (error) {
+      if (payload.type_contrat === "CDD") {
+        throw new ConvexError(CDD_TEMPLATE_ERROR);
+      }
+      throw error;
+    }
 
     await ctx.runMutation(internal.rh.recordContractWebhook, {
       employeeId: args.employeeId,
@@ -818,6 +831,9 @@ export const generateContract = action({
     });
 
     if (!response.ok) {
+      if (payload.type_contrat === "CDD") {
+        throw new ConvexError(CDD_TEMPLATE_ERROR);
+      }
       throw new Error(`Webhook Make en échec (${response.status}).`);
     }
 
