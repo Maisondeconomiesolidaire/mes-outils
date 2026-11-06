@@ -27,6 +27,7 @@ const PAGE_DONS = "batire:dons";
 /* ─── Fiche donateur ───────────────────────────────────────────────────────── */
 
 const profileFields = {
+  customerType: v.optional(v.union(v.literal("particulier"), v.literal("professionnel"), v.literal("collectivite"))),
   company: v.optional(v.string()),
   siret: v.optional(v.string()),
   apeCode: v.optional(v.string()),
@@ -64,6 +65,7 @@ export const getMyDonorProfile = query({
     const givenName = identity.givenName ?? "";
     const familyName = identity.familyName ?? "";
     return {
+      customerType: profile?.customerType ?? "particulier",
       company: profile?.company ?? "",
       siret: profile?.siret ?? "",
       apeCode: profile?.apeCode ?? "",
@@ -86,6 +88,7 @@ export const saveMyDonorProfile = mutation({
     const identity = await requireUser(ctx);
     const now = Date.now();
     const patch = {
+      ...(args.customerType ? { customerType: args.customerType } : {}),
       company: trimmed(args.company),
       siret: trimmed(args.siret),
       apeCode: trimmed(args.apeCode)?.toUpperCase(),

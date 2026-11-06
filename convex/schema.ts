@@ -3269,6 +3269,7 @@ export default defineSchema(
 
   /** Ventes Bâtire : paiement en ligne (boutique) ou au terminal (kiosque). */
   btOrders: defineTable({
+    paymentMethod: v.optional(v.union(v.literal("card"), v.literal("cash"), v.literal("bank_transfer"))),
     purchaseReference: v.optional(v.string()),
     pickupReference: v.optional(v.string()),
     readyAt: v.optional(v.number()),
@@ -3406,6 +3407,7 @@ export default defineSchema(
    * et alimentent le formulaire d'achat comme celui de don.
    */
   btDonorProfiles: defineTable({
+    customerType: v.optional(v.union(v.literal("particulier"), v.literal("professionnel"), v.literal("collectivite"))),
     clerkId: v.string(),
     /** Raison sociale. Une personne seule peut laisser le champ vide. */
     company: v.optional(v.string()),
