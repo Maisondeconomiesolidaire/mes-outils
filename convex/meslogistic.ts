@@ -1,0 +1,93 @@
+import { ConvexError, v } from "convex/values";
+import { mutation, query } from "./_generated/server";
+import type { MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { requireCrmPermission, requireUser } from "./lib";
+import { transportRoute, validTransition } from "./meslogisticRules";
+const PAGE = "meslogistic:demandes";
+async function event(ctx: MutationCtx, requestId: Id<"mlRequests">, message: string, actor: string) {
+  await ctx.db.insert("mlEvents", { requestId, message, actor, createdAt: Date.now() });
+}
+/** Called in the order transaction: atomic and idempotent, including Stripe retries. */
+export async function ensureOrderTransport(ctx: MutationCtx, orderId: Id<"btOrders">) {
+  const order = await ctx.db.get(orderId);
+  if (!order || !["payee", "reservee"].includes(order.status)) return;
+  if (await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", orderId)).first()) return;
+  const material = await ctx.db.get(order.materialId);
+  const route = transportRoute(order.logisticsSourceDepot ?? material?.depot, order.pickupLocation);
+  if (!route) return;
+  const now = Date.now();
+  const id = await ctx.db.insert("mlRequests", {
+    orderId, materialId: order.materialId, reference: order.pickupReference ?? order.reference,
+    title: order.materialTitle, quantity: order.quantity, unit: order.unit,
+    customerName: `${order.customer.firstName} ${order.customer.lastName}`.trim(),
+    ...route, status: "a_preparer", prepared: false, createdAt: now, updatedAt: now,
+  });
+  await event(ctx, id, `Demande créée depuis la commande Bâtire ${order.reference}`, "Bâtire");
+}
+export const list = query({
+  args: {}, handler: async ctx => {
+    await requireCrmPermission(ctx, PAGE, "read");
+    return await ctx.db.query("mlRequests").order("desc").take(500);
+  },
+});
+export const history = query({
+  args: { id: v.id("mlRequests") }, handler: async (ctx, { id }) => {
+    await requireCrmPermission(ctx, PAGE, "read");
+    return await ctx.db.query("mlEvents").withIndex("by_requestId", q => q.eq("requestId", id)).order("desc").take(200);
+  },
+});
+export const listShuttles = query({
+  args: {}, handler: async ctx => {
+    await requireCrmPermission(ctx, PAGE, "read");
+    return await ctx.db.query("mlShuttles").order("desc").take(200);
+  },
+});
+const fields = { title: v.string(), quantity: v.number(), unit: v.string(), customerName: v.string(), origin: v.string(), destination: v.string(), scheduledDate: v.optional(v.string()), assignee: v.optional(v.string()), notes: v.optional(v.string()) };
+function validateFields(args: { title: string; quantity: number; unit: string; origin: string; destination: string; scheduledDate?: string; notes?: string }) {
+  if (![args.title, args.unit, args.origin, args.destination].every(x => x.trim()) || !Number.isFinite(args.quantity) || args.quantity <= 0) throw new ConvexError("Renseignez l’objet, la quantité et les deux lieux.");
+  if (args.origin.trim().toLocaleLowerCase() === args.destination.trim().toLocaleLowerCase()) throw new ConvexError("Le départ et l’arrivée doivent être différents.");
+  if (args.scheduledDate && (!/^\d{4}-\d{2}-\d{2}$/.test(args.scheduledDate) || !Number.isFinite(Date.parse(args.scheduledDate)))) throw new ConvexError("Date invalide.");
+  if ((args.notes?.length ?? 0) > 5000 || [args.title, args.origin, args.destination].some(x => x.length > 300)) throw new ConvexError("Texte trop long.");
+}
+export const create = mutation({ args: fields, handler: async (ctx, args) => {
+  await requireCrmPermission(ctx, PAGE, "create"); validateFields(args);
+  const user = await requireUser(ctx); const now = Date.now();
+  const id = await ctx.db.insert("mlRequests", { ...args, reference: `ML-${now}`, status: "a_preparer", prepared: false, createdAt: now, updatedAt: now });
+  await ctx.db.patch(id, { reference: `ML-${id}` });
+  await event(ctx, id, "Demande manuelle créée", user.name ?? user.subject); return id;
+}});
+export const update = mutation({
+  args: { id: v.id("mlRequests"), origin: v.string(), destination: v.string(), scheduledDate: v.string(), assignee: v.string(), notes: v.string(), expectedUpdatedAt: v.number() },
+  handler: async (ctx, { id, expectedUpdatedAt, ...args }) => {
+    await requireCrmPermission(ctx, PAGE, "update"); const user = await requireUser(ctx);
+    const row = await ctx.db.get(id); if (!row) throw new ConvexError("Demande introuvable.");
+    if (row.updatedAt !== expectedUpdatedAt) throw new ConvexError("La demande a changé. Fermez puis rouvrez la fiche.");
+    if (["receptionnee", "annulee"].includes(row.status)) throw new ConvexError("Cette demande est clôturée.");
+    if (row.status === "en_transit" && (args.origin !== row.origin || args.destination !== row.destination)) throw new ConvexError("Le trajet est figé pendant le transport.");
+    if (row.orderId && (args.origin !== row.origin || args.destination !== row.destination)) throw new ConvexError("Le trajet est lié au retrait Bâtire et ne peut pas être modifié ici.");
+    if (row.shuttleId && args.scheduledDate !== row.scheduledDate) throw new ConvexError("Réaffectez une navette pour modifier la date prévue.");
+    validateFields({ ...row, ...args });
+    await ctx.db.patch(id, { ...args, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
+    await event(ctx, id, `Organisation mise à jour · ${args.origin} → ${args.destination} · ${args.scheduledDate || "sans date"} · ${args.assignee || "non attribuée"}${args.notes !== (row.notes ?? "") ? ` · Note : ${args.notes || "effacée"}` : ""}`, user.name ?? user.subject);
+  },
+});
+export const advance = mutation({
+  args: { id: v.id("mlRequests"), step: v.union(v.literal("prepared"), v.literal("en_transit"), v.literal("receptionnee"), v.literal("annulee")), expectedUpdatedAt: v.number() },
+  handler: async (ctx, { id, step, expectedUpdatedAt }) => {
+    await requireCrmPermission(ctx, PAGE, "update"); const user = await requireUser(ctx);
+    const row = await ctx.db.get(id); if (!row) throw new ConvexError("Demande introuvable.");
+    if (row.updatedAt !== expectedUpdatedAt) throw new ConvexError("La demande a changé. Actualisez la fiche.");
+    if (step === "prepared") {
+      if (row.status !== "a_preparer" || row.prepared) throw new ConvexError("Cette étape est déjà terminée.");
+      if (row.origin === "Lieu de départ à préciser") throw new ConvexError("Précisez le lieu de départ avant la préparation.");
+      await ctx.db.patch(id, { prepared: true, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
+    } else {
+      if (step === "en_transit" && row.orderId && !row.shuttleId) throw new ConvexError("Affectez une navette avant le départ.");
+      if (!validTransition(row.status, step, row.prepared)) throw new ConvexError("Respectez l’ordre des étapes du transport.");
+      await ctx.db.patch(id, { status: step, ...(step === "receptionnee" ? { receivedQuantity: row.quantity, receivedAt: Date.now() } : {}), updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
+    }
+    const labels = { prepared: "Objets préparés", en_transit: "Objets en transit", receptionnee: "Objets réceptionnés", annulee: "Demande annulée" };
+    await event(ctx, id, labels[step], user.name ?? user.subject);
+  },
+});

@@ -521,6 +521,24 @@ const livraisonDetails = v.object({
 
 export default defineSchema(
   {
+  mlShuttles: defineTable({
+    name: v.string(), scheduledDate: v.string(), createdAt: v.number(),
+  }),
+  mlRequests: defineTable({
+    shuttleId: v.optional(v.id("mlShuttles")),
+    receivedQuantity: v.optional(v.number()),
+    receivedAt: v.optional(v.number()),
+    orderId: v.optional(v.id("btOrders")),
+    materialId: v.optional(v.id("btMaterials")),
+    reference: v.string(), title: v.string(), quantity: v.number(), unit: v.string(),
+    customerName: v.string(), origin: v.string(), destination: v.string(),
+    status: v.union(v.literal("a_preparer"), v.literal("en_transit"), v.literal("receptionnee"), v.literal("annulee")),
+    prepared: v.boolean(), scheduledDate: v.optional(v.string()), assignee: v.optional(v.string()),
+    notes: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
+  }).index("by_orderId", ["orderId"]).index("by_status", ["status"]),
+  mlEvents: defineTable({
+    requestId: v.id("mlRequests"), actor: v.string(), message: v.string(), createdAt: v.number(),
+  }).index("by_requestId", ["requestId"]),
   articles: defineTable({
     title: v.string(),
     description: v.string(),
@@ -3251,6 +3269,12 @@ export default defineSchema(
 
   /** Ventes Bâtire : paiement en ligne (boutique) ou au terminal (kiosque). */
   btOrders: defineTable({
+    purchaseReference: v.optional(v.string()),
+    pickupReference: v.optional(v.string()),
+    readyAt: v.optional(v.number()),
+    collectedAt: v.optional(v.number()),
+    pickupHours: v.optional(v.string()),
+    logisticsSourceDepot: v.optional(v.string()),
     reference: v.string(),
     materialId: v.id("btMaterials"),
     materialTitle: v.string(),

@@ -58,6 +58,8 @@ import type * as lib_klydeStoreRevenue from "../lib/klydeStoreRevenue.js";
 import type * as lib_klydeVacations from "../lib/klydeVacations.js";
 import type * as lib_socialSyncSnapshot from "../lib/socialSyncSnapshot.js";
 import type * as livraison from "../livraison.js";
+import type * as meslogistic from "../meslogistic.js";
+import type * as meslogisticRules from "../meslogisticRules.js";
 import type * as mesoutilsEmails from "../mesoutilsEmails.js";
 import type * as mesoutilsNotifications from "../mesoutilsNotifications.js";
 import type * as messages from "../messages.js";
@@ -150,6 +152,8 @@ declare const fullApi: ApiFromModules<{
   "lib/klydeVacations": typeof lib_klydeVacations;
   "lib/socialSyncSnapshot": typeof lib_socialSyncSnapshot;
   livraison: typeof livraison;
+  meslogistic: typeof meslogistic;
+  meslogisticRules: typeof meslogisticRules;
   mesoutilsEmails: typeof mesoutilsEmails;
   mesoutilsNotifications: typeof mesoutilsNotifications;
   messages: typeof messages;

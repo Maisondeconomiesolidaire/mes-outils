@@ -251,7 +251,7 @@ export const sendOrderReceipt = internalAction({
       heading: "Merci pour votre commande",
       intro:
         `Bonjour ${esc(args.firstName)},<br/><br/>` +
-        `Votre paiement est confirmé. Votre commande <strong>${esc(args.reference)}</strong> vous attend au dépôt.`,
+        `Votre paiement est confirmé pour cet article de la commande <strong>${esc(args.reference)}</strong>. Attendez la notification « Prêt à retirer » avant de vous déplacer. Chaque retrait est suivi séparément dans votre espace client.`,
       contentHtml:
         `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">
           <tr><td style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(args.title)}</td>
@@ -401,5 +401,13 @@ export const sendDonorWelcome = internalAction({
     });
 
     await resendSend(args.to, "Bienvenue sur BâtiRe — votre compte est créé", html, FROM);
+  },
+});
+
+
+export const sendPickupReady = internalAction({
+  args: { to: v.string(), reference: v.string(), title: v.string(), quantity: v.number(), unit: v.string(), location: v.object({ name: v.string(), address: v.string() }), hours: v.string() },
+  handler: async (_ctx, args) => {
+    await resendSend(args.to, `Retrait ${args.reference} prêt à retirer`, shell({ preheader: "Votre retrait est disponible.", heading: "Votre retrait est prêt", intro: `Le retrait <strong>${esc(args.reference)}</strong> est disponible.`, contentHtml: note(args.title, `${args.quantity} ${args.unit}`) + note(args.location.name, `${args.location.address}\nHoraires : ${args.hours}`) + button(`${appUrl()}/mon-compte`, "Voir mes retraits") }), FROM);
   },
 });
