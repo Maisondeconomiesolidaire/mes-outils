@@ -31,17 +31,32 @@ test("payment methods are authorized by the saved customer type on the server", 
   await expect(client.mutation(api.batire.confirmOfflinePayment, { orderId: rows[0]._id })).rejects.toThrow();
 });
 
-test("bank transfer stays unpaid until staff confirmation and then creates its transfer", async () => {
+test("bank transfer can be planned before payment and stays unpaid until staff confirmation", async () => {
   const { t, client, admin, customer, items } = await fixture();
   await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "collectivite" });
   await client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" });
   const rows = await t.run(ctx => ctx.db.query("btOrders").collect());
-  expect(rows.every(row => row.status === "en_attente")).toBe(true);
-  expect(await t.run(ctx => ctx.db.query("mlRequests").collect())).toHaveLength(0);
+  expect(rows.every(row => row.status === "reservee")).toBe(true);
+  expect(await t.run(ctx => ctx.db.query("mlRequests").collect())).toHaveLength(2);
   await admin.mutation(api.batire.confirmOfflinePayment, { orderId: rows[0]._id });
   expect((await t.run(ctx => ctx.db.get(rows[0]._id)))?.status).toBe("payee");
-  expect(await t.run(ctx => ctx.db.query("mlRequests").collect())).toHaveLength(1);
+  expect(await t.run(ctx => ctx.db.query("mlRequests").collect())).toHaveLength(2);
   await expect(admin.mutation(api.batire.confirmOfflinePayment, { orderId: rows[0]._id })).rejects.toThrow();
+});
+
+test("scheduled date is visible to the client before a shuttle is assigned", async () => {
+  const { client, admin, customer, items } = await fixture();
+  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "collectivite" });
+  await client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" });
+  const transfer = (await admin.query(api.meslogistic.list, {}))[0];
+  expect(transfer.payment).toMatchObject({ method: "bank_transfer", paid: false, canConfirm: true });
+  await expect(admin.mutation(api.meslogistic.schedule, { id: transfer._id, scheduledDate: "2026-02-30", expectedUpdatedAt: transfer.updatedAt })).rejects.toThrow();
+  await admin.mutation(api.meslogistic.schedule, { id: transfer._id, scheduledDate: "2026-11-12", expectedUpdatedAt: transfer.updatedAt });
+  const activity = await client.query(api.batire.myOrderActivity, {});
+  const line = activity.orders.find(order => order._id === transfer.orderId);
+  expect(line?.fulfillment).toMatchObject({ status: "scheduled", scheduledDate: "2026-11-12" });
+  const updated = (await admin.query(api.meslogistic.list, {})).find(row => row._id === transfer._id)!;
+  await expect(admin.mutation(api.meslogistic.advance, { id: transfer._id, step: "en_transit", expectedUpdatedAt: updated.updatedAt })).rejects.toThrow();
 });
 
 test("cash cannot be handed over before payment confirmation", async () => {

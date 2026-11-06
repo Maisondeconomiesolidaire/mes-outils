@@ -1279,7 +1279,7 @@ export const requestOfflineCart = mutation({
       if (!source) throw new ConvexError(`Le dépôt de stockage de « ${material.title} » doit être confirmé par l’équipe.`);
       const fee: number = source !== item.pickupLocation && !feeCharged ? PICKUP_TRANSFER_FEE_CENTS : 0;
       const suffix = index < 26 ? String.fromCharCode(65 + index) : `A${String.fromCharCode(65 + index - 26)}`;
-      const order = await insertOrder(ctx, { ...item, customer: { ...args.customer, email }, userId: identity.subject, channel: "boutique", pickupFeeCents: fee, purchaseReference: reference, pickupReference: `${reference}-${suffix}`, paymentMethod: args.paymentMethod }, args.paymentMethod === "cash" ? "reservee" : "en_attente");
+      const order = await insertOrder(ctx, { ...item, customer: { ...args.customer, email }, userId: identity.subject, channel: "boutique", pickupFeeCents: fee, purchaseReference: reference, pickupReference: `${reference}-${suffix}`, paymentMethod: args.paymentMethod }, "reservee");
       amountCents += order.amountCents;
       feeCharged ||= fee > 0;
     }
@@ -3287,7 +3287,7 @@ export const migrateConditionsToLeboncoin = internalMutation({
 
 async function pickupTracking(ctx: QueryCtx | MutationCtx, order: Doc<"btOrders">) {
   const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
-  const status = order.status === "annulee" ? "cancelled" : order.status === "en_attente" ? "payment" : order.collectedAt ? "collected" : order.readyAt ? "ready" : transfer?.status === "annulee" ? "incident" : transfer?.status === "receptionnee" ? "preparing" : transfer?.status === "en_transit" ? "transit" : transfer ? (transfer.shuttleId && transfer.scheduledDate ? "scheduled" : "waiting") : "preparing";
+  const status = order.status === "annulee" ? "cancelled" : order.status === "en_attente" ? "payment" : order.collectedAt ? "collected" : order.readyAt ? "ready" : transfer?.status === "annulee" ? "incident" : transfer?.status === "receptionnee" ? "preparing" : transfer?.status === "en_transit" ? "transit" : transfer ? (transfer.scheduledDate ? "scheduled" : "waiting") : "preparing";
   return { status, scheduledDate: transfer?.scheduledDate, receivedQuantity: transfer?.receivedQuantity, receivedAt: transfer?.receivedAt };
 }
 
@@ -3345,7 +3345,7 @@ export const updatePickup = mutation({
       await ctx.scheduler.runAfter(0, internal.batireEmails.sendPickupReady, { to: order.customer.email, reference: order.pickupReference ?? order.reference, title: order.materialTitle, quantity: order.quantity, unit: order.unit, location: pickupLocations[order.pickupLocation], hours: args.pickupHours.trim() });
     } else {
       if (!order.readyAt) throw new ConvexError("Confirmez d’abord que le lot est prêt.");
-      if (order.paymentMethod === "cash" && order.status !== "payee") throw new ConvexError("Enregistrez le paiement en espèces avant la remise.");
+      if ((order.paymentMethod === "cash" || order.paymentMethod === "bank_transfer") && order.status !== "payee") throw new ConvexError("Enregistrez le paiement avant la remise.");
       await ctx.db.patch(order._id, { collectedAt: now });
     }
   },

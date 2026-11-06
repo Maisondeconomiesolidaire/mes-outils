@@ -41,7 +41,7 @@ test("unpaid checkout creates no transport; confirmed payment uses frozen depart
 test("same site reservation creates no request",async()=>{const {t,materialId}=await fixture();const client=t.withIdentity({subject:"client",email:customer.email});await client.mutation(api.batireDons.saveMyDonorProfile,{customerType:"professionnel"});await client.mutation(api.batire.reserveMaterial,{materialId,quantity:1,customer,pickupLocation:"comptoir_c"});expect(await t.run(ctx=>ctx.db.query("mlRequests").collect())).toHaveLength(0);});
 test("permissions, sequential steps, stale writes and history are enforced",async()=>{
  const {t,admin}=await fixture();
- const values={title:"Porte",quantity:1,unit:"unité",customerName:"Interne",origin:"Comptoir C",destination:"Esspace 150"};
+ const values={title:"Porte",quantity:1,unit:"unité",customerName:"Interne",origin:"Comptoir C",destination:"Esspace 150",scheduledDate:"2026-11-12"};
  await expect(t.mutation(api.meslogistic.create,values)).rejects.toThrow();
  const outsider=t.withIdentity({subject:"visitor",email:"visitor@example.com"});await expect(outsider.query(api.meslogistic.list,{})).rejects.toThrow();
  const id=await admin.mutation(api.meslogistic.create,values);

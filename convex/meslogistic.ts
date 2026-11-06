@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { requireCrmPermission, requireUser } from "./lib";
+import { hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
 import { transportRoute, validTransition } from "./meslogisticRules";
 const PAGE = "meslogistic:demandes";
 async function event(ctx: MutationCtx, requestId: Id<"mlRequests">, message: string, actor: string) {
@@ -28,7 +28,12 @@ export async function ensureOrderTransport(ctx: MutationCtx, orderId: Id<"btOrde
 export const list = query({
   args: {}, handler: async ctx => {
     await requireCrmPermission(ctx, PAGE, "read");
-    return await ctx.db.query("mlRequests").order("desc").take(500);
+    const rows = await ctx.db.query("mlRequests").order("desc").take(500);
+    const canConfirmPayment = await hasCrmPermission(ctx, "batire:demandes", "update");
+    return await Promise.all(rows.map(async row => {
+      const order = row.orderId ? await ctx.db.get(row.orderId) : null;
+      return { ...row, payment: order?.paymentMethod && order.paymentMethod !== "card" ? { method: order.paymentMethod, paid: order.status === "payee", canConfirm: canConfirmPayment } : null };
+    }));
   },
 });
 export const history = query({
@@ -41,6 +46,23 @@ export const listShuttles = query({
   args: {}, handler: async ctx => {
     await requireCrmPermission(ctx, PAGE, "read");
     return await ctx.db.query("mlShuttles").order("desc").take(200);
+  },
+});
+
+export const schedule = mutation({
+  args: { id: v.id("mlRequests"), scheduledDate: v.string(), expectedUpdatedAt: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE, "update");
+    const user = await requireUser(ctx);
+    const row = await ctx.db.get(args.id);
+    if (!row || row.updatedAt !== args.expectedUpdatedAt) throw new ConvexError("La demande a changé. Actualisez la fiche.");
+    if (row.status !== "a_preparer") throw new ConvexError("Cette demande est déjà partie ou clôturée.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.scheduledDate) || !Number.isFinite(Date.parse(args.scheduledDate)) || new Date(args.scheduledDate).toISOString().slice(0, 10) !== args.scheduledDate) throw new ConvexError("Choisissez une date valide.");
+    if (row.shuttleId && row.scheduledDate !== args.scheduledDate) throw new ConvexError("Réaffectez une navette pour modifier sa date.");
+    const updatedAt = Math.max(Date.now(), row.updatedAt + 1);
+    await ctx.db.patch(row._id, { scheduledDate: args.scheduledDate, prepared: true, updatedAt });
+    await event(ctx, row._id, `Date programmée : ${args.scheduledDate}`, user.name ?? user.subject);
+    return { updatedAt };
   },
 });
 const fields = { title: v.string(), quantity: v.number(), unit: v.string(), customerName: v.string(), origin: v.string(), destination: v.string(), scheduledDate: v.optional(v.string()), assignee: v.optional(v.string()), notes: v.optional(v.string()) };
@@ -83,11 +105,13 @@ export const advance = mutation({
       if (row.origin === "Lieu de départ à préciser") throw new ConvexError("Précisez le lieu de départ avant la préparation.");
       await ctx.db.patch(id, { prepared: true, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
     } else {
+      if (step === "en_transit" && !row.scheduledDate) throw new ConvexError("Programmez une date avant le départ.");
       if (step === "en_transit" && row.orderId && !row.shuttleId) throw new ConvexError("Affectez une navette avant le départ.");
       if (!validTransition(row.status, step, row.prepared)) throw new ConvexError("Respectez l’ordre des étapes du transport.");
       await ctx.db.patch(id, { status: step, ...(step === "receptionnee" ? { receivedQuantity: row.quantity, receivedAt: Date.now() } : {}), updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
     }
     const labels = { prepared: "Objets préparés", en_transit: "Objets en transit", receptionnee: "Objets réceptionnés", annulee: "Demande annulée" };
     await event(ctx, id, labels[step], user.name ?? user.subject);
+    return { updatedAt: (await ctx.db.get(id))!.updatedAt };
   },
 });
