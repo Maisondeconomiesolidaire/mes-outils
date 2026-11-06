@@ -55,3 +55,12 @@ test("cash cannot be handed over before payment confirmation", async () => {
   await admin.mutation(api.batire.updatePickup, { orderId: order._id, step: "collect" });
   expect((await t.run(ctx => ctx.db.get(order._id)))?.collectedAt).toBeDefined();
 });
+
+test("a donation without a visible company preserves the saved company in the profile", async () => {
+  const { t, client } = await fixture();
+  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "particulier", company: "Ancienne entreprise" });
+  const photo = await t.run(ctx => ctx.storage.store(new Blob(["photo"], { type: "image/png" })));
+  await client.mutation(api.batireDons.submitDonation, { title: "Bois", category: "Bois", photos: [photo], donor: { firstName: "Jean", lastName: "Test" } });
+  expect((await client.query(api.batireDons.getMyDonorProfile, {}))?.company).toBe("Ancienne entreprise");
+  expect((await t.run(ctx => ctx.db.query("btDonations").collect()))[0].donor.company).toBeUndefined();
+});

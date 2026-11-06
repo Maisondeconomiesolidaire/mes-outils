@@ -3285,7 +3285,7 @@ export const pickupOperations = query({
     await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
     const orders = await ctx.db.query("btOrders").order("desc").take(300);
     return {
-      orders: (await Promise.all(orders.filter(o => o.pickupLocation && ["payee", "reservee"].includes(o.status)).map(async order => ({ ...order, fulfillment: await pickupTracking(ctx, order) })))).filter(order => ["preparing", "ready", "collected"].includes(order.fulfillment.status)),
+      orders: await Promise.all(orders.filter(o => o.pickupLocation && (["payee", "reservee"].includes(o.status) || (o.status === "en_attente" && o.paymentMethod === "bank_transfer"))).map(async order => ({ ...order, fulfillment: await pickupTracking(ctx, order) }))),
     };
   },
 });

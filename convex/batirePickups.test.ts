@@ -34,7 +34,10 @@ test("one purchase, separate pickups, immutable depot snapshots and one 35 euro 
   const transfers = await admin.query(api.meslogistic.list, {});
   expect(transfers).toHaveLength(2);
   expect(transfers.every(row => row.origin === "Comptoir C")).toBe(true);
-  expect((await admin.query(api.batire.pickupOperations, {})).orders.map(row => row._id)).toEqual([orders[0].orderId]);
+  const operationRows = (await admin.query(api.batire.pickupOperations, {})).orders;
+  expect(operationRows).toHaveLength(3);
+  expect(operationRows.find(row => row._id === orders[0].orderId)?.fulfillment.status).toBe("preparing");
+  expect(operationRows.filter(row => row.fulfillment.status === "waiting")).toHaveLength(2);
   expect((await client.query(api.batire.myOrderActivity, {})).orders).toHaveLength(3);
   expect((await t.withIdentity({ subject: "other", email: "other@example.com" }).query(api.batire.myOrderActivity, {})).orders).toHaveLength(0);
 });
@@ -52,7 +55,7 @@ test("shared shuttle and partial reception do not block other pickups; ready not
   await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "receive", receivedQuantity: 2, expectedTransferUpdatedAt: stale })).rejects.toThrow();
   await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "ready", pickupHours: "9h–17h" })).rejects.toThrow();
   await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "receive", receivedQuantity: 2, expectedTransferUpdatedAt: (await transfer(2)).updatedAt });
-  expect((await admin.query(api.batire.pickupOperations, {})).orders).toHaveLength(2);
+  expect((await admin.query(api.batire.pickupOperations, {})).orders).toHaveLength(3);
   await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "collect" })).rejects.toThrow();
   await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "ready", pickupHours: "9h–17h" });
   const scheduledBefore = await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect());
@@ -87,7 +90,7 @@ test("Batire operators cannot manage transfers; logistics operators cannot mark 
   await expect(batire.mutation(api.batire.createPickupShuttle, { name: "Navette", scheduledDate: "2026-11-12" })).rejects.toThrow();
   await expect(batire.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "depart" })).rejects.toThrow();
   await expect(logistics.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready", pickupHours: "9h–17h" })).rejects.toThrow();
-  expect((await batire.query(api.batire.pickupOperations, {})).orders).toHaveLength(1);
+  expect((await batire.query(api.batire.pickupOperations, {})).orders).toHaveLength(3);
 });
 
 test("one shuttle can carry transfers from different purchases; an all-local purchase is free", async () => {

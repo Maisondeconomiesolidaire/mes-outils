@@ -204,7 +204,8 @@ export const submitDonation = mutation({
     // se remplirait encore avec des coordonnées que le donateur vient de
     // corriger.
     const existing = await donorProfile(ctx, identity.subject);
-    const profilePatch = { ...donor, updatedAt: now };
+    // A hidden organisation field must not erase a previously saved value.
+    const profilePatch = { ...donor, ...(args.donor.company === undefined && existing ? { company: existing.company } : {}), updatedAt: now };
     if (existing) await ctx.db.patch(existing._id, profilePatch);
     else await ctx.db.insert("btDonorProfiles", { clerkId: identity.subject, createdAt: now, ...profilePatch });
 
