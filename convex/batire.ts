@@ -1370,6 +1370,17 @@ export const updateRequestOutcome = mutation({
   },
 });
 
+/** Le suivi d'un article ne modifie pas les autres lignes ni le statut global. */
+export const updateRequestItemOutcome = mutation({
+  args: { id: v.id("btRequests"), index: v.number(), outcome: v.union(v.literal("nouveau"), v.literal("en_cours"), v.literal("gagnee"), v.literal("perdue")) },
+  handler: async (ctx, { id, index, outcome }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const request = await ctx.db.get(id);
+    if (!request || !Number.isInteger(index) || index < 0 || index >= request.items.length) throw new ConvexError("Article introuvable dans cette demande.");
+    await ctx.db.patch(id, { items: request.items.map((item, itemIndex) => itemIndex === index ? { ...item, outcome } : item), updatedAt: Date.now() });
+  },
+});
+
 /** La livraison est chiffrée par l'équipe : elle ouvre donc une demande, jamais un paiement estimé. */
 export const requestHomeDelivery = mutation({
   args: {

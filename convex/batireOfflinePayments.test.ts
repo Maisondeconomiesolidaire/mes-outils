@@ -64,3 +64,17 @@ test("a donation without a visible company preserves the saved company in the pr
   expect((await client.query(api.batireDons.getMyDonorProfile, {}))?.company).toBe("Ancienne entreprise");
   expect((await t.run(ctx => ctx.db.query("btDonations").collect()))[0].donor.company).toBeUndefined();
 });
+
+test("a delivery request keeps one card and independent statuses for its materials", async () => {
+  const { t, client, admin, customer, items } = await fixture();
+  await client.mutation(api.batire.requestHomeDelivery, { customer, address: "Beauvais", items: items.map(({ materialId, quantity }) => ({ materialId, quantity })) });
+  const request = (await admin.query(api.batire.listRequests, {}))[0];
+  expect(request.items).toHaveLength(2);
+  await expect(client.mutation(api.batire.updateRequestItemOutcome, { id: request._id, index: 0, outcome: "gagnee" })).rejects.toThrow();
+  await admin.mutation(api.batire.updateRequestItemOutcome, { id: request._id, index: 0, outcome: "en_cours" });
+  await admin.mutation(api.batire.updateRequestItemOutcome, { id: request._id, index: 1, outcome: "gagnee" });
+  const updated = await t.run(ctx => ctx.db.get(request._id));
+  expect(updated?.items.map(item => item.outcome)).toEqual(["en_cours", "gagnee"]);
+  expect(updated?.outcome).toBe("nouveau");
+  await expect(admin.mutation(api.batire.updateRequestItemOutcome, { id: request._id, index: 2, outcome: "perdue" })).rejects.toThrow();
+});

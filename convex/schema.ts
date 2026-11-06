@@ -3248,6 +3248,7 @@ export default defineSchema(
         title: v.string(),
         quantity: v.number(),
         unit: btUnit,
+        outcome: v.optional(btRequestOutcome),
       }),
     ),
     message: v.optional(v.string()),
