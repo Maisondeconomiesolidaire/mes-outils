@@ -123,14 +123,16 @@ function validateFields(args: { title: string; quantity: number; unit: string; o
   if ((args.notes?.length ?? 0) > 5000 || [args.title, args.origin, args.destination].some(x => x.length > 300)) throw new ConvexError("Texte trop long.");
 }
 export const create = mutation({ args: fields, handler: async (ctx, args) => {
-  await requireCrmPermission(ctx, PAGE, "create"); validateFields(args);
+  await requireCrmPermission(ctx, PAGE, "create");
+  if (!args.dueDate) throw new ConvexError("Indiquez l’échéance : date à laquelle les objets doivent être arrivés.");
+  validateFields(args);
   const user = await requireUser(ctx); const now = Date.now();
   const id = await ctx.db.insert("mlRequests", { ...args, reference: `ML-${now}`, status: "a_preparer", prepared: false, createdAt: now, updatedAt: now });
   await ctx.db.patch(id, { reference: `ML-${id}` });
   await event(ctx, id, "Demande manuelle créée", user.name ?? user.subject); return id;
 }});
 export const update = mutation({
-  args: { id: v.id("mlRequests"), origin: v.string(), destination: v.string(), scheduledDate: v.string(), assignee: v.string(), notes: v.string(), expectedUpdatedAt: v.number() },
+  args: { id: v.id("mlRequests"), origin: v.string(), destination: v.string(), scheduledDate: v.string(), dueDate: v.optional(v.string()), assignee: v.string(), notes: v.string(), expectedUpdatedAt: v.number() },
   handler: async (ctx, { id, expectedUpdatedAt, ...args }) => {
     await requireCrmPermission(ctx, PAGE, "update"); const user = await requireUser(ctx);
     const row = await ctx.db.get(id); if (!row) throw new ConvexError("Demande introuvable.");
@@ -139,6 +141,8 @@ export const update = mutation({
     if (row.status === "en_transit" && (args.origin !== row.origin || args.destination !== row.destination)) throw new ConvexError("Le trajet est figé pendant le transport.");
     if (row.orderId && (args.origin !== row.origin || args.destination !== row.destination)) throw new ConvexError("Le trajet est lié au retrait Bâtire et ne peut pas être modifié ici.");
     if (row.shuttleId && args.scheduledDate !== row.scheduledDate) throw new ConvexError("Réaffectez une navette pour modifier la date prévue.");
+    if (args.dueDate !== undefined && !args.dueDate) throw new ConvexError("L’échéance est obligatoire.");
+    if (args.dueDate === undefined) delete args.dueDate;
     validateFields({ ...row, ...args });
     await ctx.db.patch(id, { ...args, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
     await event(ctx, id, `Organisation mise à jour · ${args.origin} → ${args.destination} · ${args.scheduledDate || "sans date"} · ${args.assignee || "non attribuée"}${args.notes !== (row.notes ?? "") ? ` · Note : ${args.notes || "effacée"}` : ""}`, user.name ?? user.subject);

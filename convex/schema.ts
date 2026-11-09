@@ -3278,6 +3278,10 @@ export default defineSchema(
     readyAt: v.optional(v.number()),
     collectedAt: v.optional(v.number()),
     pickupHours: v.optional(v.string()),
+    /** Date (AAAA-MM-JJ) à partir de laquelle le lot peut être retiré. */
+    availableFrom: v.optional(v.string()),
+    /** Dernier envoi au client de l'avis « disponible » (indépendant de `readyAt`). */
+    customerNotifiedAt: v.optional(v.number()),
     logisticsSourceDepot: v.optional(v.string()),
     reference: v.string(),
     materialId: v.id("btMaterials"),

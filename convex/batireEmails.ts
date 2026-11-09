@@ -406,9 +406,10 @@ export const sendDonorWelcome = internalAction({
 
 
 export const sendPickupReady = internalAction({
-  args: { to: v.string(), reference: v.string(), title: v.string(), quantity: v.number(), unit: v.string(), location: v.object({ name: v.string(), address: v.string() }), hours: v.string() },
+  args: { to: v.string(), reference: v.string(), title: v.string(), quantity: v.number(), unit: v.string(), location: v.object({ name: v.string(), address: v.string() }), hours: v.string(), availableFrom: v.optional(v.string()) },
   handler: async (_ctx, args) => {
-    await resendSend(args.to, `Retrait ${args.reference} prêt à retirer`, shell({ preheader: "Votre retrait est disponible.", heading: "Votre retrait est prêt", intro: `Le retrait <strong>${esc(args.reference)}</strong> est disponible.`, contentHtml: note(args.title, `${args.quantity} ${args.unit}`) + note(args.location.name, `${args.location.address}\nHoraires : ${args.hours}`) + button(`${appUrl()}/mon-compte`, "Voir mes retraits") }), FROM);
+    const when = args.availableFrom ? ` à partir du <strong>${esc(args.availableFrom)}</strong>` : "";
+    await resendSend(args.to, `Retrait ${args.reference} disponible${args.availableFrom ? ` le ${args.availableFrom}` : ""}`, shell({ preheader: "Votre retrait est disponible.", heading: "Votre retrait est prêt", intro: `Le retrait <strong>${esc(args.reference)}</strong> est disponible${when}.`, contentHtml: note(args.title, `${args.quantity} ${args.unit}`) + note(args.location.name, `${args.location.address}\nHoraires d’ouverture : ${args.hours}\nPrésentez la référence ${args.reference} à l’équipe.`) + button(`${appUrl()}/mon-compte`, "Voir mes retraits") }), FROM);
   },
 });
 

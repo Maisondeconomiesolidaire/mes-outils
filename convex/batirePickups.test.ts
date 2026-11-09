@@ -19,11 +19,13 @@ async function fixture() {
   const admin = t.withIdentity({ subject: "admin", email: "admin@example.com" });
   const client = t.withIdentity({ subject: "client", email: customer.email });
   const pay = async () => { for (const order of orders) await t.mutation(internal.batire.markOrderPaid, { orderId: order.orderId }); };
-  return { t, admin, client, orders, materials, pay };
+  // Les transits ne sont plus créés au paiement : l'équipe Bâtire crée la demande d'enlèvement.
+  const relay = async () => { for (const order of orders.slice(1)) await admin.mutation(api.batire.requestPickupTransfer, { orderId: order.orderId, dueDate: "2026-11-20" }); };
+  return { t, admin, client, orders, materials, pay, relay };
 }
 
 test("one purchase, separate pickups, immutable depot snapshots and one 35 euro fee", async () => {
-  const { t, orders, materials, pay, admin, client } = await fixture();
+  const { t, orders, materials, pay, relay, admin, client } = await fixture();
   const rows = await t.run(ctx => ctx.db.query("btOrders").collect());
   expect(new Set(rows.map(row => row.purchaseReference)).size).toBe(1);
   expect(rows.map(row => row.pickupReference)).toEqual(["BT00001-A", "BT00001-B", "BT00001-C"]);
@@ -31,6 +33,10 @@ test("one purchase, separate pickups, immutable depot snapshots and one 35 euro 
   expect(await t.run(ctx => ctx.db.query("mlRequests").collect())).toHaveLength(0);
   await t.run(ctx => ctx.db.patch(materials[1], { depot: "Esspace 150" }));
   await pay(); await pay();
+  expect(await admin.query(api.meslogistic.list, {})).toHaveLength(0);
+  const pending = (await admin.query(api.batire.pickupOperations, {})).orders;
+  expect(pending.filter(row => row.relayRequested)).toHaveLength(2);
+  await relay();
   const transfers = await admin.query(api.meslogistic.list, {});
   expect(transfers).toHaveLength(2);
   expect(transfers.every(row => row.origin === "Comptoir C")).toBe(true);
@@ -43,7 +49,7 @@ test("one purchase, separate pickups, immutable depot snapshots and one 35 euro 
 });
 
 test("shared shuttle and partial reception do not block other pickups; ready notification is idempotent", async () => {
-  const { t, admin, client, orders, pay } = await fixture(); await pay();
+  const { t, admin, client, orders, pay, relay } = await fixture(); await pay(); await relay();
   const shuttleId = await admin.mutation(api.batire.createPickupShuttle, { name: "Navette 12 novembre", scheduledDate: "2026-11-12" });
   const transfer = async (index: number) => (await admin.query(api.meslogistic.list, {})).find(row => row.orderId === orders[index].orderId)!;
   for (const index of [1, 2]) {
@@ -53,14 +59,19 @@ test("shared shuttle and partial reception do not block other pickups; ready not
   const stale = (await transfer(1)).updatedAt;
   await admin.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "receive", receivedQuantity: 1, expectedTransferUpdatedAt: stale });
   await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "receive", receivedQuantity: 2, expectedTransferUpdatedAt: stale })).rejects.toThrow();
-  await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "ready", pickupHours: "9h–17h" })).rejects.toThrow();
+  await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "ready", availableFrom: "2026-11-21" })).rejects.toThrow();
   await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "receive", receivedQuantity: 2, expectedTransferUpdatedAt: (await transfer(2)).updatedAt });
   expect((await admin.query(api.batire.pickupOperations, {})).orders).toHaveLength(3);
   await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "collect" })).rejects.toThrow();
-  await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "ready", pickupHours: "9h–17h" });
   const scheduledBefore = await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect());
-  await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "ready", pickupHours: "9h–17h" });
+  await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "ready", availableFrom: "2026-11-21" });
+  await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "ready", availableFrom: "2026-11-21" });
+  // « Disponible » n'envoie aucun email : seule la notification explicite prévient le client.
   expect(await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(scheduledBefore.length);
+  expect((await client.query(api.batire.myOrderActivity, {})).orders.find(row => row._id === orders[2].orderId)?.fulfillment.status).not.toBe("ready");
+  await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "notify" })).rejects.toThrow();
+  await admin.mutation(api.batire.updatePickup, { orderId: orders[2].orderId, step: "notify", pickupHours: "9h–17h" });
+  expect(await t.run(ctx => ctx.db.system.query("_scheduled_functions").collect())).toHaveLength(scheduledBefore.length + 1);
   const activity = await client.query(api.batire.myOrderActivity, {});
   expect(activity.orders.find(row => row._id === orders[1].orderId)?.fulfillment.status).toBe("transit");
   expect(activity.orders.find(row => row._id === orders[2].orderId)?.fulfillment.status).toBe("ready");
@@ -89,16 +100,17 @@ test("Batire operators cannot manage transfers; logistics operators cannot mark 
   await expect(batire.query(api.meslogistic.list, {})).rejects.toThrow();
   await expect(batire.mutation(api.batire.createPickupShuttle, { name: "Navette", scheduledDate: "2026-11-12" })).rejects.toThrow();
   await expect(batire.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "depart" })).rejects.toThrow();
-  await expect(logistics.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready", pickupHours: "9h–17h" })).rejects.toThrow();
+  await expect(logistics.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready", availableFrom: "2026-11-21" })).rejects.toThrow();
   expect((await batire.query(api.batire.pickupOperations, {})).orders).toHaveLength(3);
 });
 
 test("one shuttle can carry transfers from different purchases; an all-local purchase is free", async () => {
-  const { t, admin, orders, materials, pay } = await fixture(); await pay();
+  const { t, admin, orders, materials, pay, relay } = await fixture(); await pay(); await relay();
   const local = await t.mutation(internal.batire.createCartOrders, { customer, userId: "client", items: materials.map(materialId => ({ materialId, quantity: 1, pickupLocation: "comptoir_c" as const })) });
   expect(local.every(order => order.pickupFeeCents === 0)).toBe(true);
   const second = await t.mutation(internal.batire.createCartOrders, { customer, userId: "client", items: [{ materialId: materials[0], quantity: 1, pickupLocation: "esspace_150" }] });
   await t.mutation(internal.batire.markOrderPaid, { orderId: second[0].orderId });
+  await admin.mutation(api.batire.requestPickupTransfer, { orderId: second[0].orderId, dueDate: "2026-11-20" });
   const shuttleId = await admin.mutation(api.batire.createPickupShuttle, { name: "Tournée commune", scheduledDate: "2026-11-12" });
   for (const orderId of [orders[1].orderId, second[0].orderId]) {
     const transfer = (await admin.query(api.meslogistic.list, {})).find(row => row.orderId === orderId)!;
@@ -128,14 +140,17 @@ test("same-site pickup: availability without hours, or conversion into a Meslogi
     await ctx.db.patch(transfer!._id, { status: "receptionnee" });
   });
   await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready" })).rejects.toThrow();
-  await admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready", pickupHours: "Le 21/11/2026 à 14:00" });
-  expect((await t.run(ctx => ctx.db.get(orders[0].orderId)))?.pickupHours).toBe("Le 21/11/2026 à 14:00");
+  await admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready", availableFrom: "2026-11-21" });
+  expect((await t.run(ctx => ctx.db.get(orders[0].orderId)))?.availableFrom).toBe("2026-11-21");
 });
 
 test("same-site pickup can be declared available without hours", async () => {
   const { t, admin, orders, pay } = await fixture(); await pay();
-  await admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready" });
+  await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready" })).rejects.toThrow();
+  await admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready", availableFrom: "2026-11-21" });
   const order = await t.run(ctx => ctx.db.get(orders[0].orderId));
   expect(order?.readyAt).toBeDefined();
-  expect(order?.pickupHours).toContain("horaires");
+  expect(order?.customerNotifiedAt).toBeUndefined();
+  await admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "notify", pickupHours: "Du mardi au samedi, 14h – 17h" });
+  expect((await t.run(ctx => ctx.db.get(orders[0].orderId)))?.customerNotifiedAt).toBeDefined();
 });

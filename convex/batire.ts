@@ -920,7 +920,8 @@ async function insertOrder(
     userId: args.userId,
     createdAt: Date.now(),
   });
-  if (status === "reservee") await ensureOrderTransport(ctx, orderId);
+  // Aucun transit automatique : l'équipe Bâtire crée la demande d'enlèvement
+  // (avec son échéance) depuis la fiche de la demande.
   return { orderId, reference, amountCents, pickupFeeCents, title: material.title, unit: material.unit };
 }
 
@@ -1019,7 +1020,6 @@ export const markOrderPaid = internalMutation({
       paidAt: Date.now(),
     });
 
-    await ensureOrderTransport(ctx, orderId);
     const material = await ctx.db.get(order.materialId);
     // Le reçu part de la mutation qui encaisse : c'est le seul endroit par
     // lequel passent le paiement en ligne comme l'encaissement au terminal.
@@ -3145,6 +3145,46 @@ export const listThreads = query({
   },
 });
 
+/** Fil d'une demande de retrait : le client (compte Clerk, sinon la commande) et le matériau. */
+const orderThreadClientId = (order: Doc<"btOrders">) => order.userId ?? `order:${order._id}`;
+
+export const orderMessages = query({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const order = await ctx.db.get(orderId);
+    if (!order) return [];
+    const messages = await ctx.db.query("btMessages").withIndex("by_client", q => q.eq("clientId", orderThreadClientId(order))).take(500);
+    return messages.filter(message => message.materialId === order.materialId).sort((a, b) => a.createdAt - b.createdAt);
+  },
+});
+
+/** Message de l'équipe au client d'une demande : enregistré dans son fil et envoyé par email. */
+export const sendOrderMessage = mutation({
+  args: { orderId: v.id("btOrders"), body: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const identity = await requireUser(ctx);
+    const body = args.body.trim();
+    if (!body) throw new ConvexError("Le message est vide.");
+    if (body.length > 5000) throw new ConvexError("Message trop long (5 000 caractères maximum).");
+    const order = await ctx.db.get(args.orderId);
+    if (!order) throw new ConvexError("Demande introuvable.");
+    const clientId = orderThreadClientId(order);
+    const clientName = `${order.customer.firstName} ${order.customer.lastName}`.trim();
+    // Les messages du client restés sans réponse sont lus dès que l'équipe répond.
+    for (const message of await ctx.db.query("btMessages").withIndex("by_client", q => q.eq("clientId", clientId)).take(500)) {
+      if (!message.fromStaff && !message.readByStaff && message.materialId === order.materialId) await ctx.db.patch(message._id, { readByStaff: true });
+    }
+    const messageId = await ctx.db.insert("btMessages", {
+      materialId: order.materialId, materialTitle: order.materialTitle, clientId, clientName, clientEmail: order.customer.email,
+      body, fromStaff: true, authorName: formatUserName(identity), readByStaff: true, readByClient: false, createdAt: Date.now(),
+    });
+    await ctx.scheduler.runAfter(0, internal.batireEmails.sendNewMessage, { to: order.customer.email, name: clientName, materialTitle: `${order.materialTitle} (demande ${order.pickupReference ?? order.reference})`, body });
+    return messageId;
+  },
+});
+
 export const markThreadRead = mutation({
   args: { clientId: v.string() },
   handler: async (ctx, { clientId }) => {
@@ -3287,7 +3327,7 @@ export const migrateConditionsToLeboncoin = internalMutation({
 
 async function pickupTracking(ctx: QueryCtx | MutationCtx, order: Doc<"btOrders">) {
   const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
-  const status = order.status === "annulee" ? "cancelled" : order.status === "en_attente" ? "payment" : order.collectedAt ? "collected" : order.readyAt ? "ready" : transfer?.status === "annulee" ? "incident" : transfer?.status === "receptionnee" ? "preparing" : transfer?.status === "en_transit" ? "transit" : transfer ? (transfer.scheduledDate ? "scheduled" : "waiting") : "preparing";
+  const status = order.status === "annulee" ? "cancelled" : order.status === "en_attente" ? "payment" : order.collectedAt ? "collected" : order.readyAt && (order.customerNotifiedAt || !order.availableFrom) ? "ready" : transfer?.status === "annulee" ? "incident" : transfer?.status === "receptionnee" ? "preparing" : transfer?.status === "en_transit" ? "transit" : transfer ? (transfer.scheduledDate ? "scheduled" : "waiting") : "preparing";
   return { status, scheduledDate: transfer?.scheduledDate, receivedQuantity: transfer?.receivedQuantity, receivedAt: transfer?.receivedAt };
 }
 
@@ -3298,11 +3338,25 @@ export const pickupOperations = query({
     return {
       orders: await Promise.all(orders.filter(o => o.pickupLocation && (["payee", "reservee"].includes(o.status) || (o.status === "en_attente" && o.paymentMethod === "bank_transfer"))).map(async order => {
         const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
+        const material = await ctx.db.get(order.materialId);
+        const source = storageLocationId(order.logisticsSourceDepot ?? material?.depot);
+        const pickup = order.pickupLocation === "usine_agile" ? "recyclerie_pays_de_bray" : order.pickupLocation;
         return {
           ...order,
           fulfillment: await pickupTracking(ctx, order),
           /** Lieu de stockage d'origine : sans transfert, le client retire au même endroit. */
-          sourceLocation: storageLocationId(order.logisticsSourceDepot),
+          sourceLocation: source,
+          sourceLocationName: source ? pickupLocations[source].name : order.logisticsSourceDepot ?? material?.depot,
+          pickupLocationName: order.pickupLocation ? pickupLocations[order.pickupLocation].name : undefined,
+          /** Le client retire ailleurs que sur le lieu de stockage : un enlèvement est à organiser. */
+          relayRequested: Boolean(pickup && source && pickup !== source),
+          material: material ? {
+            photoUrls: (await Promise.all(material.photos.slice(0, 6).map(photo => ctx.storage.getUrl(photo)))).filter((url): url is string => Boolean(url)),
+            description: material.description, category: material.category, family: material.family, subcategory: material.subcategory,
+            condition: material.condition, brand: material.brand, modelReference: material.modelReference, material: material.material, color: material.color,
+            packaging: material.packaging, lengthCm: material.lengthCm, widthCm: material.widthCm, heightCm: material.heightCm, thicknessMm: material.thicknessMm, weightKg: material.weightKg,
+            depot: material.depot, location: material.location, status: material.status,
+          } : null,
           transfer: transfer ? { _id: transfer._id, status: transfer.status, origin: transfer.origin, destination: transfer.destination, scheduledDate: transfer.scheduledDate, dueDate: transfer.dueDate, receivedQuantity: transfer.receivedQuantity } : null,
         };
       })),
@@ -3319,7 +3373,7 @@ export const createPickupShuttle = mutation({
 });
 
 export const updatePickup = mutation({
-  args: { orderId: v.id("btOrders"), step: v.union(v.literal("assign"), v.literal("depart"), v.literal("receive"), v.literal("ready"), v.literal("collect")), shuttleId: v.optional(v.id("mlShuttles")), receivedQuantity: v.optional(v.number()), pickupHours: v.optional(v.string()), expectedTransferUpdatedAt: v.optional(v.number()) },
+  args: { orderId: v.id("btOrders"), step: v.union(v.literal("assign"), v.literal("depart"), v.literal("receive"), v.literal("ready"), v.literal("notify"), v.literal("collect")), shuttleId: v.optional(v.id("mlShuttles")), receivedQuantity: v.optional(v.number()), pickupHours: v.optional(v.string()), availableFrom: v.optional(v.string()), expectedTransferUpdatedAt: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, ["assign", "depart", "receive"].includes(args.step) ? "meslogistic:demandes" : PAGE_DEMANDES, "update");
     const order = await ctx.db.get(args.orderId);
@@ -3347,13 +3401,18 @@ export const updatePickup = mutation({
       const actor = await requireUser(ctx);
       await ctx.db.insert("mlEvents", { requestId: transfer._id, actor: actor.name ?? actor.subject, message: `Retrait ${order.pickupReference ?? order.reference} · ${args.step}${args.step === "receive" ? ` · ${args.receivedQuantity}/${transfer.quantity} reçus` : ""}`, createdAt: now });
     } else if (args.step === "ready") {
-      if (order.readyAt) return;
+      // « Disponible » enregistre seulement la date : le client est prévenu à part (étape « notify »).
       if (transfer && transfer.status !== "receptionnee") throw new ConvexError("Réceptionnez la totalité du lot avant de le déclarer prêt.");
-      // Sans transfert, le lot est déjà sur place : les horaires d'ouverture suffisent.
-      const hours = args.pickupHours?.trim() || (transfer ? "" : "Aux horaires d’ouverture du lieu de retrait");
-      if (!hours || hours.length > 500) throw new ConvexError("Indiquez la date et l’heure de retrait pour la notification.");
-      await ctx.db.patch(order._id, { readyAt: now, pickupHours: hours });
-      await ctx.scheduler.runAfter(0, internal.batireEmails.sendPickupReady, { to: order.customer.email, reference: order.pickupReference ?? order.reference, title: order.materialTitle, quantity: order.quantity, unit: order.unit, location: pickupLocations[order.pickupLocation], hours });
+      if (!args.availableFrom || !/^\d{4}-\d{2}-\d{2}$/.test(args.availableFrom) || !Number.isFinite(Date.parse(args.availableFrom)) || new Date(args.availableFrom).toISOString().slice(0, 10) !== args.availableFrom) throw new ConvexError("Indiquez la date de disponibilité.");
+      if (order.readyAt && order.availableFrom === args.availableFrom) return;
+      await ctx.db.patch(order._id, { readyAt: order.readyAt ?? now, availableFrom: args.availableFrom });
+    } else if (args.step === "notify") {
+      if (!order.readyAt || !order.availableFrom) throw new ConvexError("Indiquez d’abord la date de disponibilité.");
+      const hours = args.pickupHours?.trim() ?? "";
+      if (!hours || hours.length > 500) throw new ConvexError("Indiquez les horaires d’ouverture du lieu de retrait.");
+      const date = new Date(`${order.availableFrom}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" });
+      await ctx.db.patch(order._id, { pickupHours: hours, customerNotifiedAt: now });
+      await ctx.scheduler.runAfter(0, internal.batireEmails.sendPickupReady, { to: order.customer.email, reference: order.pickupReference ?? order.reference, title: order.materialTitle, quantity: order.quantity, unit: order.unit, location: pickupLocations[order.pickupLocation], hours, availableFrom: date });
     } else {
       if (!order.readyAt) throw new ConvexError("Confirmez d’abord que le lot est prêt.");
       if ((order.paymentMethod === "cash" || order.paymentMethod === "bank_transfer") && order.status !== "payee") throw new ConvexError("Enregistrez le paiement avant la remise.");
@@ -3368,7 +3427,7 @@ export const updatePickup = mutation({
  * avec son échéance (date à laquelle le lot doit être arrivé).
  */
 export const requestPickupTransfer = mutation({
-  args: { orderId: v.id("btOrders"), destination: pickupLocationValidator, dueDate: v.string() },
+  args: { orderId: v.id("btOrders"), destination: v.optional(pickupLocationValidator), dueDate: v.string() },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
     const actor = await requireUser(ctx);
@@ -3380,7 +3439,8 @@ export const requestPickupTransfer = mutation({
     const material = await ctx.db.get(order.materialId);
     const source = storageLocationId(order.logisticsSourceDepot ?? material?.depot);
     if (!source) throw new ConvexError("Le lieu de stockage du matériau doit être confirmé avant le transit.");
-    const destination = args.destination === "usine_agile" ? "recyclerie_pays_de_bray" : args.destination;
+    const requested = args.destination ?? order.pickupLocation;
+    const destination = requested === "usine_agile" ? "recyclerie_pays_de_bray" : requested;
     if (destination === source) throw new ConvexError("Choisissez un lieu différent du lieu de stockage.");
     await ctx.db.patch(order._id, { pickupLocation: destination, logisticsSourceDepot: order.logisticsSourceDepot ?? material?.depot });
     const transferId = await ensureOrderTransport(ctx, order._id, { dueDate: args.dueDate, actor: actor.name ?? actor.subject });
