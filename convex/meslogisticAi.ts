@@ -68,6 +68,7 @@ Règles :
 - Sinon, propose une NOUVELLE navette : date (AAAA-MM-JJ) avant l'échéance, en regroupant les transits ouverts non affectés qui partent du même lieu ou vont au même lieu (échéances compatibles).
 - Donne l'ordre logique des arrêts (libellés de lieux tels que fournis), en commençant par le premier chargement.
 - N'invente ni distance ni durée.
+- LANGUE : tous les textes (summary, reasons, alternatives, newShuttleName) sont rédigés en FRANÇAIS, jamais en anglais. Seules les clés JSON restent en anglais.
 Réponds en JSON strict :
 {"choice":"existing"|"new","shuttleId":"<id d'une navette fournie si existing>","newShuttleName":"<si new>","newShuttleDate":"AAAA-MM-JJ si new","groupWith":["<ids de transits ouverts à embarquer aussi>"],"stops":["<lieu>", "..."],"summary":"<1 à 2 phrases>","reasons":["<raison courte>", "..."],"alternatives":[{"label":"<option>","why":"<pourquoi moins bien>"}]}`;
 
@@ -123,7 +124,9 @@ export const suggestShuttle = action({
       const response = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, temperature: 0.2, max_tokens: 1000, response_format: { type: "json_object" }, messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: JSON.stringify(context) }] }),
+        body: JSON.stringify({ model, temperature: 0.2, max_tokens: 1000, response_format: { type: "json_object" }, messages: [{ role: "system", content: SYSTEM_PROMPT }, { role: "user", content: `Propose la meilleure navette pour le transit cible. Rédige toutes tes explications en français.
+
+${JSON.stringify(context)}` }] }),
       });
       if (!response.ok) { lastError = `(${response.status}) ${(await response.text()).slice(0, 200)}`; continue; }
       const data = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
