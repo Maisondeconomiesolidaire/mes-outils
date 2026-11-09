@@ -13,7 +13,7 @@ import { action, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { requireCrmPermission } from "./lib";
-import { canonicalLocation } from "./meslogisticRules";
+import { canonicalLocation, onTheWay, sameDirection, tourStops } from "./meslogisticRules";
 
 const PAGE = "meslogistic:demandes";
 
@@ -54,19 +54,36 @@ function placeMatch(target: { origin: string; destination: string }, trips: { or
   const sameDestination = trips.some(trip => placeKey(trip.destination) === to);
   const visited = new Set(trips.flatMap(trip => [placeKey(trip.origin), placeKey(trip.destination)]));
   const servesBoth = visited.has(from) && visited.has(to);
-  const score = (sameRoute ? 4 : 0) + (servesBoth ? 2 : 0) + (sameOrigin ? 1 : 0) + (sameDestination ? 1 : 0);
-  const labels = [sameRoute && "même trajet", !sameRoute && servesBoth && "passe par le départ et l’arrivée", !sameRoute && sameOrigin && "même départ", !sameRoute && sameDestination && "même arrivée"].filter(Boolean) as string[];
+  // Sur l'axe Comptoir C — Solidarium — Esspace 150 : la tournée passe-t-elle déjà par ce trajet ?
+  const coversTarget = trips.some(trip => onTheWay(trip, target));
+  const carriedOnTheWay = trips.some(trip => onTheWay(target, trip));
+  const sameWay = trips.some(trip => sameDirection(target, trip));
+  const score = (sameRoute ? 4 : 0) + (coversTarget ? 3 : 0) + (servesBoth ? 2 : 0) + (carriedOnTheWay ? 2 : 0) + (sameOrigin ? 1 : 0) + (sameDestination ? 1 : 0) + (sameWay ? 1 : 0);
+  const labels = [
+    sameRoute && "même trajet",
+    !sameRoute && coversTarget && "passe par ce trajet",
+    !sameRoute && !coversTarget && carriedOnTheWay && "sur le chemin",
+    !sameRoute && !coversTarget && servesBoth && "passe par le départ et l’arrivée",
+    !sameRoute && sameOrigin && "même départ",
+    !sameRoute && sameDestination && "même arrivée",
+    !sameRoute && !coversTarget && !carriedOnTheWay && sameWay && "même sens",
+  ].filter(Boolean) as string[];
   return { score, labels };
 }
 
 const SYSTEM_PROMPT = `Tu es le planificateur logistique de Meslogistic (réemploi de matériaux, Oise / Pays de Bray).
 Une navette est une tournée à une date donnée qui transporte plusieurs transits (lieu de départ → lieu d'arrivée).
 Objectif : pour le transit CIBLE, proposer la meilleure navette en raisonnant UNIQUEMENT sur les lieux et les dates.
+GÉOGRAPHIE (à retenir absolument) : les trois sites sont alignés sur un même axe.
+  Comptoir C (extrémité gauche) — Solidarium / Recyclerie du Pays de Bray (au milieu) — Esspace 150 (extrémité droite).
+  Aller du Comptoir C à l'Esspace 150 (ou l'inverse) fait PASSER PAR le Solidarium. Le plus loin du Comptoir C est l'Esspace 150, et inversement.
+  Une tournée parcourt l'axe dans un sens : elle charge et décharge au passage. Ne propose JAMAIS un ordre qui revient sur ses pas inutilement (ex. Comptoir C → Esspace 150 → Solidarium est absurde : on passe par le Solidarium en allant à l'Esspace 150 ; le bon ordre est Comptoir C → Solidarium → Esspace 150).
 Règles :
 - La date de la navette doit être au plus tard l'échéance du transit cible (si elle existe) et pas avant aujourd'hui.
 - Privilégie une navette EXISTANTE à venir qui passe par les mêmes lieux (le champ "correspondance" indique : même trajet, passe par le départ et l'arrivée, même départ, même arrivée). Plus la correspondance est forte, mieux c'est.
-- Sinon, propose une NOUVELLE navette : date (AAAA-MM-JJ) avant l'échéance, en regroupant les transits ouverts non affectés qui partent du même lieu ou vont au même lieu (échéances compatibles).
-- Donne l'ordre logique des arrêts (libellés de lieux tels que fournis), en commençant par le premier chargement.
+- Sinon, propose une NOUVELLE navette : date (AAAA-MM-JJ) avant l'échéance.
+- Propose TOUJOURS d'embarquer les autres transits ouverts compatibles (groupWith) : en priorité ceux "sur le chemin" (même sens, trajet compris dans la tournée), puis ceux de même départ / même arrivée, avec des échéances compatibles avec la date de la navette.
+- Donne l'ordre des arrêts en balayant l'axe dans un sens (puis retour éventuel pour les trajets de sens inverse), en commençant par le premier chargement.
 - N'invente ni distance ni durée.
 - LANGUE : tous les textes (summary, reasons, alternatives, newShuttleName) sont rédigés en FRANÇAIS, jamais en anglais. Seules les clés JSON restent en anglais.
 Réponds en JSON strict :
@@ -153,7 +170,9 @@ ${JSON.stringify(context)}` }] }),
       reasons: (answer.reasons ?? []).filter(reason => typeof reason === "string").slice(0, 6),
       alternatives: (answer.alternatives ?? []).filter(item => item?.label).slice(0, 3).map(item => ({ label: item.label!, why: item.why ?? "" })),
       groupWith: compatible.map(item => item.row).filter(row => answer!.groupWith?.includes(row._id)).map(row => ({ _id: row._id, reference: row.reference, title: row.title, origin: row.origin, destination: row.destination, dueDate: row.dueDate })),
-      stops: (answer.stops ?? []).filter(stop => typeof stop === "string").slice(0, 12),
+      // L'ordre des arrêts suit l'axe des sites quand tous les lieux sont connus ; sinon celui de l'IA.
+      stops: tourStops([target, ...(existing?.transits ?? []), ...compatible.map(item => item.row).filter(row => answer!.groupWith?.includes(row._id))])
+        ?? (answer.stops ?? []).filter(stop => typeof stop === "string").slice(0, 12),
       matches,
       warnings,
       model: usedModel,

@@ -4,7 +4,7 @@ import { expect, test, afterEach, vi } from "vitest";
 import schema from "./schema";
 import { api, internal } from "./_generated/api";
 import { ensureOrderTransport } from "./meslogistic";
-import { transportRoute } from "./meslogisticRules";
+import { onTheWay, tourStops, transportRoute } from "./meslogisticRules";
 const modules = import.meta.glob("./**/*.ts");
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 async function fixture(depot = "Comptoir C") {
@@ -80,4 +80,14 @@ test("shuttles are created, previewed with their transits, and assignments follo
  await admin.mutation(api.meslogistic.assignShuttle,{id,shuttleId:null,expectedUpdatedAt:(await row()).updatedAt});
  expect((await row()).shuttleId).toBeUndefined();
  const list=await admin.query(api.meslogistic.list,{});expect(list[0]).not.toHaveProperty("payment");
+});
+test("sites are on one axis: Comptoir C — Solidarium — Esspace 150", () => {
+ const route = { origin: "Comptoir C", destination: "Esspace 150 / Recyclerie de Gournay" };
+ expect(onTheWay(route, { origin: "Comptoir C", destination: "Recyclerie du Pays de Bray" })).toBe(true);
+ expect(onTheWay(route, { origin: "Recyclerie du Pays de Bray", destination: "Esspace 150" })).toBe(true);
+ expect(onTheWay(route, { origin: "Esspace 150", destination: "Comptoir C" })).toBe(false);
+ expect(tourStops([route, { origin: "Comptoir C", destination: "Solidarium" }])).toEqual(["Comptoir C", "Solidarium (Recyclerie du Pays de Bray)", "Esspace 150"]);
+ expect(tourStops([route, { origin: "Recyclerie du Pays de Bray", destination: "Comptoir C" }])).toEqual(["Comptoir C", "Esspace 150", "Solidarium (Recyclerie du Pays de Bray)", "Comptoir C"]);
+ expect(tourStops([{ origin: "Esspace 150", destination: "Comptoir C" }])).toEqual(["Esspace 150", "Comptoir C"]);
+ expect(tourStops([{ origin: "Entrepôt inconnu", destination: "Comptoir C" }])).toBeNull();
 });
