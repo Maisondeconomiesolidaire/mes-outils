@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
+import { requireCrmPermission, requireUser } from "./lib";
 import { transportRoute, validTransition } from "./meslogisticRules";
 const PAGE = "meslogistic:demandes";
 async function event(ctx: MutationCtx, requestId: Id<"mlRequests">, message: string, actor: string) {
@@ -30,10 +30,10 @@ export const list = query({
   args: {}, handler: async ctx => {
     await requireCrmPermission(ctx, PAGE, "read");
     const rows = await ctx.db.query("mlRequests").order("desc").take(500);
-    const canConfirmPayment = await hasCrmPermission(ctx, "batire:demandes", "update");
+    // Meslogistic ne gère que la logistique : aucun statut de paiement n'est exposé ici.
     return await Promise.all(rows.map(async row => {
       const order = row.orderId ? await ctx.db.get(row.orderId) : null;
-      return { ...row, collected: Boolean(order?.collectedAt), payment: order?.paymentMethod && order.paymentMethod !== "card" ? { method: order.paymentMethod, paid: order.status === "payee", canConfirm: canConfirmPayment } : null };
+      return { ...row, collected: Boolean(order?.collectedAt) };
     }));
   },
 });
@@ -47,6 +47,54 @@ export const listShuttles = query({
   args: {}, handler: async ctx => {
     await requireCrmPermission(ctx, PAGE, "read");
     return await ctx.db.query("mlShuttles").order("desc").take(200);
+  },
+});
+/** Navettes avec l’aperçu des transits déjà affectés (page Navettes et fenêtre d’affectation). */
+export const shuttlesOverview = query({
+  args: {}, handler: async ctx => {
+    await requireCrmPermission(ctx, PAGE, "read");
+    const shuttles = await ctx.db.query("mlShuttles").order("desc").take(200);
+    return await Promise.all(shuttles.map(async shuttle => {
+      const transits = await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(200);
+      return {
+        ...shuttle,
+        transits: transits.map(r => ({ _id: r._id, reference: r.reference, title: r.title, quantity: r.quantity, unit: r.unit, customerName: r.customerName, origin: r.origin, destination: r.destination, status: r.status, fromOrder: Boolean(r.orderId) })),
+      };
+    }));
+  },
+});
+const isoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
+export const createShuttle = mutation({
+  args: { name: v.string(), scheduledDate: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE, "create");
+    const name = args.name.trim();
+    if (!name || name.length > 100) throw new ConvexError("Donnez un nom à la navette (100 caractères maximum).");
+    if (!isoDate(args.scheduledDate)) throw new ConvexError("Choisissez une date valide.");
+    return await ctx.db.insert("mlShuttles", { name, scheduledDate: args.scheduledDate, createdAt: Date.now() });
+  },
+});
+/** Affecte (ou retire) un transit à une navette : la date prévue devient celle de la navette. */
+export const assignShuttle = mutation({
+  args: { id: v.id("mlRequests"), shuttleId: v.union(v.id("mlShuttles"), v.null()), expectedUpdatedAt: v.number() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE, "update");
+    const user = await requireUser(ctx);
+    const row = await ctx.db.get(args.id);
+    if (!row || row.updatedAt !== args.expectedUpdatedAt) throw new ConvexError("La demande a changé. Actualisez la fiche.");
+    if (row.status !== "a_preparer") throw new ConvexError("Ce transit est déjà parti ou clôturé.");
+    const updatedAt = Math.max(Date.now(), row.updatedAt + 1);
+    if (args.shuttleId) {
+      const shuttle = await ctx.db.get(args.shuttleId);
+      if (!shuttle) throw new ConvexError("Navette introuvable.");
+      await ctx.db.patch(row._id, { shuttleId: shuttle._id, scheduledDate: shuttle.scheduledDate, prepared: true, updatedAt });
+      await event(ctx, row._id, `Affecté à la navette « ${shuttle.name} » du ${shuttle.scheduledDate}`, user.name ?? user.subject);
+    } else {
+      if (!row.shuttleId) return { updatedAt: row.updatedAt };
+      await ctx.db.patch(row._id, { shuttleId: undefined, updatedAt });
+      await event(ctx, row._id, "Retiré de sa navette", user.name ?? user.subject);
+    }
+    return { updatedAt };
   },
 });
 

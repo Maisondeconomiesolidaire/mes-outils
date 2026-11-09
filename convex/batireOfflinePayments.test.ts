@@ -49,7 +49,8 @@ test("scheduled date is visible to the client before a shuttle is assigned", asy
   await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "collectivite" });
   await client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" });
   const transfer = (await admin.query(api.meslogistic.list, {}))[0];
-  expect(transfer.payment).toMatchObject({ method: "bank_transfer", paid: false, canConfirm: true });
+  // Meslogistic gère uniquement la logistique : le paiement reste côté Bâtire.
+  expect(transfer).not.toHaveProperty("payment");
   await expect(admin.mutation(api.meslogistic.schedule, { id: transfer._id, scheduledDate: "2026-02-30", expectedUpdatedAt: transfer.updatedAt })).rejects.toThrow();
   await admin.mutation(api.meslogistic.schedule, { id: transfer._id, scheduledDate: "2026-11-12", expectedUpdatedAt: transfer.updatedAt });
   const activity = await client.query(api.batire.myOrderActivity, {});

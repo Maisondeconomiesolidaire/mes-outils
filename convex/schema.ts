@@ -537,7 +537,7 @@ export default defineSchema(
     notes: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
     /** Échéance : date à laquelle le lot doit être arrivé à destination (YYYY-MM-DD). */
     dueDate: v.optional(v.string()),
-  }).index("by_orderId", ["orderId"]).index("by_status", ["status"]),
+  }).index("by_orderId", ["orderId"]).index("by_status", ["status"]).index("by_shuttleId", ["shuttleId"]),
   mlEvents: defineTable({
     requestId: v.id("mlRequests"), actor: v.string(), message: v.string(), createdAt: v.number(),
   }).index("by_requestId", ["requestId"]),

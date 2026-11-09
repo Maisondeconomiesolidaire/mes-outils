@@ -54,3 +54,27 @@ test("permissions, sequential steps, stale writes and history are enforced",asyn
  await admin.mutation(api.meslogistic.advance,{id,step:"receptionnee",expectedUpdatedAt:(await row()).updatedAt});
  expect((await row()).status).toBe("receptionnee");expect(await admin.query(api.meslogistic.history,{id})).toHaveLength(4);
 });
+test("shuttles are created, previewed with their transits, and assignments follow the shuttle date",async()=>{
+ const {t,admin}=await fixture();
+ const values={title:"Porte",quantity:1,unit:"unité",customerName:"Interne",origin:"Comptoir C",destination:"Esspace 150"};
+ const outsider=t.withIdentity({subject:"visitor",email:"visitor@example.com"});
+ await expect(outsider.mutation(api.meslogistic.createShuttle,{name:"Navette",scheduledDate:"2026-11-12"})).rejects.toThrow();
+ await expect(admin.mutation(api.meslogistic.createShuttle,{name:" ",scheduledDate:"2026-11-12"})).rejects.toThrow();
+ await expect(admin.mutation(api.meslogistic.createShuttle,{name:"Navette",scheduledDate:"2026-02-31"})).rejects.toThrow();
+ const first=await admin.mutation(api.meslogistic.createShuttle,{name:"Tournée mardi",scheduledDate:"2026-11-12"});
+ const second=await admin.mutation(api.meslogistic.createShuttle,{name:"Tournée jeudi",scheduledDate:"2026-11-14"});
+ const id=await admin.mutation(api.meslogistic.create,values);
+ const row=async()=> (await t.run(ctx=>ctx.db.get(id)))!;
+ await admin.mutation(api.meslogistic.assignShuttle,{id,shuttleId:first,expectedUpdatedAt:(await row()).updatedAt});
+ expect(await row()).toMatchObject({shuttleId:first,scheduledDate:"2026-11-12",prepared:true});
+ const stale=(await row()).updatedAt;
+ await admin.mutation(api.meslogistic.assignShuttle,{id,shuttleId:second,expectedUpdatedAt:stale});
+ await expect(admin.mutation(api.meslogistic.assignShuttle,{id,shuttleId:first,expectedUpdatedAt:stale})).rejects.toThrow();
+ const overview=await admin.query(api.meslogistic.shuttlesOverview,{});
+ expect(overview.find(s=>s._id===first)?.transits).toHaveLength(0);
+ expect(overview.find(s=>s._id===second)?.transits.map(r=>r._id)).toEqual([id]);
+ expect((await row()).scheduledDate).toBe("2026-11-14");
+ await admin.mutation(api.meslogistic.assignShuttle,{id,shuttleId:null,expectedUpdatedAt:(await row()).updatedAt});
+ expect((await row()).shuttleId).toBeUndefined();
+ const list=await admin.query(api.meslogistic.list,{});expect(list[0]).not.toHaveProperty("payment");
+});
