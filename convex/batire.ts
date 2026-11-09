@@ -3327,7 +3327,7 @@ export const migrateConditionsToLeboncoin = internalMutation({
 
 async function pickupTracking(ctx: QueryCtx | MutationCtx, order: Doc<"btOrders">) {
   const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
-  const status = order.status === "annulee" ? "cancelled" : order.status === "en_attente" ? "payment" : order.collectedAt ? "collected" : order.readyAt && (order.customerNotifiedAt || !order.availableFrom) ? "ready" : transfer?.status === "annulee" ? "incident" : transfer?.status === "receptionnee" ? "preparing" : transfer?.status === "en_transit" ? "transit" : transfer ? (transfer.scheduledDate ? "scheduled" : "waiting") : "preparing";
+  const status = order.status === "annulee" || order.lostAt ? "cancelled" : order.status === "en_attente" ? "payment" : order.collectedAt ? "collected" : order.readyAt && (order.customerNotifiedAt || !order.availableFrom) ? "ready" : transfer?.status === "annulee" ? "incident" : transfer?.status === "receptionnee" ? "preparing" : transfer?.status === "en_transit" ? "transit" : transfer ? (transfer.scheduledDate ? "scheduled" : "waiting") : "preparing";
   return { status, scheduledDate: transfer?.scheduledDate, receivedQuantity: transfer?.receivedQuantity, receivedAt: transfer?.receivedAt };
 }
 
@@ -3381,6 +3381,7 @@ export const updatePickup = mutation({
     const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
     const now = Date.now();
     if (order.collectedAt) throw new ConvexError("Ce retrait a déjà été remis.");
+    if (order.lostAt) throw new ConvexError("Cette demande est marquée perdue.");
     if (["assign", "depart", "receive"].includes(args.step)) {
       if (!transfer || order.readyAt || transfer.updatedAt !== args.expectedTransferUpdatedAt) throw new ConvexError("Le transfert a changé. Actualisez la fiche.");
       const patch: Partial<Doc<"mlRequests">> = { updatedAt: Math.max(now, transfer.updatedAt + 1) };
@@ -3417,6 +3418,36 @@ export const updatePickup = mutation({
       if (!order.readyAt) throw new ConvexError("Confirmez d’abord que le lot est prêt.");
       if ((order.paymentMethod === "cash" || order.paymentMethod === "bank_transfer") && order.status !== "payee") throw new ConvexError("Enregistrez le paiement avant la remise.");
       await ctx.db.patch(order._id, { collectedAt: now });
+    }
+  },
+});
+
+/**
+ * Demande perdue : elle quitte les demandes en cours. Un transit pas encore
+ * parti est annulé dans Meslogistic ; une commande réglée peut rendre sa
+ * quantité au stock (une réservation n'a jamais décompté le stock).
+ */
+export const markPickupLost = mutation({
+  args: { orderId: v.id("btOrders"), reason: v.string(), restock: v.boolean() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const actor = await requireUser(ctx);
+    const reason = args.reason.trim();
+    if (!reason || reason.length > 500) throw new ConvexError("Indiquez la raison (500 caractères maximum).");
+    const order = await ctx.db.get(args.orderId);
+    if (!order) throw new ConvexError("Demande introuvable.");
+    if (order.collectedAt) throw new ConvexError("Ce retrait a déjà été remis au client.");
+    if (order.lostAt) return;
+    const now = Date.now();
+    await ctx.db.patch(order._id, { lostAt: now, lostReason: reason });
+    const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
+    if (transfer && transfer.status === "a_preparer") {
+      await ctx.db.patch(transfer._id, { status: "annulee", updatedAt: Math.max(now, transfer.updatedAt + 1) });
+      await ctx.db.insert("mlEvents", { requestId: transfer._id, actor: actor.name ?? actor.subject, message: `Demande Bâtire ${order.pickupReference ?? order.reference} perdue · ${reason}`, createdAt: now });
+    }
+    if (args.restock && order.status === "payee") {
+      const material = await ctx.db.get(order.materialId);
+      if (material) await ctx.db.patch(material._id, { quantity: material.quantity + order.quantity, status: material.status === "vendu" ? "disponible" : material.status, updatedAt: now });
     }
   },
 });

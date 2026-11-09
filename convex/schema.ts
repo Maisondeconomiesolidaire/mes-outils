@@ -3282,6 +3282,9 @@ export default defineSchema(
     availableFrom: v.optional(v.string()),
     /** Dernier envoi au client de l'avis « disponible » (indépendant de `readyAt`). */
     customerNotifiedAt: v.optional(v.number()),
+    /** Demande perdue (client jamais venu, désistement…) : sort du suivi des retraits. */
+    lostAt: v.optional(v.number()),
+    lostReason: v.optional(v.string()),
     logisticsSourceDepot: v.optional(v.string()),
     reference: v.string(),
     materialId: v.id("btMaterials"),

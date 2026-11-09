@@ -144,6 +144,19 @@ test("same-site pickup: availability without hours, or conversion into a Meslogi
   expect((await t.run(ctx => ctx.db.get(orders[0].orderId)))?.availableFrom).toBe("2026-11-21");
 });
 
+test("a lost pickup leaves the open board, cancels its pending transit and can restock a paid order", async () => {
+  const { t, admin, orders, materials, pay, relay } = await fixture(); await pay(); await relay();
+  const before = (await t.run(ctx => ctx.db.get(materials[1])))!.quantity;
+  await expect(admin.mutation(api.batire.markPickupLost, { orderId: orders[1].orderId, reason: " ", restock: true })).rejects.toThrow();
+  await admin.mutation(api.batire.markPickupLost, { orderId: orders[1].orderId, reason: "Client injoignable", restock: true });
+  await admin.mutation(api.batire.markPickupLost, { orderId: orders[1].orderId, reason: "Client injoignable", restock: true });
+  expect((await t.run(ctx => ctx.db.get(materials[1])))!.quantity).toBe(before + 2);
+  const transfer = (await admin.query(api.meslogistic.list, {})).find(row => row.orderId === orders[1].orderId)!;
+  expect(transfer.status).toBe("annulee");
+  expect((await admin.query(api.batire.pickupOperations, {})).orders.find(row => row._id === orders[1].orderId)?.lostReason).toBe("Client injoignable");
+  await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[1].orderId, step: "ready", availableFrom: "2026-11-21" })).rejects.toThrow();
+});
+
 test("same-site pickup can be declared available without hours", async () => {
   const { t, admin, orders, pay } = await fixture(); await pay();
   await expect(admin.mutation(api.batire.updatePickup, { orderId: orders[0].orderId, step: "ready" })).rejects.toThrow();
