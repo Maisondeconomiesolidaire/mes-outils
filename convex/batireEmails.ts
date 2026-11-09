@@ -314,6 +314,26 @@ export const sendReservationConfirmation = internalAction({
 });
 
 /** L'équipe a répondu dans la messagerie : le client n'a pas à surveiller l'app. */
+/** Équipe logistique prévenue de chaque nouvelle demande Meslogistic. */
+const MESLOGISTIC_RECIPIENTS = ["m.iribarnegaray@eco-solidaire.fr", "l.charpentier@eco-solidaire.fr"];
+
+export const sendMeslogisticNewRequest = internalAction({
+  args: { reference: v.string(), title: v.string(), quantity: v.number(), unit: v.string(), customerName: v.string(), origin: v.string(), destination: v.string(), dueDate: v.optional(v.string()), source: v.string() },
+  handler: async (_ctx, args) => {
+    const due = args.dueDate ? new Date(`${args.dueDate}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" }) : "Non renseignée";
+    const url = (process.env.MESLOGISTIC_APP_URL ?? "https://meslogistic.groupemes.fr").replace(/\/$/, "");
+    await resendSend(MESLOGISTIC_RECIPIENTS, `Nouvelle demande de navette ${args.reference} · échéance ${args.dueDate ? new Date(`${args.dueDate}T12:00:00`).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : "à définir"}`, shell({
+      preheader: `${args.origin} → ${args.destination}`,
+      heading: "Nouvelle demande de navette",
+      intro: `Une demande <strong>${esc(args.reference)}</strong> vient d’arriver dans Meslogistic (${esc(args.source)}).`,
+      contentHtml: note("Échéance · arrivée au plus tard", due)
+        + note("Trajet", `${args.origin} → ${args.destination}`)
+        + note("Objets", `${args.quantity} ${args.unit} · ${args.title}${args.customerName ? `\nClient / demandeur : ${args.customerName}` : ""}`)
+        + button(url, "Ouvrir Meslogistic"),
+    }), FROM);
+  },
+});
+
 export const sendNewMessage = internalAction({
   args: {
     to: v.string(),

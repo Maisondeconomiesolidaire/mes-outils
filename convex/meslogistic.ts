@@ -1,8 +1,9 @@
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { requireCrmPermission, requireUser } from "./lib";
+import { hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
 import { transportRoute, validTransition } from "./meslogisticRules";
 const PAGE = "meslogistic:demandes";
 async function event(ctx: MutationCtx, requestId: Id<"mlRequests">, message: string, actor: string) {
@@ -23,6 +24,7 @@ export async function ensureOrderTransport(ctx: MutationCtx, orderId: Id<"btOrde
     customerName: `${order.customer.firstName} ${order.customer.lastName}`.trim(),
     ...route, status: "a_preparer", prepared: false, dueDate: options.dueDate, createdAt: now, updatedAt: now,
   });
+  await ctx.scheduler.runAfter(0, internal.batireEmails.sendMeslogisticNewRequest, { reference: order.pickupReference ?? order.reference, title: order.materialTitle, quantity: order.quantity, unit: order.unit, customerName: `${order.customer.firstName} ${order.customer.lastName}`.trim(), origin: route.origin, destination: route.destination, dueDate: options.dueDate, source: "Bâtire" });
   await event(ctx, id, options.dueDate ? `Demande d’enlèvement créée depuis Bâtire ${order.pickupReference ?? order.reference} · échéance ${options.dueDate}` : `Demande créée depuis la commande Bâtire ${order.reference}`, options.actor ?? "Bâtire");
   return id;
 }
@@ -35,6 +37,14 @@ export const list = query({
       const order = row.orderId ? await ctx.db.get(row.orderId) : null;
       return { ...row, collected: Boolean(order?.collectedAt) };
     }));
+  },
+});
+/** Badge de navigation : demandes nouvelles, sans navette assignée. 0 sans droit de lecture. */
+export const badgeCount = query({
+  args: {}, handler: async ctx => {
+    if (!(await hasCrmPermission(ctx, PAGE, "read"))) return 0;
+    const rows = await ctx.db.query("mlRequests").order("desc").take(500);
+    return rows.filter(row => row.status === "a_preparer" && !row.shuttleId).length;
   },
 });
 export const history = query({
@@ -129,6 +139,7 @@ export const create = mutation({ args: fields, handler: async (ctx, args) => {
   const user = await requireUser(ctx); const now = Date.now();
   const id = await ctx.db.insert("mlRequests", { ...args, reference: `ML-${now}`, status: "a_preparer", prepared: false, createdAt: now, updatedAt: now });
   await ctx.db.patch(id, { reference: `ML-${id}` });
+  await ctx.scheduler.runAfter(0, internal.batireEmails.sendMeslogisticNewRequest, { reference: `ML-${id}`, title: args.title, quantity: args.quantity, unit: args.unit, customerName: args.customerName, origin: args.origin, destination: args.destination, dueDate: args.dueDate, source: `créée par ${user.name ?? user.email ?? "l’équipe"}` });
   await event(ctx, id, "Demande manuelle créée", user.name ?? user.subject); return id;
 }});
 export const update = mutation({
