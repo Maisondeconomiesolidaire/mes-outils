@@ -3296,7 +3296,16 @@ export const pickupOperations = query({
     await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
     const orders = await ctx.db.query("btOrders").order("desc").take(300);
     return {
-      orders: await Promise.all(orders.filter(o => o.pickupLocation && (["payee", "reservee"].includes(o.status) || (o.status === "en_attente" && o.paymentMethod === "bank_transfer"))).map(async order => ({ ...order, fulfillment: await pickupTracking(ctx, order) }))),
+      orders: await Promise.all(orders.filter(o => o.pickupLocation && (["payee", "reservee"].includes(o.status) || (o.status === "en_attente" && o.paymentMethod === "bank_transfer"))).map(async order => {
+        const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
+        return {
+          ...order,
+          fulfillment: await pickupTracking(ctx, order),
+          /** Lieu de stockage d'origine : sans transfert, le client retire au même endroit. */
+          sourceLocation: storageLocationId(order.logisticsSourceDepot),
+          transfer: transfer ? { _id: transfer._id, status: transfer.status, origin: transfer.origin, destination: transfer.destination, scheduledDate: transfer.scheduledDate, dueDate: transfer.dueDate, receivedQuantity: transfer.receivedQuantity } : null,
+        };
+      })),
     };
   },
 });
@@ -3340,13 +3349,42 @@ export const updatePickup = mutation({
     } else if (args.step === "ready") {
       if (order.readyAt) return;
       if (transfer && transfer.status !== "receptionnee") throw new ConvexError("Réceptionnez la totalité du lot avant de le déclarer prêt.");
-      if (!args.pickupHours?.trim() || args.pickupHours.length > 500) throw new ConvexError("Indiquez les horaires de retrait pour la notification.");
-      await ctx.db.patch(order._id, { readyAt: now, pickupHours: args.pickupHours.trim() });
-      await ctx.scheduler.runAfter(0, internal.batireEmails.sendPickupReady, { to: order.customer.email, reference: order.pickupReference ?? order.reference, title: order.materialTitle, quantity: order.quantity, unit: order.unit, location: pickupLocations[order.pickupLocation], hours: args.pickupHours.trim() });
+      // Sans transfert, le lot est déjà sur place : les horaires d'ouverture suffisent.
+      const hours = args.pickupHours?.trim() || (transfer ? "" : "Aux horaires d’ouverture du lieu de retrait");
+      if (!hours || hours.length > 500) throw new ConvexError("Indiquez la date et l’heure de retrait pour la notification.");
+      await ctx.db.patch(order._id, { readyAt: now, pickupHours: hours });
+      await ctx.scheduler.runAfter(0, internal.batireEmails.sendPickupReady, { to: order.customer.email, reference: order.pickupReference ?? order.reference, title: order.materialTitle, quantity: order.quantity, unit: order.unit, location: pickupLocations[order.pickupLocation], hours });
     } else {
       if (!order.readyAt) throw new ConvexError("Confirmez d’abord que le lot est prêt.");
       if ((order.paymentMethod === "cash" || order.paymentMethod === "bank_transfer") && order.status !== "payee") throw new ConvexError("Enregistrez le paiement avant la remise.");
       await ctx.db.patch(order._id, { collectedAt: now });
     }
+  },
+});
+
+/**
+ * Retrait prévu sur le lieu de stockage → demande d'enlèvement vers un autre
+ * lieu : le retrait change de destination et une navette Meslogistic est créée
+ * avec son échéance (date à laquelle le lot doit être arrivé).
+ */
+export const requestPickupTransfer = mutation({
+  args: { orderId: v.id("btOrders"), destination: pickupLocationValidator, dueDate: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const actor = await requireUser(ctx);
+    const order = await ctx.db.get(args.orderId);
+    if (!order || !["payee", "reservee"].includes(order.status) || !order.pickupLocation) throw new ConvexError("Retrait indisponible.");
+    if (order.readyAt || order.collectedAt) throw new ConvexError("Ce retrait est déjà disponible ou remis au client.");
+    if (await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first()) throw new ConvexError("Un transit existe déjà pour ce retrait.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.dueDate) || !Number.isFinite(Date.parse(args.dueDate)) || new Date(args.dueDate).toISOString().slice(0, 10) !== args.dueDate) throw new ConvexError("Choisissez une échéance valide.");
+    const material = await ctx.db.get(order.materialId);
+    const source = storageLocationId(order.logisticsSourceDepot ?? material?.depot);
+    if (!source) throw new ConvexError("Le lieu de stockage du matériau doit être confirmé avant le transit.");
+    const destination = args.destination === "usine_agile" ? "recyclerie_pays_de_bray" : args.destination;
+    if (destination === source) throw new ConvexError("Choisissez un lieu différent du lieu de stockage.");
+    await ctx.db.patch(order._id, { pickupLocation: destination, logisticsSourceDepot: order.logisticsSourceDepot ?? material?.depot });
+    const transferId = await ensureOrderTransport(ctx, order._id, { dueDate: args.dueDate, actor: actor.name ?? actor.subject });
+    if (!transferId) throw new ConvexError("Le transit n’a pas pu être créé.");
+    return transferId;
   },
 });

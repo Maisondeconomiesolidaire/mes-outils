@@ -9,7 +9,7 @@ async function event(ctx: MutationCtx, requestId: Id<"mlRequests">, message: str
   await ctx.db.insert("mlEvents", { requestId, message, actor, createdAt: Date.now() });
 }
 /** Called in the order transaction: atomic and idempotent, including Stripe retries. */
-export async function ensureOrderTransport(ctx: MutationCtx, orderId: Id<"btOrders">) {
+export async function ensureOrderTransport(ctx: MutationCtx, orderId: Id<"btOrders">, options: { dueDate?: string; actor?: string } = {}) {
   const order = await ctx.db.get(orderId);
   if (!order || !["payee", "reservee"].includes(order.status)) return;
   if (await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", orderId)).first()) return;
@@ -21,9 +21,10 @@ export async function ensureOrderTransport(ctx: MutationCtx, orderId: Id<"btOrde
     orderId, materialId: order.materialId, reference: order.pickupReference ?? order.reference,
     title: order.materialTitle, quantity: order.quantity, unit: order.unit,
     customerName: `${order.customer.firstName} ${order.customer.lastName}`.trim(),
-    ...route, status: "a_preparer", prepared: false, createdAt: now, updatedAt: now,
+    ...route, status: "a_preparer", prepared: false, dueDate: options.dueDate, createdAt: now, updatedAt: now,
   });
-  await event(ctx, id, `Demande créée depuis la commande Bâtire ${order.reference}`, "Bâtire");
+  await event(ctx, id, options.dueDate ? `Demande d’enlèvement créée depuis Bâtire ${order.pickupReference ?? order.reference} · échéance ${options.dueDate}` : `Demande créée depuis la commande Bâtire ${order.reference}`, options.actor ?? "Bâtire");
+  return id;
 }
 export const list = query({
   args: {}, handler: async ctx => {
@@ -32,7 +33,7 @@ export const list = query({
     const canConfirmPayment = await hasCrmPermission(ctx, "batire:demandes", "update");
     return await Promise.all(rows.map(async row => {
       const order = row.orderId ? await ctx.db.get(row.orderId) : null;
-      return { ...row, payment: order?.paymentMethod && order.paymentMethod !== "card" ? { method: order.paymentMethod, paid: order.status === "payee", canConfirm: canConfirmPayment } : null };
+      return { ...row, collected: Boolean(order?.collectedAt), payment: order?.paymentMethod && order.paymentMethod !== "card" ? { method: order.paymentMethod, paid: order.status === "payee", canConfirm: canConfirmPayment } : null };
     }));
   },
 });
@@ -65,11 +66,12 @@ export const schedule = mutation({
     return { updatedAt };
   },
 });
-const fields = { title: v.string(), quantity: v.number(), unit: v.string(), customerName: v.string(), origin: v.string(), destination: v.string(), scheduledDate: v.optional(v.string()), assignee: v.optional(v.string()), notes: v.optional(v.string()) };
-function validateFields(args: { title: string; quantity: number; unit: string; origin: string; destination: string; scheduledDate?: string; notes?: string }) {
+const fields = { title: v.string(), quantity: v.number(), unit: v.string(), customerName: v.string(), origin: v.string(), destination: v.string(), scheduledDate: v.optional(v.string()), dueDate: v.optional(v.string()), assignee: v.optional(v.string()), notes: v.optional(v.string()) };
+function validateFields(args: { title: string; quantity: number; unit: string; origin: string; destination: string; scheduledDate?: string; dueDate?: string; notes?: string }) {
   if (![args.title, args.unit, args.origin, args.destination].every(x => x.trim()) || !Number.isFinite(args.quantity) || args.quantity <= 0) throw new ConvexError("Renseignez l’objet, la quantité et les deux lieux.");
   if (args.origin.trim().toLocaleLowerCase() === args.destination.trim().toLocaleLowerCase()) throw new ConvexError("Le départ et l’arrivée doivent être différents.");
   if (args.scheduledDate && (!/^\d{4}-\d{2}-\d{2}$/.test(args.scheduledDate) || !Number.isFinite(Date.parse(args.scheduledDate)))) throw new ConvexError("Date invalide.");
+  if (args.dueDate && (!/^\d{4}-\d{2}-\d{2}$/.test(args.dueDate) || !Number.isFinite(Date.parse(args.dueDate)))) throw new ConvexError("Échéance invalide.");
   if ((args.notes?.length ?? 0) > 5000 || [args.title, args.origin, args.destination].some(x => x.length > 300)) throw new ConvexError("Texte trop long.");
 }
 export const create = mutation({ args: fields, handler: async (ctx, args) => {

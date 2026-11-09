@@ -535,6 +535,8 @@ export default defineSchema(
     status: v.union(v.literal("a_preparer"), v.literal("en_transit"), v.literal("receptionnee"), v.literal("annulee")),
     prepared: v.boolean(), scheduledDate: v.optional(v.string()), assignee: v.optional(v.string()),
     notes: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number(),
+    /** Échéance : date à laquelle le lot doit être arrivé à destination (YYYY-MM-DD). */
+    dueDate: v.optional(v.string()),
   }).index("by_orderId", ["orderId"]).index("by_status", ["status"]),
   mlEvents: defineTable({
     requestId: v.id("mlRequests"), actor: v.string(), message: v.string(), createdAt: v.number(),
