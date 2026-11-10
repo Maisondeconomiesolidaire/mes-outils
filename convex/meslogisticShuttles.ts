@@ -45,7 +45,7 @@ export const board = query({
     const shuttles = await ctx.db.query("mlShuttles").order("desc").take(200);
     const rows = await Promise.all(shuttles.map(async shuttle => {
       const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
-      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, transits: await Promise.all(transits.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
+      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, transits: await Promise.all(transits.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
     return { shuttles: rows, unassigned: await Promise.all(unassigned.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
@@ -96,7 +96,7 @@ export const removeRequest = mutation({
 
 /** Modifie le nom ou la date d'une navette planifiée ; ses demandes prennent la nouvelle date. */
 export const updateShuttle = mutation({
-  args: { shuttleId: v.id("mlShuttles"), name: v.string(), scheduledDate: v.string() },
+  args: { shuttleId: v.id("mlShuttles"), name: v.string(), scheduledDate: v.string(), origin: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE, "update");
     const name = args.name.trim();
@@ -104,7 +104,8 @@ export const updateShuttle = mutation({
     if (!/^\d{4}-\d{2}-\d{2}$/.test(args.scheduledDate) || !Number.isFinite(Date.parse(args.scheduledDate))) throw new ConvexError("Choisissez une date valide.");
     const { transits, status } = await loadShuttle(ctx, args.shuttleId);
     if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
-    await ctx.db.patch(args.shuttleId, { name, scheduledDate: args.scheduledDate });
+    const origin = args.origin?.trim();
+    await ctx.db.patch(args.shuttleId, { name, scheduledDate: args.scheduledDate, ...(origin ? { origin } : {}) });
     const now = Date.now();
     for (const row of transits) await ctx.db.patch(row._id, { scheduledDate: args.scheduledDate, updatedAt: Math.max(now, row.updatedAt + 1) });
   },
@@ -150,7 +151,10 @@ export const setLoaded = mutation({
   },
 });
 
-/** Départ : la navette part, toutes ses demandes passent en transit. */
+/**
+ * Départ : seuls les objets confirmés « Chargé » partent en transit. Les objets
+ * non chargés quittent la navette et reviennent « À planifier ».
+ */
 export const departShuttle = mutation({
   args: { shuttleId: v.id("mlShuttles") },
   handler: async (ctx, { shuttleId }) => {
@@ -158,13 +162,18 @@ export const departShuttle = mutation({
     const user = await requireUser(ctx);
     const { shuttle, transits, status } = await loadShuttle(ctx, shuttleId);
     if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
-    if (!transits.length) throw new ConvexError("Ajoutez au moins une demande avant le départ.");
-    const missing = transits.filter(row => row.status === "a_preparer" && !row.loadedAt);
-    if (missing.length) throw new ConvexError(`Confirmez le chargement de tous les objets avant le départ (${missing.length} restant${missing.length > 1 ? "s" : ""} : ${missing.slice(0, 3).map(row => row.reference).join(", ")}${missing.length > 3 ? "…" : ""}).`);
+    const waiting = transits.filter(row => row.status === "a_preparer");
+    const loaded = waiting.filter(row => row.loadedAt);
+    if (!loaded.length) throw new ConvexError("Cochez « Chargé » sur au moins un objet avant le départ.");
     const now = Date.now();
-    for (const row of transits.filter(item => item.status === "a_preparer")) {
+    const actor = user.name ?? user.subject;
+    for (const row of loaded) {
       await ctx.db.patch(row._id, { status: "en_transit", prepared: true, updatedAt: Math.max(now, row.updatedAt + 1) });
-      await log(ctx, row._id, `En transit · départ de la navette « ${shuttle.name} »`, user.name ?? user.subject);
+      await log(ctx, row._id, `En transit · départ de la navette « ${shuttle.name} »`, actor);
+    }
+    for (const row of waiting.filter(item => !item.loadedAt)) {
+      await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await log(ctx, row._id, `Non chargé au départ de la navette « ${shuttle.name} » : à replanifier`, actor);
     }
     await ctx.db.patch(shuttleId, { status: "en_route", departedAt: now });
   },

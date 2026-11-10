@@ -523,6 +523,8 @@ export default defineSchema(
   {
   mlShuttles: defineTable({
     name: v.string(), scheduledDate: v.string(), createdAt: v.number(),
+    /** Lieu de départ de la navette (v2). */
+    origin: v.optional(v.string()),
     /** Statut de la navette (v2). Absent : déduit de ses demandes. */
     status: v.optional(v.union(v.literal("planifiee"), v.literal("en_route"), v.literal("terminee"))),
     departedAt: v.optional(v.number()),
