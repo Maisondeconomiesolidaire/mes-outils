@@ -91,3 +91,25 @@ test("sites are on one axis: Comptoir C — Solidarium — Esspace 150", () => {
  expect(tourStops([{ origin: "Esspace 150", destination: "Comptoir C" }])).toEqual(["Esspace 150", "Comptoir C"]);
  expect(tourStops([{ origin: "Entrepôt inconnu", destination: "Comptoir C" }])).toBeNull();
 });
+test("v2: a shuttle carries its requests through departure and arrival", async () => {
+ const {t,admin}=await fixture();
+ const values={title:"Porte",quantity:2,unit:"unité",customerName:"Interne",origin:"Comptoir C",destination:"Esspace 150",dueDate:"2026-11-20"};
+ const a=await admin.mutation(api.meslogistic.create,values);const b=await admin.mutation(api.meslogistic.create,{...values,destination:"Solidarium"});
+ const shuttleId=await admin.mutation(api.meslogistic.createShuttle,{name:"Tournée",scheduledDate:"2026-11-12"});
+ await expect(admin.mutation(api.meslogisticShuttles.departShuttle,{shuttleId})).rejects.toThrow();
+ expect((await admin.query(api.meslogisticShuttles.board,{})).unassigned).toHaveLength(2);
+ await admin.mutation(api.meslogisticShuttles.addRequests,{shuttleId,requestIds:[a,b]});
+ let board=await admin.query(api.meslogisticShuttles.board,{});
+ expect(board.unassigned).toHaveLength(0);expect(board.shuttles[0]).toMatchObject({status:"planifiee"});expect(board.shuttles[0].transits).toHaveLength(2);
+ await admin.mutation(api.meslogisticShuttles.removeRequest,{requestId:b});
+ expect((await admin.query(api.meslogisticShuttles.board,{})).unassigned.map(r=>r._id)).toEqual([b]);
+ await admin.mutation(api.meslogisticShuttles.addRequests,{shuttleId,requestIds:[b]});
+ await admin.mutation(api.meslogisticShuttles.departShuttle,{shuttleId});
+ await expect(admin.mutation(api.meslogisticShuttles.addRequests,{shuttleId,requestIds:[b]})).rejects.toThrow();
+ expect((await t.run(ctx=>ctx.db.get(a)))?.status).toBe("en_transit");
+ await admin.mutation(api.meslogisticShuttles.deliverShuttle,{shuttleId,requestIds:[a]});
+ board=await admin.query(api.meslogisticShuttles.board,{});expect(board.shuttles[0].status).toBe("en_route");
+ await admin.mutation(api.meslogisticShuttles.deliverShuttle,{shuttleId});
+ board=await admin.query(api.meslogisticShuttles.board,{});expect(board.shuttles[0].status).toBe("terminee");
+ expect((await t.run(ctx=>ctx.db.get(b)))).toMatchObject({status:"receptionnee",receivedQuantity:2});
+});

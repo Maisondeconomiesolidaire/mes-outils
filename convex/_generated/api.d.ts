@@ -61,6 +61,7 @@ import type * as livraison from "../livraison.js";
 import type * as meslogistic from "../meslogistic.js";
 import type * as meslogisticAi from "../meslogisticAi.js";
 import type * as meslogisticRules from "../meslogisticRules.js";
+import type * as meslogisticShuttles from "../meslogisticShuttles.js";
 import type * as mesoutilsEmails from "../mesoutilsEmails.js";
 import type * as mesoutilsNotifications from "../mesoutilsNotifications.js";
 import type * as messages from "../messages.js";
@@ -156,6 +157,7 @@ declare const fullApi: ApiFromModules<{
   meslogistic: typeof meslogistic;
   meslogisticAi: typeof meslogisticAi;
   meslogisticRules: typeof meslogisticRules;
+  meslogisticShuttles: typeof meslogisticShuttles;
   mesoutilsEmails: typeof mesoutilsEmails;
   mesoutilsNotifications: typeof mesoutilsNotifications;
   messages: typeof messages;
