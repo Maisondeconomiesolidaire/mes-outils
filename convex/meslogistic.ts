@@ -83,7 +83,7 @@ export const shuttlesOverview = query({
 });
 const isoDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value;
 export const createShuttle = mutation({
-  args: { name: v.string(), scheduledDate: v.string(), origin: v.optional(v.string()) },
+  args: { name: v.string(), scheduledDate: v.string(), origin: v.optional(v.string()), destination: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE, "create");
     const name = args.name.trim();
@@ -91,7 +91,9 @@ export const createShuttle = mutation({
     if (!isoDate(args.scheduledDate)) throw new ConvexError("Choisissez une date valide.");
     const origin = args.origin?.trim();
     if (origin !== undefined && (!origin || origin.length > 300)) throw new ConvexError("Indiquez le lieu de départ de la navette.");
-    return await ctx.db.insert("mlShuttles", { name, scheduledDate: args.scheduledDate, origin, createdAt: Date.now() });
+    const destination = args.destination?.trim() || undefined;
+    if (destination && destination.length > 300) throw new ConvexError("Lieu d'arrivée trop long.");
+    return await ctx.db.insert("mlShuttles", { name, scheduledDate: args.scheduledDate, origin, destination, createdAt: Date.now() });
   },
 });
 /** Affecte (ou retire) un transit à une navette : la date prévue devient celle de la navette. */

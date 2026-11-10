@@ -45,7 +45,7 @@ export const board = query({
     const shuttles = await ctx.db.query("mlShuttles").order("desc").take(200);
     const rows = await Promise.all(shuttles.map(async shuttle => {
       const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
-      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, transits: await Promise.all(transits.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
+      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, transits: await Promise.all(transits.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
     return { shuttles: rows, unassigned: await Promise.all(unassigned.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
@@ -96,7 +96,7 @@ export const removeRequest = mutation({
 
 /** Modifie le nom ou la date d'une navette planifiée ; ses demandes prennent la nouvelle date. */
 export const updateShuttle = mutation({
-  args: { shuttleId: v.id("mlShuttles"), name: v.string(), scheduledDate: v.string(), origin: v.optional(v.string()) },
+  args: { shuttleId: v.id("mlShuttles"), name: v.string(), scheduledDate: v.string(), origin: v.optional(v.string()), destination: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE, "update");
     const name = args.name.trim();
@@ -105,7 +105,9 @@ export const updateShuttle = mutation({
     const { transits, status } = await loadShuttle(ctx, args.shuttleId);
     if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
     const origin = args.origin?.trim();
-    await ctx.db.patch(args.shuttleId, { name, scheduledDate: args.scheduledDate, ...(origin ? { origin } : {}) });
+    const destination = args.destination?.trim();
+    if (destination && destination.length > 300) throw new ConvexError("Lieu d'arrivée trop long.");
+    await ctx.db.patch(args.shuttleId, { name, scheduledDate: args.scheduledDate, ...(origin ? { origin } : {}), ...(args.destination !== undefined ? { destination: destination || undefined } : {}) });
     const now = Date.now();
     for (const row of transits) await ctx.db.patch(row._id, { scheduledDate: args.scheduledDate, updatedAt: Math.max(now, row.updatedAt + 1) });
   },
