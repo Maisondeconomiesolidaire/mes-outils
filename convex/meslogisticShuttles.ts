@@ -180,6 +180,29 @@ export const departShuttle = mutation({
 });
 
 /**
+ * Annule le départ (transit) d'une navette : elle redevient « Nouveau » et ses
+ * objets en transit reviennent « À préparer », toujours chargés dans la navette.
+ * Impossible si un objet a déjà été livré.
+ */
+export const cancelDeparture = mutation({
+  args: { shuttleId: v.id("mlShuttles") },
+  handler: async (ctx, { shuttleId }) => {
+    await requireCrmPermission(ctx, PAGE, "update");
+    const user = await requireUser(ctx);
+    const { shuttle, transits, status } = await loadShuttle(ctx, shuttleId);
+    if (status !== "en_route") throw new ConvexError("Seule une navette en transit peut être annulée.");
+    if (transits.some(row => row.status === "receptionnee")) throw new ConvexError("Des objets ont déjà été livrés : le transit ne peut plus être annulé.");
+    const now = Date.now();
+    const actor = user.name ?? user.subject;
+    for (const row of transits.filter(item => item.status === "en_transit")) {
+      await ctx.db.patch(row._id, { status: "a_preparer", loadedAt: row.loadedAt ?? now, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await log(ctx, row._id, `Transit annulé · navette « ${shuttle.name} » revenue à « Nouveau »`, actor);
+    }
+    await ctx.db.patch(shuttleId, { status: "planifiee", departedAt: undefined });
+  },
+});
+
+/**
  * Arrivée : toutes les demandes de la navette sont livrées (disponibles à
  * destination). `requestIds` permet de n'en déclarer que certaines : la
  * navette se termine quand il ne reste plus rien en transit.
