@@ -32,6 +32,7 @@ const transitView = (row: Doc<"mlRequests">) => ({
   _id: row._id, reference: row.reference, title: row.title, quantity: row.quantity, unit: row.unit,
   customerName: row.customerName, origin: row.origin, destination: row.destination, dueDate: row.dueDate,
   status: row.status, fromOrder: Boolean(row.orderId), notes: row.notes,
+  loadedAt: row.loadedAt, loadedBy: row.loadedBy,
 });
 
 /** Tableau des navettes et des demandes encore sans navette. */
@@ -86,7 +87,7 @@ export const removeRequest = mutation({
     if (!row?.shuttleId) return;
     if (row.status !== "a_preparer") throw new ConvexError("Cette demande est déjà partie.");
     const shuttle = await ctx.db.get(row.shuttleId);
-    await ctx.db.patch(requestId, { shuttleId: undefined, scheduledDate: undefined, prepared: false, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
+    await ctx.db.patch(requestId, { shuttleId: undefined, scheduledDate: undefined, prepared: false, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
     await log(ctx, requestId, `Retirée de la navette « ${shuttle?.name ?? "?"} »`, user.name ?? user.subject);
   },
 });
@@ -117,10 +118,33 @@ export const deleteShuttle = mutation({
     if (status !== "planifiee") throw new ConvexError("Une navette partie ne peut pas être supprimée.");
     const now = Date.now();
     for (const row of transits) {
-      await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
       await log(ctx, row._id, `Navette « ${shuttle.name} » supprimée : demande à replanifier`, user.name ?? user.subject);
     }
     await ctx.db.delete(shuttleId);
+  },
+});
+
+/**
+ * Confirme (ou annule) qu'un objet est bien chargé dans sa navette. Sans
+ * `requestId`, confirme tous les objets de la navette d'un coup.
+ */
+export const setLoaded = mutation({
+  args: { shuttleId: v.id("mlShuttles"), requestId: v.optional(v.id("mlRequests")), loaded: v.boolean() },
+  handler: async (ctx, { shuttleId, requestId, loaded }) => {
+    await requireCrmPermission(ctx, PAGE, "update");
+    const user = await requireUser(ctx);
+    const { shuttle, transits, status } = await loadShuttle(ctx, shuttleId);
+    if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
+    const targets = transits.filter(row => row.status === "a_preparer" && (!requestId || row._id === requestId));
+    if (requestId && !targets.length) throw new ConvexError("Cet objet n’est pas dans cette navette.");
+    const now = Date.now();
+    const actor = user.name ?? user.subject;
+    for (const row of targets) {
+      if (Boolean(row.loadedAt) === loaded) continue;
+      await ctx.db.patch(row._id, loaded ? { loadedAt: now, loadedBy: actor } : { loadedAt: undefined, loadedBy: undefined });
+      await log(ctx, row._id, loaded ? `Chargement confirmé dans la navette « ${shuttle.name} »` : `Chargement annulé (navette « ${shuttle.name} »)`, actor);
+    }
   },
 });
 
@@ -133,6 +157,8 @@ export const departShuttle = mutation({
     const { shuttle, transits, status } = await loadShuttle(ctx, shuttleId);
     if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
     if (!transits.length) throw new ConvexError("Ajoutez au moins une demande avant le départ.");
+    const missing = transits.filter(row => row.status === "a_preparer" && !row.loadedAt);
+    if (missing.length) throw new ConvexError(`Confirmez le chargement de tous les objets avant le départ (${missing.length} restant${missing.length > 1 ? "s" : ""} : ${missing.slice(0, 3).map(row => row.reference).join(", ")}${missing.length > 3 ? "…" : ""}).`);
     const now = Date.now();
     for (const row of transits.filter(item => item.status === "a_preparer")) {
       await ctx.db.patch(row._id, { status: "en_transit", prepared: true, updatedAt: Math.max(now, row.updatedAt + 1) });

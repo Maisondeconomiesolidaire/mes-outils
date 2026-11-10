@@ -104,6 +104,10 @@ test("v2: a shuttle carries its requests through departure and arrival", async (
  await admin.mutation(api.meslogisticShuttles.removeRequest,{requestId:b});
  expect((await admin.query(api.meslogisticShuttles.board,{})).unassigned.map(r=>r._id)).toEqual([b]);
  await admin.mutation(api.meslogisticShuttles.addRequests,{shuttleId,requestIds:[b]});
+ await admin.mutation(api.meslogisticShuttles.setLoaded,{shuttleId,requestId:a,loaded:true});
+ await expect(admin.mutation(api.meslogisticShuttles.departShuttle,{shuttleId})).rejects.toThrow(/chargement/i);
+ await admin.mutation(api.meslogisticShuttles.setLoaded,{shuttleId,loaded:true});
+ expect((await admin.query(api.meslogisticShuttles.board,{})).shuttles[0].transits.every(r=>r.loadedAt)).toBe(true);
  await admin.mutation(api.meslogisticShuttles.departShuttle,{shuttleId});
  await expect(admin.mutation(api.meslogisticShuttles.addRequests,{shuttleId,requestIds:[b]})).rejects.toThrow();
  expect((await t.run(ctx=>ctx.db.get(a)))?.status).toBe("en_transit");
