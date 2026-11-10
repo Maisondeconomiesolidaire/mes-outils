@@ -3342,7 +3342,7 @@ export const pickupOperations = query({
         const source = storageLocationId(order.logisticsSourceDepot ?? material?.depot);
         // Dates des étapes Meslogistic, retrouvées dans le journal de la demande de transit.
         const events = transfer ? await ctx.db.query("mlEvents").withIndex("by_requestId", q => q.eq("requestId", transfer._id)).order("desc").take(100) : [];
-        const lastEvent = (test: (message: string) => boolean) => { const found = events.find(event => test(event.message)); return found ? { at: found.createdAt, by: found.actor as string | undefined } : undefined; };
+        const lastEvent = (test: (message: string) => boolean) => { const found = events.find(event => test(event.message)); return found ? { at: found.createdAt as number | undefined, by: found.actor as string | undefined } : undefined; };
         const shuttle = transfer?.shuttleId ? await ctx.db.get(transfer.shuttleId) : null;
         const firstEvent = events[events.length - 1];
         const pickup = order.pickupLocation === "usine_agile" ? "recyclerie_pays_de_bray" : order.pickupLocation;
@@ -3366,9 +3366,11 @@ export const pickupOperations = query({
           /** Étapes du transit (date et auteur), pour la checklist de gestion. */
           transitSteps: transfer ? {
             requested: { at: transfer.createdAt, by: firstEvent?.actor as string | undefined },
-            assigned: transfer.shuttleId || transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => message.startsWith("Ajoutée à la navette") || message.endsWith("· assign")) ?? (shuttle ? { at: shuttle.createdAt, by: undefined } : undefined) : undefined,
-            transit: transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => message.startsWith("En transit") || message.endsWith("· depart")) ?? (shuttle?.departedAt ? { at: shuttle.departedAt, by: undefined } : undefined) : undefined,
-            arrived: transfer.status === "receptionnee" ? lastEvent(message => message.startsWith("Livrée") || message.includes("· receive")) ?? (transfer.receivedAt ? { at: transfer.receivedAt, by: undefined } : undefined) : undefined,
+            // Une étape est faite d'après le statut du transit ; la date vient du journal,
+            // quel que soit le flux Meslogistic qui l'a écrit (ancien ou navettes v2).
+            assigned: transfer.shuttleId || transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => /^(Ajoutée|Affecté) à la navette/.test(message) || message.endsWith("· assign")) ?? { at: undefined, by: undefined } : undefined,
+            transit: transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => /^(En transit|Objets en transit)/.test(message) || message.endsWith("· depart")) ?? { at: shuttle?.departedAt, by: undefined } : undefined,
+            arrived: transfer.status === "receptionnee" ? lastEvent(message => /^(Livrée|Objets réceptionnés)/.test(message) || message.includes("· receive")) ?? { at: transfer.receivedAt, by: undefined } : undefined,
             shuttleName: shuttle?.name,
           } : null,
         };
