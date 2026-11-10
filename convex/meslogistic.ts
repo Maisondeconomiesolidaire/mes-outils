@@ -4,6 +4,8 @@ import { internal } from "./_generated/api";
 import type { MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
+import { thumbnailUrl } from "./thumbnails";
+import type { QueryCtx } from "./_generated/server";
 import { transportRoute, validTransition } from "./meslogisticRules";
 const PAGE = "meslogistic:demandes";
 async function event(ctx: MutationCtx, requestId: Id<"mlRequests">, message: string, actor: string) {
@@ -28,6 +30,12 @@ export async function ensureOrderTransport(ctx: MutationCtx, orderId: Id<"btOrde
   await event(ctx, id, options.dueDate ? `Demande d’enlèvement créée depuis Bâtire ${order.pickupReference ?? order.reference} · échéance ${options.dueDate}` : `Demande créée depuis la commande Bâtire ${order.reference}`, options.actor ?? "Bâtire");
   return id;
 }
+/** Miniature de la première photo de l'article Bâtire transporté (null pour une demande interne). */
+export async function materialPhoto(ctx: QueryCtx, materialId?: Id<"btMaterials">) {
+  if (!materialId) return null;
+  const material = await ctx.db.get(materialId);
+  return material?.photos[0] ? await thumbnailUrl(ctx, material.photos[0]) : null;
+}
 export const list = query({
   args: {}, handler: async ctx => {
     await requireCrmPermission(ctx, PAGE, "read");
@@ -35,7 +43,7 @@ export const list = query({
     // Meslogistic ne gère que la logistique : aucun statut de paiement n'est exposé ici.
     return await Promise.all(rows.map(async row => {
       const order = row.orderId ? await ctx.db.get(row.orderId) : null;
-      return { ...row, collected: Boolean(order?.collectedAt) };
+      return { ...row, collected: Boolean(order?.collectedAt), photoUrl: await materialPhoto(ctx, row.materialId) };
     }));
   },
 });
