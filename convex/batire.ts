@@ -3340,6 +3340,11 @@ export const pickupOperations = query({
         const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
         const material = await ctx.db.get(order.materialId);
         const source = storageLocationId(order.logisticsSourceDepot ?? material?.depot);
+        // Dates des étapes Meslogistic, retrouvées dans le journal de la demande de transit.
+        const events = transfer ? await ctx.db.query("mlEvents").withIndex("by_requestId", q => q.eq("requestId", transfer._id)).order("desc").take(100) : [];
+        const lastEvent = (test: (message: string) => boolean) => { const found = events.find(event => test(event.message)); return found ? { at: found.createdAt, by: found.actor as string | undefined } : undefined; };
+        const shuttle = transfer?.shuttleId ? await ctx.db.get(transfer.shuttleId) : null;
+        const firstEvent = events[events.length - 1];
         const pickup = order.pickupLocation === "usine_agile" ? "recyclerie_pays_de_bray" : order.pickupLocation;
         return {
           ...order,
@@ -3358,6 +3363,14 @@ export const pickupOperations = query({
             depot: material.depot, location: material.location, status: material.status,
           } : null,
           transfer: transfer ? { _id: transfer._id, status: transfer.status, origin: transfer.origin, destination: transfer.destination, scheduledDate: transfer.scheduledDate, dueDate: transfer.dueDate, receivedQuantity: transfer.receivedQuantity } : null,
+          /** Étapes du transit (date et auteur), pour la checklist de gestion. */
+          transitSteps: transfer ? {
+            requested: { at: transfer.createdAt, by: firstEvent?.actor as string | undefined },
+            assigned: transfer.shuttleId || transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => message.startsWith("Ajoutée à la navette") || message.endsWith("· assign")) ?? (shuttle ? { at: shuttle.createdAt, by: undefined } : undefined) : undefined,
+            transit: transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => message.startsWith("En transit") || message.endsWith("· depart")) ?? (shuttle?.departedAt ? { at: shuttle.departedAt, by: undefined } : undefined) : undefined,
+            arrived: transfer.status === "receptionnee" ? lastEvent(message => message.startsWith("Livrée") || message.includes("· receive")) ?? (transfer.receivedAt ? { at: transfer.receivedAt, by: undefined } : undefined) : undefined,
+            shuttleName: shuttle?.name,
+          } : null,
         };
       })),
     };
@@ -3477,5 +3490,97 @@ export const requestPickupTransfer = mutation({
     const transferId = await ensureOrderTransport(ctx, order._id, { dueDate: args.dueDate, actor: actor.name ?? actor.subject });
     if (!transferId) throw new ConvexError("Le transit n’a pas pu être créé.");
     return transferId;
+  },
+});
+
+/** Coordonnées du client d'une demande Bâtire (onglet Client du CRM). */
+export const updateOrderCustomer = mutation({
+  args: { orderId: v.id("btOrders"), customer: v.object({ firstName: v.string(), lastName: v.string(), email: v.string(), phone: v.optional(v.string()), company: v.optional(v.string()) }) },
+  handler: async (ctx, { orderId, customer }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const order = await ctx.db.get(orderId);
+    if (!order) throw new ConvexError("Demande introuvable.");
+    const clean = (value?: string) => value?.trim() || undefined;
+    const email = customer.email.trim().toLowerCase();
+    if (!customer.firstName.trim() && !customer.lastName.trim()) throw new ConvexError("Indiquez le nom du client.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ConvexError("Adresse email invalide.");
+    if ([customer.firstName, customer.lastName, customer.email, customer.phone ?? "", customer.company ?? ""].some(value => value.length > 200)) throw new ConvexError("Valeur trop longue.");
+    await ctx.db.patch(orderId, { customer: { firstName: customer.firstName.trim(), lastName: customer.lastName.trim(), email, phone: clean(customer.phone), company: clean(customer.company) } });
+  },
+});
+
+export const orderForRefund = internalQuery({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    const order = await ctx.db.get(orderId);
+    if (!order) return null;
+    const material = await ctx.db.get(order.materialId);
+    return { order, category: material?.category ?? "" };
+  },
+});
+
+/**
+ * Remboursement enregistré : la demande passe « perdue », le lot revient en
+ * stock et un enlèvement Meslogistic pas encore parti est annulé.
+ */
+export const markOrderRefunded = internalMutation({
+  args: { orderId: v.id("btOrders"), stripeRefundId: v.string(), refundedAmountCents: v.number(), refundedBy: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const order = await ctx.db.get(args.orderId);
+    if (!order) throw new ConvexError("Demande introuvable.");
+    const now = Date.now();
+    await ctx.db.patch(order._id, { stripeRefundId: args.stripeRefundId, refundedAt: now, refundedAmountCents: args.refundedAmountCents, refundedBy: args.refundedBy, ...(order.lostAt || order.collectedAt ? {} : { lostAt: now, lostReason: "Remboursée" }) });
+    if (order.collectedAt) return;
+    if (!order.lostAt) {
+      const material = await ctx.db.get(order.materialId);
+      if (material) await ctx.db.patch(material._id, { quantity: material.quantity + order.quantity, status: material.status === "vendu" ? "disponible" : material.status, updatedAt: now });
+    }
+    const transfer = await ctx.db.query("mlRequests").withIndex("by_orderId", q => q.eq("orderId", order._id)).first();
+    if (transfer && transfer.status === "a_preparer") {
+      await ctx.db.patch(transfer._id, { status: "annulee", updatedAt: Math.max(now, transfer.updatedAt + 1) });
+      await ctx.db.insert("mlEvents", { requestId: transfer._id, actor: args.refundedBy ?? "Bâtire", message: `Demande Bâtire ${order.pickupReference ?? order.reference} remboursée`, createdAt: now });
+    }
+  },
+});
+
+/**
+ * Rembourse par Stripe le montant de cette demande (paiement carte). Une
+ * commande panier partage un seul paiement : on ne rend que la part de la
+ * demande. On essaie la clé du compte qui a vendu le matériau, puis l'autre
+ * compte si Stripe ne connaît pas ce paiement.
+ */
+export const refundOrder = action({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }): Promise<{ refundId: string; amountCents: number }> => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, PAGE_DEMANDES, "update")) throw new ConvexError("Accès CRM insuffisant.");
+    const details = await ctx.runQuery(internal.batire.orderForRefund, { orderId });
+    if (!details) throw new ConvexError("Demande introuvable.");
+    const { order, category } = details;
+    if (order.stripeRefundId) throw new ConvexError("Cette demande a déjà été remboursée.");
+    if (order.status !== "payee" || !order.stripePaymentIntentId || (order.paymentMethod && order.paymentMethod !== "card")) throw new ConvexError("Aucun paiement par carte encaissé : il n'y a rien à rembourser.");
+    if (order.collectedAt) throw new ConvexError("Le lot a déjà été remis au client.");
+    const keys: string[] = [];
+    try { keys.push(stripeKeyForCategory(category)); } catch { /* clé absente : on tente l'autre compte */ }
+    for (const key of [env.RECYCAPP_STRIPE_SECRET_KEY, env.BENNESPRO_STRIPE_SECRET_KEY]) if (key && !keys.includes(key)) keys.push(key);
+    let refund: { id: string; amount: number } | null = null;
+    let lastError = "";
+    for (const secretKey of keys) {
+      try {
+        refund = await stripeRequest<{ id: string; amount: number }>("refunds", secretKey, {
+          payment_intent: order.stripePaymentIntentId,
+          amount: String(order.amountCents),
+          "metadata[orderId]": String(order._id),
+          "metadata[source]": "batire-crm-remboursement",
+        });
+        break;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "Erreur Stripe.";
+        if (!/no such payment_intent/i.test(lastError)) break;
+      }
+    }
+    if (!refund) throw new ConvexError(lastError || "Stripe a refusé le remboursement.");
+    await ctx.runMutation(internal.batire.markOrderRefunded, { orderId, stripeRefundId: refund.id, refundedAmountCents: refund.amount, refundedBy: access.email ?? undefined });
+    return { refundId: refund.id, amountCents: refund.amount };
   },
 });

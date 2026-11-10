@@ -3333,6 +3333,11 @@ export default defineSchema(
     stripeSessionId: v.optional(v.string()),
     stripePaymentIntentId: v.optional(v.string()),
     paidAt: v.optional(v.number()),
+    /** Remboursement Stripe effectué depuis le CRM Bâtire. */
+    stripeRefundId: v.optional(v.string()),
+    refundedAt: v.optional(v.number()),
+    refundedAmountCents: v.optional(v.number()),
+    refundedBy: v.optional(v.string()),
     userId: v.optional(v.string()),
     createdAt: v.number(),
   })
