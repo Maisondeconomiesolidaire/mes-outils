@@ -11,7 +11,7 @@ import { mutation, query } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireCrmPermission, requireUser } from "./lib";
-import { materialPhoto } from "./meslogistic";
+import { materialPhoto, materialSlot } from "./meslogistic";
 
 const PAGE = "meslogistic:demandes";
 type ShuttleStatus = "planifiee" | "en_route" | "terminee";
@@ -29,8 +29,8 @@ async function log(ctx: MutationCtx, requestId: Id<"mlRequests">, message: strin
   await ctx.db.insert("mlEvents", { requestId, message, actor, createdAt: Date.now() });
 }
 
-const transitView = (row: Doc<"mlRequests">, photoUrl: string | null) => ({
-  photoUrl,
+const transitView = (row: Doc<"mlRequests">, photoUrl: string | null, storageSlot: Awaited<ReturnType<typeof materialSlot>> = null) => ({
+  photoUrl, storageSlot,
   _id: row._id, reference: row.reference, title: row.title, quantity: row.quantity, unit: row.unit,
   customerName: row.customerName, origin: row.origin, destination: row.destination, dueDate: row.dueDate,
   status: row.status, fromOrder: Boolean(row.orderId), notes: row.notes,
@@ -43,12 +43,14 @@ export const board = query({
   handler: async ctx => {
     await requireCrmPermission(ctx, PAGE, "read");
     const shuttles = await ctx.db.query("mlShuttles").order("desc").take(200);
+    const slots = await ctx.db.query("btStorageSlots").collect();
+    const view = async (row: Doc<"mlRequests">) => transitView(row, await materialPhoto(ctx, row.materialId), await materialSlot(ctx, row.materialId, slots));
     const rows = await Promise.all(shuttles.map(async shuttle => {
       const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
-      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, transits: await Promise.all(transits.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
+      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, transits: await Promise.all(transits.map(view)) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
-    return { shuttles: rows, unassigned: await Promise.all(unassigned.map(async row => transitView(row, await materialPhoto(ctx, row.materialId)))) };
+    return { shuttles: rows, unassigned: await Promise.all(unassigned.map(view)) };
   },
 });
 

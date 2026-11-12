@@ -3983,6 +3983,7 @@ export const promoCodeAction = mutation({
 /* ------------------------------------------------------------------ */
 
 const STORAGE_LOCATIONS = ["comptoir_c", "recyclerie_pays_de_bray", "esspace_150"] as const;
+const slotKind = v.optional(v.union(v.literal("stockage"), v.literal("depart"), v.literal("arrivee")));
 
 function cleanSlot(location: string, label: string) {
   if (!(STORAGE_LOCATIONS as readonly string[]).includes(location)) throw new ConvexError("Lieu inconnu.");
@@ -4006,19 +4007,19 @@ export const listStorageSlots = query({
 });
 
 export const createStorageSlot = mutation({
-  args: { location: v.string(), label: v.string() },
+  args: { location: v.string(), label: v.string(), kind: slotKind },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
     const label = cleanSlot(args.location, args.label);
     await assertUniqueSlot(ctx, args.location, label);
     const now = Date.now();
-    return await ctx.db.insert("btStorageSlots", { location: args.location, label, createdAt: now, updatedAt: now });
+    return await ctx.db.insert("btStorageSlots", { location: args.location, label, kind: args.kind ?? "stockage", createdAt: now, updatedAt: now });
   },
 });
 
 /** Renommer un emplacement met aussi à jour les matériaux qui y sont rangés. */
 export const updateStorageSlot = mutation({
-  args: { slotId: v.id("btStorageSlots"), location: v.string(), label: v.string() },
+  args: { slotId: v.id("btStorageSlots"), location: v.string(), label: v.string(), kind: slotKind },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
     const slot = await ctx.db.get(args.slotId);
@@ -4026,7 +4027,7 @@ export const updateStorageSlot = mutation({
     const label = cleanSlot(args.location, args.label);
     await assertUniqueSlot(ctx, args.location, label, slot._id);
     const now = Date.now();
-    await ctx.db.patch(slot._id, { location: args.location, label, updatedAt: now });
+    await ctx.db.patch(slot._id, { location: args.location, label, ...(args.kind ? { kind: args.kind } : {}), updatedAt: now });
     if (label === slot.label && args.location === slot.location) return 0;
     let moved = 0;
     for await (const material of ctx.db.query("btMaterials")) {

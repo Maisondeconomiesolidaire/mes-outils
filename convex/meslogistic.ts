@@ -2,7 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { MutationCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
 import { thumbnailUrl } from "./thumbnails";
 import type { QueryCtx } from "./_generated/server";
@@ -36,14 +36,27 @@ export async function materialPhoto(ctx: QueryCtx, materialId?: Id<"btMaterials"
   const material = await ctx.db.get(materialId);
   return material?.photos[0] ? await thumbnailUrl(ctx, material.photos[0]) : null;
 }
+/**
+ * Emplacement de l'article Bâtire dans son dépôt (« Allée B3 », type
+ * stockage / départ / arrivée d'après la page Emplacements de Bâtire).
+ */
+export async function materialSlot(ctx: QueryCtx, materialId?: Id<"btMaterials">, slots?: Doc<"btStorageSlots">[]) {
+  if (!materialId) return null;
+  const material = await ctx.db.get(materialId);
+  const label = material?.location?.trim();
+  if (!label) return null;
+  const known = (slots ?? await ctx.db.query("btStorageSlots").collect()).find(slot => slot.label === label);
+  return { label, kind: known ? known.kind ?? "stockage" : undefined, depot: material?.depot };
+}
 export const list = query({
   args: {}, handler: async ctx => {
     await requireCrmPermission(ctx, PAGE, "read");
     const rows = await ctx.db.query("mlRequests").order("desc").take(500);
+    const slots = await ctx.db.query("btStorageSlots").collect();
     // Meslogistic ne gère que la logistique : aucun statut de paiement n'est exposé ici.
     return await Promise.all(rows.map(async row => {
       const order = row.orderId ? await ctx.db.get(row.orderId) : null;
-      return { ...row, collected: Boolean(order?.collectedAt), photoUrl: await materialPhoto(ctx, row.materialId) };
+      return { ...row, collected: Boolean(order?.collectedAt), photoUrl: await materialPhoto(ctx, row.materialId), storageSlot: await materialSlot(ctx, row.materialId, slots) };
     }));
   },
 });

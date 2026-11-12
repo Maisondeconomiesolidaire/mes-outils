@@ -3385,6 +3385,8 @@ export default defineSchema(
   btStorageSlots: defineTable({
     location: v.string(),
     label: v.string(),
+    /** Stockage, zone de départ ou d'arrivée des marchandises (absent = stockage). */
+    kind: v.optional(v.union(v.literal("stockage"), v.literal("depart"), v.literal("arrivee"))),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_location", ["location"]),
