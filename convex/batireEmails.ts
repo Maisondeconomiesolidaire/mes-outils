@@ -450,6 +450,20 @@ export const sendOfflineCartConfirmation = internalAction({
 });
 
 
+/**
+ * Le code en très gros, sélectionnable d'un seul geste (`user-select:all`) :
+ * aucun client mail n'exécute de script, la copie directe se fait sur la page
+ * ouverte par le bouton « Copier le code ».
+ */
+function promoCodeBlock(code: string, amount: string) {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 18px;border-collapse:separate;">
+    <tr><td align="center" style="padding:22px 16px;background:#f3f9fb;border:3px dashed ${BRAND};border-radius:18px;">
+      <p style="margin:0 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:${BRAND_DARK};">Votre code promo · ${esc(amount)}</p>
+      <p style="margin:0;font-family:'Courier New',Courier,monospace;font-size:34px;line-height:1.15;font-weight:900;letter-spacing:.08em;color:#18181b;-webkit-user-select:all;user-select:all;word-break:break-all;">${esc(code)}</p>
+    </td></tr>
+  </table>`;
+}
+
 export const sendPromoCode = internalAction({
   args: { to: v.string(), firstName: v.string(), code: v.string(), kind: v.union(v.literal("amount"), v.literal("percent")), value: v.number(), reason: v.optional(v.string()), expiresAt: v.optional(v.number()) },
   handler: async (_ctx, args) => {
@@ -460,7 +474,9 @@ export const sendPromoCode = internalAction({
       preheader: `Code ${args.code} : ${amount} de remise.`,
       heading: `${amount} de remise sur votre prochaine commande`,
       intro: `${hello} un code promo de <strong>${esc(amount)}</strong>${args.reason ? ` (${esc(args.reason)})` : ""}.`,
-      contentHtml: note(`Code : ${args.code}`, `${until}utilisable une fois dans votre panier BâtiRe (hors frais de transfert). Vous pouvez aussi le présenter en boutique.`) + button(`${appUrl()}/panier`, "Utiliser mon code"),
+      contentHtml: promoCodeBlock(args.code, amount)
+        + `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;"><tr><td align="center">${button(`${appUrl()}/code-promo/${encodeURIComponent(args.code)}`, "Copier le code")}</td></tr></table>`
+        + note("Comment l’utiliser", `${until}utilisable une fois dans votre panier BâtiRe (hors frais de transfert) : le bouton « Copier le code » l’applique directement à votre panier. Vous pouvez aussi le présenter en boutique.`),
     }), FROM);
   },
 });
