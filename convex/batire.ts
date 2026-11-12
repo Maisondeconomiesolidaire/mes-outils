@@ -3902,13 +3902,20 @@ export const orderPromoCodes = query({
   },
 });
 
+/**
+ * Crée un code promo, depuis une demande (le client de la demande le reçoit)
+ * ou depuis la page Codes promo (email facultatif).
+ */
 export const createPromoCode = mutation({
-  args: { orderId: v.id("btOrders"), kind: v.union(v.literal("amount"), v.literal("percent")), value: v.number(), reason: v.optional(v.string()), validityDays: v.optional(v.number()), sendEmail: v.boolean() },
+  args: { orderId: v.optional(v.id("btOrders")), customerEmail: v.optional(v.string()), kind: v.union(v.literal("amount"), v.literal("percent")), value: v.number(), reason: v.optional(v.string()), validityDays: v.optional(v.number()), sendEmail: v.boolean() },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
     const actor = await requireUser(ctx);
-    const order = await ctx.db.get(args.orderId);
-    if (!order) throw new ConvexError("Demande introuvable.");
+    const order = args.orderId ? await ctx.db.get(args.orderId) : null;
+    if (args.orderId && !order) throw new ConvexError("Demande introuvable.");
+    const customerEmail = order?.customer.email ?? (args.customerEmail?.trim().toLowerCase() || undefined);
+    if (customerEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail)) throw new ConvexError("Adresse email invalide.");
+    if (args.sendEmail && !customerEmail) throw new ConvexError("Indiquez l’email du client pour lui envoyer le code.");
     const value = Math.round(args.value);
     if (args.kind === "percent" ? !(value >= 1 && value <= 100) : !(value >= 1 && value <= 10_000_00)) throw new ConvexError(args.kind === "percent" ? "Pourcentage entre 1 et 100." : "Montant invalide.");
     const reason = args.reason?.trim().slice(0, 300) || undefined;
@@ -3922,9 +3929,27 @@ export const createPromoCode = mutation({
     if (!code) throw new ConvexError("Génération du code impossible, réessayez.");
     const now = Date.now();
     const expiresAt = days ? now + days * 86_400_000 : undefined;
-    const promoId = await ctx.db.insert("btPromoCodes", { code, kind: args.kind, value, reason, sourceOrderId: order._id, customerEmail: order.customer.email, expiresAt, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, ...(args.sendEmail ? { emailedAt: now } : {}) });
-    if (args.sendEmail) await ctx.scheduler.runAfter(0, internal.batireEmails.sendPromoCode, { to: order.customer.email, firstName: order.customer.firstName, code, kind: args.kind, value, reason, expiresAt });
-    return promoId;
+    const promoId = await ctx.db.insert("btPromoCodes", { code, kind: args.kind, value, reason, sourceOrderId: order?._id, customerEmail, expiresAt, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, ...(args.sendEmail ? { emailedAt: now } : {}) });
+    if (args.sendEmail && customerEmail) await ctx.scheduler.runAfter(0, internal.batireEmails.sendPromoCode, { to: customerEmail, firstName: order?.customer.firstName ?? "", code, kind: args.kind, value, reason, expiresAt });
+    return { promoId, code };
+  },
+});
+
+/** Tous les codes promo (page Codes promo du CRM), avec la demande d'origine. */
+export const listPromoCodes = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const codes = await ctx.db.query("btPromoCodes").order("desc").take(1000);
+    return await Promise.all(codes.map(async promo => {
+      const source = promo.sourceOrderId ? await ctx.db.get(promo.sourceOrderId) : null;
+      const usedOrders = await Promise.all((promo.usedOrderIds ?? []).map(id => ctx.db.get(id)));
+      const releasable = Boolean(promo.usedAt) && usedOrders.every(order => !order || order.status === "en_attente" || order.status === "annulee");
+      return {
+        ...promo, releasable,
+        source: source ? { reference: source.pickupReference ?? source.purchaseReference ?? source.reference, customerName: [source.customer.firstName, source.customer.lastName].filter(Boolean).join(" "), materialTitle: source.materialTitle } : null,
+      };
+    }));
   },
 });
 

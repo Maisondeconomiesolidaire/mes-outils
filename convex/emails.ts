@@ -59,6 +59,14 @@ function euro(n: number) {
   }).format(n);
 }
 
+/** « mardi 18 novembre 2026 à 14h30 » ; sans heure si l'intervention est à minuit (date seule). */
+function formatDayTime(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("fr-FR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "Europe/Paris" }).formatToParts(new Date(timestamp));
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "00";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+  return hour === "00" && minute === "00" ? formatDay(timestamp) : `${formatDay(timestamp)} à ${hour}h${minute}`;
+}
+
 function formatDay(timestamp: number) {
   return new Intl.DateTimeFormat("fr-FR", {
     weekday: "long",
@@ -658,7 +666,7 @@ export const sendScheduled = internalAction({
     { email, name, reference, type, requestId, date, article },
   ) => {
     const label = typeLabel(type);
-    const day = formatDay(date);
+    const day = formatDayTime(date);
     const orderUrl = `${appUrl()}/compte/commandes/${requestId}`;
     const html = shell({
       preheader: `Votre demande ${label} #${reference} est programmée pour le ${day}.`,
@@ -666,8 +674,8 @@ export const sendScheduled = internalAction({
       intro: `Bonjour ${esc(name)},<br/><br/>Bonne nouvelle : votre demande <strong>${esc(label)}</strong> (référence <strong>#${esc(reference)}</strong>) est programmée.`,
       contentHtml: `
         <div style="margin:0 0 22px;padding:16px 18px;background:linear-gradient(135deg,#fff7ef,#ffe9d6);border:1px solid #ffe0c4;border-radius:14px;text-align:center;">
-          <p style="margin:0 0 4px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Date d'intervention</p>
-          <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;color:${BRAND};text-transform:capitalize;">${esc(day)}</p>
+          <p style="margin:0 0 4px;font-family:Helvetica,Arial,sans-serif;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Date et heure d'intervention</p>
+          <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;color:${BRAND};">${esc(day.charAt(0).toUpperCase() + day.slice(1))}</p>
         </div>
         ${buildArticleCard(article)}
         <div style="margin:0 0 22px;">${button(orderUrl, "Voir ma demande")}</div>
