@@ -3350,6 +3350,36 @@ export default defineSchema(
     .index("by_user_createdAt", ["userId", "createdAt"]),
 
   /**
+   * Devis Stripe d'une demande Bâtire (onglet Devis du CRM). Le devis est créé
+   * et finalisé chez Stripe (PDF officiel), puis accepté → facture Stripe.
+   */
+  btQuotes: defineTable({
+    orderId: v.id("btOrders"),
+    /** Compte Stripe qui porte le devis (celui du vendeur du matériau). */
+    provider: v.union(v.literal("recycapp"), v.literal("bennespro")),
+    status: v.union(v.literal("ouvert"), v.literal("accepte"), v.literal("annule")),
+    lines: v.array(v.object({ label: v.string(), quantity: v.number(), unitAmountCents: v.number() })),
+    totalCents: v.number(),
+    note: v.optional(v.string()),
+    expiresAt: v.number(),
+    stripeCustomerId: v.string(),
+    stripeQuoteId: v.string(),
+    quoteNumber: v.optional(v.string()),
+    pdfStorageId: v.optional(v.id("_storage")),
+    createdBy: v.optional(v.string()),
+    createdAt: v.number(),
+    acceptedAt: v.optional(v.number()),
+    canceledAt: v.optional(v.number()),
+    stripeInvoiceId: v.optional(v.string()),
+    invoiceNumber: v.optional(v.string()),
+    invoiceStatus: v.optional(v.string()),
+    invoiceUrl: v.optional(v.string()),
+    invoicePdfUrl: v.optional(v.string()),
+    invoiceSentAt: v.optional(v.number()),
+    invoicePaidAt: v.optional(v.number()),
+  }).index("by_orderId", ["orderId"]),
+
+  /**
    * Messagerie Bâtire : un fil par client et par matériau.
    *
    * Négocier une reprise ou organiser un enlèvement se fait en quelques

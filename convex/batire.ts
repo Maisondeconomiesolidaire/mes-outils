@@ -3586,3 +3586,218 @@ export const refundOrder = action({
     return { refundId: refund.id, amountCents: refund.amount };
   },
 });
+
+
+/* ------------------------------------------------------------------ */
+/* Devis Stripe (onglet Devis des demandes Bâtire)                     */
+/* ------------------------------------------------------------------ */
+
+const quoteLine = v.object({ label: v.string(), quantity: v.number(), unitAmountCents: v.number() });
+
+function stripeKeyForProvider(provider: "recycapp" | "bennespro") {
+  const key = provider === "recycapp" ? env.RECYCAPP_STRIPE_SECRET_KEY : env.BENNESPRO_STRIPE_SECRET_KEY;
+  if (!key) throw new ConvexError("La clé Stripe de ce compte n'est pas configurée côté Convex.");
+  return key;
+}
+
+async function requireDemandesAction(ctx: { runQuery: (...args: any[]) => Promise<any> }) {
+  const access = await ctx.runQuery(api.permissions.myAccess, {});
+  if (!accessAllows(access, PAGE_DEMANDES, "update")) throw new ConvexError("Accès CRM insuffisant.");
+  return access as { email?: string | null };
+}
+
+/** Devis d'une demande, du plus récent au plus ancien, avec le lien du PDF. */
+export const orderQuotes = query({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const quotes = await ctx.db.query("btQuotes").withIndex("by_orderId", q => q.eq("orderId", orderId)).order("desc").collect();
+    return await Promise.all(quotes.map(async quote => ({ ...quote, pdfUrl: quote.pdfStorageId ? await ctx.storage.getUrl(quote.pdfStorageId) : null })));
+  },
+});
+
+export const quoteContext = internalQuery({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    const order = await ctx.db.get(orderId);
+    if (!order) return null;
+    const material = await ctx.db.get(order.materialId);
+    const previous = await ctx.db.query("btQuotes").withIndex("by_orderId", q => q.eq("orderId", orderId)).order("desc").first();
+    return { order, category: material?.category ?? "", previousCustomerId: previous?.stripeCustomerId, previousProvider: previous?.provider };
+  },
+});
+
+export const quoteById = internalQuery({
+  args: { quoteId: v.id("btQuotes") },
+  handler: async (ctx, { quoteId }) => await ctx.db.get(quoteId),
+});
+
+export const insertQuote = internalMutation({
+  args: {
+    orderId: v.id("btOrders"), provider: v.union(v.literal("recycapp"), v.literal("bennespro")), lines: v.array(quoteLine), totalCents: v.number(),
+    note: v.optional(v.string()), expiresAt: v.number(), stripeCustomerId: v.string(), stripeQuoteId: v.string(), quoteNumber: v.optional(v.string()),
+    pdfStorageId: v.optional(v.id("_storage")), createdBy: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => await ctx.db.insert("btQuotes", { ...args, status: "ouvert", createdAt: Date.now() }),
+});
+
+export const patchQuote = internalMutation({
+  args: {
+    quoteId: v.id("btQuotes"),
+    patch: v.object({
+      status: v.optional(v.union(v.literal("ouvert"), v.literal("accepte"), v.literal("annule"))),
+      acceptedAt: v.optional(v.number()), canceledAt: v.optional(v.number()),
+      stripeInvoiceId: v.optional(v.string()), invoiceNumber: v.optional(v.string()), invoiceStatus: v.optional(v.string()),
+      invoiceUrl: v.optional(v.string()), invoicePdfUrl: v.optional(v.string()), invoiceSentAt: v.optional(v.number()), invoicePaidAt: v.optional(v.number()),
+    }),
+  },
+  handler: async (ctx, { quoteId, patch }) => { await ctx.db.patch(quoteId, patch); },
+});
+
+type StripeQuote = { id: string; number?: string | null; status: string; invoice?: string | { id: string } | null; amount_total?: number };
+type StripeInvoice = { id: string; number?: string | null; status?: string | null; hosted_invoice_url?: string | null; invoice_pdf?: string | null; status_transitions?: { paid_at?: number | null } };
+
+function invoicePatch(invoice: StripeInvoice) {
+  return {
+    stripeInvoiceId: invoice.id,
+    invoiceNumber: invoice.number ?? undefined,
+    invoiceStatus: invoice.status ?? undefined,
+    invoiceUrl: invoice.hosted_invoice_url ?? undefined,
+    invoicePdfUrl: invoice.invoice_pdf ?? undefined,
+    invoicePaidAt: invoice.status_transitions?.paid_at ? invoice.status_transitions.paid_at * 1000 : undefined,
+  };
+}
+
+/**
+ * Génère un devis Stripe : client Stripe (retrouvé par email), un produit
+ * par ligne, devis finalisé (numéroté) et PDF officiel gardé dans Convex.
+ * Facturation « envoi de facture » : à l'acceptation, Stripe crée une
+ * facture à régler sous `daysUntilDue` jours.
+ */
+export const createQuote = action({
+  args: { orderId: v.id("btOrders"), lines: v.array(quoteLine), note: v.optional(v.string()), validityDays: v.number(), daysUntilDue: v.number() },
+  handler: async (ctx, args): Promise<Id<"btQuotes">> => {
+    const access = await requireDemandesAction(ctx);
+    const details = await ctx.runQuery(internal.batire.quoteContext, { orderId: args.orderId });
+    if (!details) throw new ConvexError("Demande introuvable.");
+    const lines = args.lines.map(line => ({ label: line.label.trim(), quantity: line.quantity, unitAmountCents: Math.round(line.unitAmountCents) }));
+    if (lines.length === 0 || lines.length > 20) throw new ConvexError("Le devis doit compter entre 1 et 20 lignes.");
+    for (const line of lines) {
+      if (!line.label || line.label.length > 250) throw new ConvexError("Chaque ligne doit avoir un libellé (250 caractères max).");
+      if (!Number.isInteger(line.quantity) || line.quantity < 1 || line.quantity > 100000) throw new ConvexError("Quantité invalide (nombre entier ≥ 1).");
+      if (line.unitAmountCents < 0 || line.unitAmountCents > 100_000_000) throw new ConvexError("Prix unitaire invalide.");
+    }
+    const totalCents = lines.reduce((sum, line) => sum + line.quantity * line.unitAmountCents, 0);
+    if (totalCents <= 0) throw new ConvexError("Le total du devis doit être supérieur à 0 €.");
+    const validityDays = Math.min(365, Math.max(1, Math.round(args.validityDays)));
+    const daysUntilDue = Math.min(365, Math.max(0, Math.round(args.daysUntilDue)));
+    const note = args.note?.trim().slice(0, 500) || undefined;
+
+    const { order, category } = details;
+    const provider = details.previousProvider ?? stripeProviderForCategory(category);
+    const secretKey = stripeKeyForProvider(provider);
+    const customerName = [order.customer.firstName, order.customer.lastName].filter(Boolean).join(" ").trim();
+
+    let customerId = details.previousCustomerId as string | undefined;
+    if (!customerId) {
+      const found = await stripeRequest<{ data: { id: string }[] }>(`customers?limit=1&email=${encodeURIComponent(order.customer.email)}`, secretKey);
+      customerId = found.data[0]?.id;
+    }
+    if (!customerId) {
+      const created = await stripeRequest<{ id: string }>("customers", secretKey, {
+        email: order.customer.email,
+        name: order.customer.company || customerName || order.customer.email,
+        ...(order.customer.phone ? { phone: order.customer.phone } : {}),
+        "metadata[source]": "batire-crm",
+      });
+      customerId = created.id;
+    }
+
+    const body: Record<string, string> = {
+      customer: customerId,
+      collection_method: "send_invoice",
+      "invoice_settings[days_until_due]": String(daysUntilDue),
+      expires_at: String(Math.floor(Date.now() / 1000) + validityDays * 86400),
+      description: `Demande Bâtire #${order.pickupReference ?? order.reference}`,
+      "metadata[orderId]": String(order._id),
+      "metadata[source]": "batire-crm-devis",
+    };
+    if (note) body.footer = note;
+    for (const [index, line] of lines.entries()) {
+      const product = await stripeRequest<{ id: string }>("products", secretKey, { name: line.label, "metadata[source]": "batire-crm-devis" });
+      body[`line_items[${index}][quantity]`] = String(line.quantity);
+      body[`line_items[${index}][price_data][currency]`] = "eur";
+      body[`line_items[${index}][price_data][product]`] = product.id;
+      body[`line_items[${index}][price_data][unit_amount]`] = String(line.unitAmountCents);
+    }
+    const draft = await stripeRequest<StripeQuote>("quotes", secretKey, body);
+    const quote = await stripeRequest<StripeQuote>(`quotes/${draft.id}/finalize`, secretKey, {});
+
+    let pdfStorageId: Id<"_storage"> | undefined;
+    try {
+      const response = await fetch(`https://files.stripe.com/v1/quotes/${quote.id}/pdf`, { headers: { Authorization: `Bearer ${secretKey}` } });
+      if (response.ok) pdfStorageId = await ctx.storage.store(new Blob([await response.arrayBuffer()], { type: "application/pdf" }));
+    } catch { /* PDF indisponible : le devis reste valable chez Stripe */ }
+
+    return await ctx.runMutation(internal.batire.insertQuote, {
+      orderId: order._id, provider, lines, totalCents, note, expiresAt: Date.now() + validityDays * 86400_000,
+      stripeCustomerId: customerId, stripeQuoteId: quote.id, quoteNumber: quote.number ?? undefined, pdfStorageId, createdBy: access.email ?? undefined,
+    });
+  },
+});
+
+/**
+ * Devis accepté par le client → Stripe le convertit en facture, que l'on
+ * finalise (numéro + PDF) et, si demandé, que Stripe envoie par email.
+ */
+export const acceptQuote = action({
+  args: { quoteId: v.id("btQuotes"), sendInvoice: v.boolean() },
+  handler: async (ctx, { quoteId, sendInvoice }) => {
+    await requireDemandesAction(ctx);
+    const row = await ctx.runQuery(internal.batire.quoteById, { quoteId });
+    if (!row) throw new ConvexError("Devis introuvable.");
+    if (row.status !== "ouvert") throw new ConvexError("Ce devis n'est plus ouvert.");
+    if (row.expiresAt < Date.now()) throw new ConvexError("Ce devis a expiré : générez-en un nouveau.");
+    const secretKey = stripeKeyForProvider(row.provider);
+    const accepted = await stripeRequest<StripeQuote>(`quotes/${row.stripeQuoteId}/accept`, secretKey, {});
+    const invoiceId = typeof accepted.invoice === "string" ? accepted.invoice : accepted.invoice?.id;
+    const now = Date.now();
+    if (!invoiceId) {
+      await ctx.runMutation(internal.batire.patchQuote, { quoteId, patch: { status: "accepte", acceptedAt: now } });
+      throw new ConvexError("Devis accepté, mais Stripe n'a pas créé de facture.");
+    }
+    let invoice = await stripeRequest<StripeInvoice>(`invoices/${invoiceId}/finalize`, secretKey, { auto_advance: "false" });
+    let sentAt: number | undefined;
+    if (sendInvoice) { invoice = await stripeRequest<StripeInvoice>(`invoices/${invoiceId}/send`, secretKey, {}); sentAt = Date.now(); }
+    await ctx.runMutation(internal.batire.patchQuote, { quoteId, patch: { status: "accepte", acceptedAt: now, ...invoicePatch(invoice), invoiceSentAt: sentAt } });
+  },
+});
+
+export const cancelQuote = action({
+  args: { quoteId: v.id("btQuotes") },
+  handler: async (ctx, { quoteId }) => {
+    await requireDemandesAction(ctx);
+    const row = await ctx.runQuery(internal.batire.quoteById, { quoteId });
+    if (!row) throw new ConvexError("Devis introuvable.");
+    if (row.status !== "ouvert") throw new ConvexError("Seul un devis ouvert peut être annulé.");
+    try { await stripeRequest(`quotes/${row.stripeQuoteId}/cancel`, stripeKeyForProvider(row.provider), {}); }
+    catch (error) { if (!/canceled|expired/i.test(error instanceof Error ? error.message : "")) throw error; }
+    await ctx.runMutation(internal.batire.patchQuote, { quoteId, patch: { status: "annule", canceledAt: Date.now() } });
+  },
+});
+
+/** Facture du devis : envoi par email, encaissement hors Stripe, ou relecture du statut. */
+export const quoteInvoiceAction = action({
+  args: { quoteId: v.id("btQuotes"), action: v.union(v.literal("send"), v.literal("markPaid"), v.literal("refresh")) },
+  handler: async (ctx, args) => {
+    await requireDemandesAction(ctx);
+    const row = await ctx.runQuery(internal.batire.quoteById, { quoteId: args.quoteId });
+    if (!row?.stripeInvoiceId) throw new ConvexError("Aucune facture pour ce devis.");
+    const secretKey = stripeKeyForProvider(row.provider);
+    const path = `invoices/${row.stripeInvoiceId}`;
+    const invoice = args.action === "send" ? await stripeRequest<StripeInvoice>(`${path}/send`, secretKey, {})
+      : args.action === "markPaid" ? await stripeRequest<StripeInvoice>(`${path}/pay`, secretKey, { paid_out_of_band: "true" })
+      : await stripeRequest<StripeInvoice>(path, secretKey);
+    await ctx.runMutation(internal.batire.patchQuote, { quoteId: args.quoteId, patch: { ...invoicePatch(invoice), ...(args.action === "send" ? { invoiceSentAt: Date.now() } : {}), ...(args.action === "markPaid" && !invoice.status_transitions?.paid_at ? { invoicePaidAt: Date.now() } : {}) } });
+  },
+});
