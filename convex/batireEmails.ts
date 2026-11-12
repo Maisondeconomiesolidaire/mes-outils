@@ -10,9 +10,10 @@ import { esc, resendSend, storageImageUrl } from "./emails";
 
 const FROM = "Bâtire <no-reply@mesoutils.eco-solidaire.fr>";
 
-/** Ocre de marque Bâtire (`brand-500` / `brand-700` de l'app). */
-const BRAND = "#c9741f";
-const BRAND_DARK = "#834717";
+/** Bleu et vert du logo BâtiRe (`brand-600` / `brand-700` de l'app). */
+const BRAND = "#2795b3";
+const BRAND_DARK = "#1e718a";
+const BRAND_GREEN = "#8fbe2a";
 
 function appUrl() {
   return (process.env.BATIRE_APP_URL ?? "https://batire.groupemes.fr").replace(/\/$/, "");
@@ -34,7 +35,7 @@ function button(href: string, label: string) {
 function productImage(storageId: string | undefined) {
   if (!storageId) return "";
   return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;">
-    <tr><td align="center" style="background:#faf7f2;border:1px solid #efe6d9;border-radius:14px;padding:12px;">
+    <tr><td align="center" style="background:#f3f9fb;border:1px solid #d7eaf0;border-radius:14px;padding:12px;">
       <img src="${storageImageUrl(storageId)}" alt="" width="480" style="display:block;width:100%;max-width:480px;height:auto;border:0;border-radius:8px;outline:none;text-decoration:none;" />
     </td></tr>
   </table>`;
@@ -42,9 +43,9 @@ function productImage(storageId: string | undefined) {
 
 /** Encart de citation : motif de refus, consignes de dépôt. */
 function note(title: string, body: string) {
-  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;background:#faf7f2;border:1px solid #efe6d9;border-left:4px solid ${BRAND};border-radius:12px;">
+  return `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;background:#f3f9fb;border:1px solid #d7eaf0;border-left:4px solid ${BRAND};border-radius:12px;">
     <tr><td style="padding:14px 18px;font-family:Helvetica,Arial,sans-serif;">
-      <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#8a7259;">${esc(title)}</p>
+      <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#1e718a;">${esc(title)}</p>
       <p style="margin:0;font-size:14px;line-height:1.6;color:#3f3f46;white-space:pre-line;">${esc(body)}</p>
     </td></tr>
   </table>`;
@@ -59,15 +60,18 @@ function shell(opts: { preheader: string; heading: string; intro: string; conten
     <meta name="color-scheme" content="light" />
     <style>@media (max-width:600px){.container{width:100% !important;}.px{padding-left:20px !important;padding-right:20px !important;}}</style>
   </head>
-  <body style="margin:0;padding:0;background:#f6f2ec;">
+  <body style="margin:0;padding:0;background:#eef6f8;">
     <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${esc(opts.preheader)}</div>
-    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f6f2ec;padding:24px 12px;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#eef6f8;padding:24px 12px;">
       <tr><td align="center">
-        <table role="presentation" cellpadding="0" cellspacing="0" width="600" class="container" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #ece4d8;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" class="container" style="width:600px;max-width:600px;background:#ffffff;border-radius:20px;overflow:hidden;border:1px solid #dbe9ee;box-shadow:0 10px 40px rgba(24,24,27,0.06);">
           <tr>
-            <td class="px" style="padding:22px 32px;border-bottom:1px solid #f1e9dd;border-top:4px solid ${BRAND};">
-              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:20px;font-weight:800;letter-spacing:-.02em;color:#18181b;">BâtiRe<span style="color:${BRAND};">.</span></p>
-              <p style="margin:2px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;color:#a1a1aa;">Matériaux de réemploi</p>
+            <td class="px" style="padding:22px 32px;border-bottom:1px solid #e3eff3;border-top:4px solid ${BRAND};border-image:linear-gradient(90deg, ${BRAND} 0%, ${BRAND} 55%, ${BRAND_GREEN} 55%, ${BRAND_GREEN} 100%) 1;">
+              <table role="presentation" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>
+                <td style="padding:0 16px 0 0;vertical-align:middle;"><img src="${appUrl()}/logo-BATIRE.jpg" alt="bâtiRE" width="64" height="64" style="display:block;width:64px;height:64px;border:0;outline:none;text-decoration:none;" /></td>
+                <td style="vertical-align:middle;border-left:1px solid #e3eff3;padding-left:16px;">
+                  <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:${BRAND_DARK};">Matériaux de réemploi</p>                </td>
+              </tr></table>
             </td>
           </tr>
           <tr>
@@ -78,8 +82,8 @@ function shell(opts: { preheader: string; heading: string; intro: string; conten
             </td>
           </tr>
           <tr>
-            <td class="px" style="padding:20px 32px;background:#faf7f2;border-top:1px solid #f1e9dd;">
-              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#b8b0a4;">
+            <td class="px" style="padding:20px 32px;background:#f3f9fb;border-top:1px solid #e3eff3;">
+              <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:11px;line-height:1.6;color:#94a3b8;">
                 Message automatique — merci de ne pas y répondre. Une question ? Appelez BâtiRe au <a href="tel:+33375150475" style="color:${BRAND};font-weight:700;text-decoration:none;">03 75 15 04 75</a> ou écrivez-nous depuis la messagerie de votre espace client.
               </p>
             </td>
@@ -254,8 +258,8 @@ export const sendOrderReceipt = internalAction({
         `Votre paiement est confirmé pour cet article de la commande <strong>${esc(args.reference)}</strong>. Attendez la notification « Prêt à retirer » avant de vous déplacer. Chaque retrait est suivi séparément dans votre espace client.`,
       contentHtml:
         `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">
-          <tr><td style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(args.title)}</td>
-              <td align="right" style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(`${args.quantity} ${args.unit}`)}</td></tr>
+          <tr><td style="padding:10px 0;border-bottom:1px solid #e3eff3;">${esc(args.title)}</td>
+              <td align="right" style="padding:10px 0;border-bottom:1px solid #e3eff3;">${esc(`${args.quantity} ${args.unit}`)}</td></tr>
           <tr><td style="padding:10px 0;font-weight:700;color:#18181b;">Total payé</td>
               <td align="right" style="padding:10px 0;font-weight:700;color:#18181b;">${esc(total)}</td></tr>
         </table>` +
@@ -298,8 +302,8 @@ export const sendReservationConfirmation = internalAction({
         `Votre réservation <strong>${esc(args.reference)}</strong> est bien enregistrée. Le règlement se fait sur place, au retrait.`,
       contentHtml:
         `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">
-          <tr><td style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(args.title)}</td>
-              <td align="right" style="padding:10px 0;border-bottom:1px solid #f1e9dd;">${esc(`${args.quantity} ${args.unit}`)}</td></tr>
+          <tr><td style="padding:10px 0;border-bottom:1px solid #e3eff3;">${esc(args.title)}</td>
+              <td align="right" style="padding:10px 0;border-bottom:1px solid #e3eff3;">${esc(`${args.quantity} ${args.unit}`)}</td></tr>
           <tr><td style="padding:10px 0;font-weight:700;color:#18181b;">Total à régler au retrait</td>
               <td align="right" style="padding:10px 0;font-weight:700;color:#18181b;">${esc(total)}</td></tr>
         </table>` +
