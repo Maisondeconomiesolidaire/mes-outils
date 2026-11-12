@@ -444,3 +444,19 @@ export const sendOfflineCartConfirmation = internalAction({
     await resendSend(args.to, `Demande ${args.reference} enregistrée`, shell({ preheader: "Votre demande a été enregistrée.", heading: "Votre demande est enregistrée", intro: `Votre demande <strong>${esc(args.reference)}</strong> de ${esc(amount)} est en attente de paiement.`, contentHtml: note(transfer ? "Virement bancaire" : "Paiement en espèces", instructions) + button(`${appUrl()}/mon-compte?onglet=commandes`, "Suivre ma commande") }), FROM);
   },
 });
+
+
+export const sendPromoCode = internalAction({
+  args: { to: v.string(), firstName: v.string(), code: v.string(), kind: v.union(v.literal("amount"), v.literal("percent")), value: v.number(), reason: v.optional(v.string()), expiresAt: v.optional(v.number()) },
+  handler: async (_ctx, args) => {
+    const amount = args.kind === "percent" ? `${args.value} %` : (args.value / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+    const until = args.expiresAt ? `Valable jusqu’au ${new Date(args.expiresAt).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Paris" })}, ` : "";
+    const hello = args.firstName ? `Bonjour ${esc(args.firstName)}, voici` : "Voici";
+    await resendSend(args.to, `Votre code promo BâtiRe : ${amount} de remise`, shell({
+      preheader: `Code ${args.code} : ${amount} de remise.`,
+      heading: `${amount} de remise sur votre prochaine commande`,
+      intro: `${hello} un code promo de <strong>${esc(amount)}</strong>${args.reason ? ` (${esc(args.reason)})` : ""}.`,
+      contentHtml: note(`Code : ${args.code}`, `${until}utilisable une fois dans votre panier BâtiRe (hors frais de transfert). Vous pouvez aussi le présenter en boutique.`) + button(`${appUrl()}/panier`, "Utiliser mon code"),
+    }), FROM);
+  },
+});

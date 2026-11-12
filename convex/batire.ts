@@ -847,7 +847,7 @@ const pickupLocations = {
   esspace_150: { name: "Esspace 150 / Recyclerie de Gournay", address: "150 Rte de Paris, 76220 Gournay-en-Bray" },
 } as const;
 
-const PICKUP_TRANSFER_FEE_CENTS = 3500;
+const PICKUP_TRANSFER_FEE_CENTS = 990;
 
 /** Accepte les anciens libellés saisis librement, tout en comparant les lieux canoniques. */
 function storageLocationId(depot?: string): keyof typeof pickupLocations | undefined {
@@ -1171,7 +1171,7 @@ export const materialForCheckout = internalQuery({
 export const createCartOrders = internalMutation({
   args: {
     items: v.array(v.object({ materialId: v.id("btMaterials"), quantity: v.number(), pickupLocation: pickupLocationValidator })),
-    customer: customerValidator, userId: v.string(),
+    customer: customerValidator, userId: v.string(), promoCode: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     if (!args.items.length || args.items.length > 50) throw new ConvexError("Le panier doit contenir de 1 à 50 matériaux.");
@@ -1190,6 +1190,10 @@ export const createCartOrders = internalMutation({
       feeCharged ||= fee > 0;
       orders.push({ ...order, quantity: item.quantity });
     }
+    if (args.promoCode) {
+      const discounts = await applyPromoCode(ctx, args.promoCode, orders, purchaseReference);
+      for (const order of orders) order.amountCents -= discounts.get(order.orderId) ?? 0;
+    }
     return orders;
   },
 });
@@ -1200,8 +1204,9 @@ export const startCartCheckout = action({
     customer: customerValidator,
     pickupLocation: v.optional(pickupLocationValidator),
     returnUrl: v.string(),
+    promoCode: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<{ checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }> }> => {
+  handler: async (ctx, args): Promise<{ checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }>; freeReference?: string }> => {
     if (!args.items.length || args.items.length > 50) throw new ConvexError("Le panier doit contenir de 1 à 50 matériaux.");
     const email = args.customer.email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email) || !args.customer.firstName.trim() || !args.customer.lastName.trim()) throw new ConvexError("Indiquez vos coordonnées complètes.");
@@ -1222,12 +1227,18 @@ export const startCartCheckout = action({
     const checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }> = [];
     for (const [provider, items] of groups) {
       const orders: Array<{ orderId: Id<"btOrders">; amountCents: number; pickupFeeCents: number; title: string; unit: string; quantity: number }> = await ctx.runMutation(internal.batire.createCartOrders, {
-        items: items.map(item => ({ materialId: item.materialId, quantity: item.quantity, pickupLocation: item.pickupLocation! })), customer: { ...args.customer, email }, userId: identity.subject,
+        items: items.map(item => ({ materialId: item.materialId, quantity: item.quantity, pickupLocation: item.pickupLocation! })), customer: { ...args.customer, email }, userId: identity.subject, promoCode: args.promoCode,
       });
+      // Code promo couvrant tout le panier : rien à encaisser, la commande est réglée.
+      if (orders.every(order => order.amountCents <= 0)) {
+        for (const order of orders) await ctx.runMutation(internal.batire.markOrderPaid, { orderId: order.orderId });
+        const reference = await ctx.runQuery(internal.batire.purchaseReferenceOf, { orderId: orders[0]!.orderId });
+        return { checkouts: [], freeReference: reference };
+      }
       const returnUrl = new URL(args.returnUrl);
       returnUrl.searchParams.set("provider", provider);
       const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer_email: email, "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(",") };
-      orders.forEach((order, index) => {
+      orders.filter(order => order.amountCents - order.pickupFeeCents > 0).forEach((order, index) => {
         body[`line_items[${index}][quantity]`] = "1";
         body[`line_items[${index}][price_data][currency]`] = "eur";
         body[`line_items[${index}][price_data][unit_amount]`] = String(order.amountCents - order.pickupFeeCents);
@@ -1236,7 +1247,7 @@ export const startCartCheckout = action({
       });
       const pickupFee = orders.find((order) => order.pickupFeeCents > 0)?.pickupFeeCents;
       if (pickupFee) {
-        const index = orders.length;
+        const index = orders.filter(order => order.amountCents - order.pickupFeeCents > 0).length;
         body[`line_items[${index}][quantity]`] = "1";
         body[`line_items[${index}][price_data][currency]`] = "eur";
         body[`line_items[${index}][price_data][unit_amount]`] = String(pickupFee);
@@ -1256,6 +1267,7 @@ export const requestOfflineCart = mutation({
     items: v.array(v.object({ materialId: v.id("btMaterials"), quantity: v.number(), pickupLocation: pickupLocationValidator })),
     customer: customerValidator,
     paymentMethod: v.union(v.literal("cash"), v.literal("bank_transfer")),
+    promoCode: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await requireUser(ctx);
@@ -1269,6 +1281,7 @@ export const requestOfflineCart = mutation({
     let provider: "recycapp" | "bennespro" | undefined;
     let feeCharged = false;
     let amountCents = 0;
+    const created: Array<{ orderId: Id<"btOrders">; amountCents: number; pickupFeeCents: number }> = [];
     for (const [index, item] of args.items.entries()) {
       const material = await ctx.db.get(item.materialId);
       if (!material || !Number.isFinite(item.quantity) || item.quantity <= 0) throw new ConvexError("Matériau ou quantité invalide.");
@@ -1281,7 +1294,12 @@ export const requestOfflineCart = mutation({
       const suffix = index < 26 ? String.fromCharCode(65 + index) : `A${String.fromCharCode(65 + index - 26)}`;
       const order = await insertOrder(ctx, { ...item, customer: { ...args.customer, email }, userId: identity.subject, channel: "boutique", pickupFeeCents: fee, purchaseReference: reference, pickupReference: `${reference}-${suffix}`, paymentMethod: args.paymentMethod }, "reservee");
       amountCents += order.amountCents;
+      created.push(order);
       feeCharged ||= fee > 0;
+    }
+    if (args.promoCode) {
+      const discounts = await applyPromoCode(ctx, args.promoCode, created, reference);
+      for (const discount of discounts.values()) amountCents -= discount;
     }
     await ctx.scheduler.runAfter(0, internal.batireEmails.sendOfflineCartConfirmation, { to: email, reference, paymentMethod: args.paymentMethod, amountCents });
     return { reference };
@@ -3799,5 +3817,207 @@ export const quoteInvoiceAction = action({
       : args.action === "markPaid" ? await stripeRequest<StripeInvoice>(`${path}/pay`, secretKey, { paid_out_of_band: "true" })
       : await stripeRequest<StripeInvoice>(path, secretKey);
     await ctx.runMutation(internal.batire.patchQuote, { quoteId: args.quoteId, patch: { ...invoicePatch(invoice), ...(args.action === "send" ? { invoiceSentAt: Date.now() } : {}), ...(args.action === "markPaid" && !invoice.status_transitions?.paid_at ? { invoicePaidAt: Date.now() } : {}) } });
+  },
+});
+
+
+export const purchaseReferenceOf = internalQuery({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => { const order = await ctx.db.get(orderId); return order?.purchaseReference ?? order?.reference ?? ""; },
+});
+
+/* ------------------------------------------------------------------ */
+/* Codes promo                                                          */
+/* ------------------------------------------------------------------ */
+
+const PROMO_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const normalizeCode = (code: string) => code.trim().toUpperCase().replace(/\s+/g, "");
+
+function promoProblem(promo: Doc<"btPromoCodes"> | null, now = Date.now()) {
+  if (!promo) return "Ce code promo n’existe pas.";
+  if (promo.canceledAt) return "Ce code promo a été annulé.";
+  if (promo.usedAt) return "Ce code promo a déjà été utilisé.";
+  if (promo.expiresAt && promo.expiresAt < now) return "Ce code promo a expiré.";
+  return null;
+}
+
+/** Remise sur les articles (hors frais de transfert), répartie au prorata des lignes. */
+function promoDiscounts(promo: Pick<Doc<"btPromoCodes">, "kind" | "value">, orders: Array<{ orderId: Id<"btOrders">; amountCents: number; pickupFeeCents: number }>) {
+  const goods = orders.map(order => Math.max(0, order.amountCents - order.pickupFeeCents));
+  const goodsTotal = goods.reduce((sum, value) => sum + value, 0);
+  const total = Math.min(goodsTotal, promo.kind === "percent" ? Math.round(goodsTotal * promo.value / 100) : promo.value);
+  const result = new Map<Id<"btOrders">, number>();
+  let left = total;
+  orders.forEach((order, index) => {
+    const share = index === orders.length - 1 ? left : Math.min(left, goodsTotal ? Math.round(total * goods[index]! / goodsTotal) : 0);
+    result.set(order.orderId, share);
+    left -= share;
+  });
+  return result;
+}
+
+/** Applique un code promo à des demandes qui viennent d'être créées, et le consomme. */
+async function applyPromoCode(ctx: MutationCtx, rawCode: string, orders: Array<{ orderId: Id<"btOrders">; amountCents: number; pickupFeeCents: number }>, reference: string) {
+  const code = normalizeCode(rawCode);
+  const promo = await ctx.db.query("btPromoCodes").withIndex("by_code", q => q.eq("code", code)).unique();
+  const problem = promoProblem(promo);
+  if (problem || !promo) throw new ConvexError(problem ?? "Code promo invalide.");
+  const discounts = promoDiscounts(promo, orders);
+  let used = 0;
+  for (const order of orders) {
+    const discount = discounts.get(order.orderId) ?? 0;
+    if (discount <= 0) continue;
+    used += discount;
+    await ctx.db.patch(order.orderId, { amountCents: order.amountCents - discount, discountCents: discount, promoCode: code });
+  }
+  await ctx.db.patch(promo._id, { usedAt: Date.now(), usedOrderIds: orders.map(order => order.orderId), usedReference: reference, usedDiscountCents: used });
+  return discounts;
+}
+
+/** Vérification au panier : le client voit sa remise avant de payer. */
+export const checkPromoCode = query({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const normalized = normalizeCode(code);
+    if (!normalized || normalized.length > 40) return { ok: false as const, message: "Saisissez un code promo." };
+    const promo = await ctx.db.query("btPromoCodes").withIndex("by_code", q => q.eq("code", normalized)).unique();
+    const problem = promoProblem(promo);
+    if (problem || !promo) return { ok: false as const, message: problem ?? "Code promo invalide." };
+    return { ok: true as const, code: promo.code, kind: promo.kind, value: promo.value };
+  },
+});
+
+/** Codes promo émis depuis une demande (onglet Code promo du CRM). */
+export const orderPromoCodes = query({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const codes = await ctx.db.query("btPromoCodes").withIndex("by_sourceOrderId", q => q.eq("sourceOrderId", orderId)).order("desc").collect();
+    return await Promise.all(codes.map(async promo => {
+      const usedOrders = await Promise.all((promo.usedOrderIds ?? []).map(id => ctx.db.get(id)));
+      // Panier abandonné avant paiement : le code peut être rendu au client.
+      const releasable = Boolean(promo.usedAt) && usedOrders.every(order => !order || order.status === "en_attente" || order.status === "annulee");
+      return { ...promo, releasable };
+    }));
+  },
+});
+
+export const createPromoCode = mutation({
+  args: { orderId: v.id("btOrders"), kind: v.union(v.literal("amount"), v.literal("percent")), value: v.number(), reason: v.optional(v.string()), validityDays: v.optional(v.number()), sendEmail: v.boolean() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const actor = await requireUser(ctx);
+    const order = await ctx.db.get(args.orderId);
+    if (!order) throw new ConvexError("Demande introuvable.");
+    const value = Math.round(args.value);
+    if (args.kind === "percent" ? !(value >= 1 && value <= 100) : !(value >= 1 && value <= 10_000_00)) throw new ConvexError(args.kind === "percent" ? "Pourcentage entre 1 et 100." : "Montant invalide.");
+    const reason = args.reason?.trim().slice(0, 300) || undefined;
+    const days = args.validityDays === undefined ? undefined : Math.round(args.validityDays);
+    if (days !== undefined && !(days >= 1 && days <= 3650)) throw new ConvexError("Durée de validité invalide.");
+    let code = "";
+    for (let attempt = 0; attempt < 10 && !code; attempt++) {
+      const candidate = `BATIRE-${Array.from({ length: 6 }, () => PROMO_ALPHABET[Math.floor(Math.random() * PROMO_ALPHABET.length)]).join("")}`;
+      if (!(await ctx.db.query("btPromoCodes").withIndex("by_code", q => q.eq("code", candidate)).unique())) code = candidate;
+    }
+    if (!code) throw new ConvexError("Génération du code impossible, réessayez.");
+    const now = Date.now();
+    const expiresAt = days ? now + days * 86_400_000 : undefined;
+    const promoId = await ctx.db.insert("btPromoCodes", { code, kind: args.kind, value, reason, sourceOrderId: order._id, customerEmail: order.customer.email, expiresAt, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, ...(args.sendEmail ? { emailedAt: now } : {}) });
+    if (args.sendEmail) await ctx.scheduler.runAfter(0, internal.batireEmails.sendPromoCode, { to: order.customer.email, firstName: order.customer.firstName, code, kind: args.kind, value, reason, expiresAt });
+    return promoId;
+  },
+});
+
+export const promoCodeAction = mutation({
+  args: { promoId: v.id("btPromoCodes"), action: v.union(v.literal("email"), v.literal("cancel"), v.literal("release")) },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const promo = await ctx.db.get(args.promoId);
+    if (!promo) throw new ConvexError("Code promo introuvable.");
+    if (args.action === "cancel") {
+      if (promo.usedAt) throw new ConvexError("Ce code a déjà été utilisé.");
+      await ctx.db.patch(promo._id, { canceledAt: Date.now() });
+    } else if (args.action === "release") {
+      const orders = await Promise.all((promo.usedOrderIds ?? []).map(id => ctx.db.get(id)));
+      if (!promo.usedAt || orders.some(order => order && order.status !== "en_attente" && order.status !== "annulee")) throw new ConvexError("Ce code a servi à une commande réglée ou réservée.");
+      await ctx.db.patch(promo._id, { usedAt: undefined, usedOrderIds: undefined, usedReference: undefined, usedDiscountCents: undefined });
+    } else {
+      const problem = promoProblem(promo);
+      if (problem) throw new ConvexError(problem);
+      const order = promo.sourceOrderId ? await ctx.db.get(promo.sourceOrderId) : null;
+      const to = order?.customer.email ?? promo.customerEmail;
+      if (!to) throw new ConvexError("Aucun email client.");
+      await ctx.db.patch(promo._id, { emailedAt: Date.now() });
+      await ctx.scheduler.runAfter(0, internal.batireEmails.sendPromoCode, { to, firstName: order?.customer.firstName ?? "", code: promo.code, kind: promo.kind, value: promo.value, reason: promo.reason, expiresAt: promo.expiresAt });
+    }
+  },
+});
+
+/* ------------------------------------------------------------------ */
+/* Emplacements de stockage                                             */
+/* ------------------------------------------------------------------ */
+
+const STORAGE_LOCATIONS = ["comptoir_c", "recyclerie_pays_de_bray", "esspace_150"] as const;
+
+function cleanSlot(location: string, label: string) {
+  if (!(STORAGE_LOCATIONS as readonly string[]).includes(location)) throw new ConvexError("Lieu inconnu.");
+  const clean = label.trim().replace(/\s+/g, " ");
+  if (!clean || clean.length > 80) throw new ConvexError("Indiquez l’emplacement (80 caractères max).");
+  return clean;
+}
+
+async function assertUniqueSlot(ctx: MutationCtx, location: string, label: string, except?: Id<"btStorageSlots">) {
+  const existing = await ctx.db.query("btStorageSlots").withIndex("by_location", q => q.eq("location", location)).collect();
+  if (existing.some(slot => slot._id !== except && slot.label.toLocaleLowerCase("fr-FR") === label.toLocaleLowerCase("fr-FR"))) throw new ConvexError("Cet emplacement existe déjà pour ce lieu.");
+}
+
+export const listStorageSlots = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "read");
+    const slots = await ctx.db.query("btStorageSlots").collect();
+    return slots.sort((a, b) => a.location.localeCompare(b.location) || a.label.localeCompare(b.label, "fr", { numeric: true }));
+  },
+});
+
+export const createStorageSlot = mutation({
+  args: { location: v.string(), label: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
+    const label = cleanSlot(args.location, args.label);
+    await assertUniqueSlot(ctx, args.location, label);
+    const now = Date.now();
+    return await ctx.db.insert("btStorageSlots", { location: args.location, label, createdAt: now, updatedAt: now });
+  },
+});
+
+/** Renommer un emplacement met aussi à jour les matériaux qui y sont rangés. */
+export const updateStorageSlot = mutation({
+  args: { slotId: v.id("btStorageSlots"), location: v.string(), label: v.string() },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
+    const slot = await ctx.db.get(args.slotId);
+    if (!slot) throw new ConvexError("Emplacement introuvable.");
+    const label = cleanSlot(args.location, args.label);
+    await assertUniqueSlot(ctx, args.location, label, slot._id);
+    const now = Date.now();
+    await ctx.db.patch(slot._id, { location: args.location, label, updatedAt: now });
+    if (label === slot.label && args.location === slot.location) return 0;
+    let moved = 0;
+    for await (const material of ctx.db.query("btMaterials")) {
+      if (material.location !== slot.label || storageLocationId(material.depot) !== slot.location) continue;
+      await ctx.db.patch(material._id, { location: label, ...(args.location !== slot.location ? { depot: pickupLocations[args.location as keyof typeof pickupLocations].name } : {}), updatedAt: now });
+      moved++;
+    }
+    return moved;
+  },
+});
+
+/** Les matériaux gardent leur emplacement en texte : la suppression ne vide aucune fiche. */
+export const removeStorageSlot = mutation({
+  args: { slotId: v.id("btStorageSlots") },
+  handler: async (ctx, { slotId }) => {
+    await requireCrmPermission(ctx, PAGE_MATERIAUX, "update");
+    await ctx.db.delete(slotId);
   },
 });

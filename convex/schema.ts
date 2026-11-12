@@ -3340,6 +3340,9 @@ export default defineSchema(
     refundedAt: v.optional(v.number()),
     refundedAmountCents: v.optional(v.number()),
     refundedBy: v.optional(v.string()),
+    /** Remise d'un code promo Bâtire, déjà déduite de `amountCents`. */
+    discountCents: v.optional(v.number()),
+    promoCode: v.optional(v.string()),
     userId: v.optional(v.string()),
     createdAt: v.number(),
   })
@@ -3353,6 +3356,39 @@ export default defineSchema(
    * Devis Stripe d'une demande Bâtire (onglet Devis du CRM). Le devis est créé
    * et finalisé chez Stripe (PDF officiel), puis accepté → facture Stripe.
    */
+  /**
+   * Codes promo Bâtire, émis depuis une demande (geste commercial, article
+   * défectueux…). Usage unique, sur un panier de la boutique.
+   */
+  btPromoCodes: defineTable({
+    code: v.string(),
+    kind: v.union(v.literal("amount"), v.literal("percent")),
+    /** Centimes pour un montant, pourcentage (1–100) sinon. */
+    value: v.number(),
+    reason: v.optional(v.string()),
+    sourceOrderId: v.optional(v.id("btOrders")),
+    customerEmail: v.optional(v.string()),
+    expiresAt: v.optional(v.number()),
+    createdBy: v.optional(v.string()),
+    createdAt: v.number(),
+    emailedAt: v.optional(v.number()),
+    canceledAt: v.optional(v.number()),
+    usedAt: v.optional(v.number()),
+    usedOrderIds: v.optional(v.array(v.id("btOrders"))),
+    usedReference: v.optional(v.string()),
+    usedDiscountCents: v.optional(v.number()),
+  })
+    .index("by_code", ["code"])
+    .index("by_sourceOrderId", ["sourceOrderId"]),
+
+  /** Emplacements de stockage Bâtire (« allée B3 »…), rattachés à un lieu. */
+  btStorageSlots: defineTable({
+    location: v.string(),
+    label: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_location", ["location"]),
+
   btQuotes: defineTable({
     orderId: v.id("btOrders"),
     /** Compte Stripe qui porte le devis (celui du vendeur du matériau). */
