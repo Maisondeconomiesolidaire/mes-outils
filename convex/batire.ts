@@ -4136,7 +4136,8 @@ export const listBillingDocs = query({
     const docs = await ctx.db.query("btBillingDocs").withIndex("by_type", q => q.eq("type", type)).order("desc").take(500);
     return await Promise.all(docs.map(async doc => {
       const linked = doc.invoiceId ? await ctx.db.get(doc.invoiceId) : doc.sourceQuoteId ? await ctx.db.get(doc.sourceQuoteId) : null;
-      return { ...doc, linkedNumber: linked?.number };
+      const order = doc.orderId ? await ctx.db.get(doc.orderId) : null;
+      return { ...doc, client: await completeClient(ctx, doc.client, { clientId: doc.clientId, userId: order?.userId }), linkedNumber: linked?.number };
     }));
   },
 });
@@ -4175,15 +4176,49 @@ export const sendBillingDoc = action({
   },
 });
 
+type BillingClientData = Doc<"btBillingDocs">["client"];
+const CLIENT_KEYS = ["company", "firstName", "lastName", "email", "phone", "address", "postalCode", "city", "siret", "vatNumber"] as const;
+
+/**
+ * Coordonnées complètes d'un client : ce qui est saisi d'abord, puis sa fiche
+ * de facturation, puis son compte boutique (adresse, SIRET…). Une demande ne
+ * porte que nom, email et téléphone.
+ */
+async function completeClient(ctx: QueryCtx | MutationCtx, client: BillingClientData, refs: { clientId?: Id<"btBillingClients">; userId?: string } = {}): Promise<BillingClientData> {
+  const billing = (refs.clientId ? await ctx.db.get(refs.clientId) : null)
+    ?? (client.email ? await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", client.email!.toLowerCase())).first() : null);
+  const profile = refs.userId ? await ctx.db.query("btDonorProfiles").withIndex("by_clerkId", q => q.eq("clerkId", refs.userId!)).unique() : null;
+  const result: BillingClientData = { ...client };
+  for (const key of CLIENT_KEYS) {
+    if (result[key]?.trim()) continue;
+    const value = (billing as Record<string, unknown> | null)?.[key] ?? (profile as Record<string, unknown> | null)?.[key];
+    if (typeof value === "string" && value.trim()) result[key] = value.trim();
+  }
+  return result;
+}
+
+/** Client d'une demande, complété (adresse…) pour pré-remplir un devis / une facture. */
+export const orderBillingClient = query({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const order = await ctx.db.get(orderId);
+    if (!order) return null;
+    const { company, firstName, lastName, email, phone } = order.customer;
+    return await completeClient(ctx, { company, firstName, lastName, email, phone }, { userId: order.userId });
+  },
+});
+
 /** Devis et factures d'une demande (onglet Facturation de la popup). */
 export const orderBillingDocs = query({
   args: { orderId: v.id("btOrders") },
   handler: async (ctx, { orderId }) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
     const docs = await ctx.db.query("btBillingDocs").withIndex("by_orderId", q => q.eq("orderId", orderId)).order("desc").collect();
+    const order = await ctx.db.get(orderId);
     return await Promise.all(docs.map(async doc => {
       const linked = doc.invoiceId ? await ctx.db.get(doc.invoiceId) : doc.sourceQuoteId ? await ctx.db.get(doc.sourceQuoteId) : null;
-      return { ...doc, linkedNumber: linked?.number };
+      return { ...doc, client: await completeClient(ctx, doc.client, { clientId: doc.clientId, userId: order?.userId }), linkedNumber: linked?.number };
     }));
   },
 });
@@ -4215,8 +4250,9 @@ export const createBillingDoc = mutation({
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
     const actor = await requireUser(ctx);
-    const client = cleanClient(args.client);
-    if (args.orderId && !(await ctx.db.get(args.orderId))) throw new ConvexError("Demande introuvable.");
+    const sourceOrder = args.orderId ? await ctx.db.get(args.orderId) : null;
+    if (args.orderId && !sourceOrder) throw new ConvexError("Demande introuvable.");
+    const client = await completeClient(ctx, cleanClient(args.client), { clientId: args.clientId, userId: sourceOrder?.userId });
     if (!args.lines.length || args.lines.length > 60) throw new ConvexError("Le document doit compter entre 1 et 60 lignes.");
     if (![0, 5.5, 10, 20].includes(args.vatRate)) throw new ConvexError("Taux de TVA invalide.");
     const issuers = new Set<Issuer>();
@@ -4331,7 +4367,7 @@ async function ensureOrderInvoice(ctx: MutationCtx, orderId: Id<"btOrders">, cre
   const issueDate = isoDay(now);
   const { year, seq, number } = await nextBillingNumber(ctx, issuer, "facture", issueDate);
   const customer = order.customer;
-  const client = { company: customer.company, firstName: customer.firstName, lastName: customer.lastName, email: customer.email, phone: customer.phone };
+  const client = await completeClient(ctx, { company: customer.company, firstName: customer.firstName, lastName: customer.lastName, email: customer.email, phone: customer.phone }, { userId: order.userId });
   const clientId = (await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", customer.email)).first())?._id
     ?? await ctx.db.insert("btBillingClients", { ...client, createdAt: now, updatedAt: now });
   return await ctx.db.insert("btBillingDocs", {
