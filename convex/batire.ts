@@ -4047,3 +4047,201 @@ export const removeStorageSlot = mutation({
     await ctx.db.delete(slotId);
   },
 });
+
+
+/* ------------------------------------------------------------------ */
+/* Facturation : devis et factures (Recyclerie / MatériauSol)           */
+/* ------------------------------------------------------------------ */
+
+type Issuer = "recyclerie" | "materiosol";
+const issuerOfCategory = (category: string): Issuer => isRecyclerieFurniture(category) ? "recyclerie" : "materiosol";
+const ISSUER_PREFIX: Record<Issuer, string> = { recyclerie: "RPB", materiosol: "MS" };
+const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr-FR");
+const clean = (value?: string, max = 200) => { const text = value?.trim().replace(/\s+/g, " "); return text ? text.slice(0, max) : undefined; };
+const isoDay = (at: number) => new Date(at).toLocaleDateString("sv-SE", { timeZone: "Europe/Paris" });
+const addDays = (day: string, days: number) => { const date = new Date(`${day}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); };
+
+const billingClientFields = {
+  company: v.optional(v.string()), firstName: v.optional(v.string()), lastName: v.optional(v.string()),
+  email: v.optional(v.string()), phone: v.optional(v.string()), address: v.optional(v.string()),
+  postalCode: v.optional(v.string()), city: v.optional(v.string()), siret: v.optional(v.string()), vatNumber: v.optional(v.string()),
+};
+
+function cleanClient(client: Record<string, string | undefined>) {
+  const result = {
+    company: clean(client.company), firstName: clean(client.firstName, 100), lastName: clean(client.lastName, 100),
+    email: clean(client.email, 200)?.toLowerCase(), phone: clean(client.phone, 40), address: clean(client.address, 300),
+    postalCode: clean(client.postalCode, 20), city: clean(client.city, 120), siret: clean(client.siret, 30), vatNumber: clean(client.vatNumber, 30),
+  };
+  if (!result.company && !result.firstName && !result.lastName) throw new ConvexError("Indiquez le nom du client ou sa raison sociale.");
+  if (result.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(result.email)) throw new ConvexError("Adresse email du client invalide.");
+  return result;
+}
+
+/** Articles Bâtire à ajouter à un devis, avec leur émetteur de facture. */
+export const searchBillingMaterials = query({
+  args: { search: v.string() },
+  handler: async (ctx, { search }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const needle = fold(search.trim());
+    if (needle.length < 2) return [];
+    const rows = await ctx.db.query("btMaterials").order("desc").take(3000);
+    const found = rows.filter(material => [material.title, material.reference, material.qrReference, material.brand].some(value => value && fold(value).includes(needle))).slice(0, 20);
+    return await Promise.all(found.map(async material => ({
+      _id: material._id, title: material.title, price: material.price, unit: material.unit, quantity: material.quantity, status: material.status,
+      category: material.category, reference: material.reference ?? material.qrReference, depot: material.depot,
+      issuer: issuerOfCategory(material.category), thumbUrl: material.photos[0] ? await thumbnailUrl(ctx, material.photos[0]) : null,
+    })));
+  },
+});
+
+/** Clients : ceux de la facturation et les comptes de la boutique (profils donateurs / clients). */
+export const searchBillingClients = query({
+  args: { search: v.string() },
+  handler: async (ctx, { search }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const needle = fold(search.trim());
+    if (needle.length < 2) return [];
+    const match = (values: Array<string | undefined>) => values.some(value => value && fold(value).includes(needle));
+    const billing = (await ctx.db.query("btBillingClients").take(2000)).filter(client => match([client.company, client.firstName, client.lastName, client.email, client.phone, client.city, `${client.firstName ?? ""} ${client.lastName ?? ""}`]));
+    const known = new Set(billing.map(client => client.email).filter(Boolean));
+    const profiles = (await ctx.db.query("btDonorProfiles").take(3000)).filter(profile => !(profile.email && known.has(profile.email.toLowerCase())) && match([profile.company, profile.firstName, profile.lastName, profile.email, profile.phone, profile.city, `${profile.firstName ?? ""} ${profile.lastName ?? ""}`]));
+    const pick = (row: { company?: string; firstName?: string; lastName?: string; email?: string; phone?: string; address?: string; postalCode?: string; city?: string; siret?: string }) =>
+      ({ company: row.company, firstName: row.firstName, lastName: row.lastName, email: row.email, phone: row.phone, address: row.address, postalCode: row.postalCode, city: row.city, siret: row.siret });
+    return [
+      ...billing.slice(0, 15).map(client => ({ source: "facturation" as const, clientId: client._id, ...pick(client), vatNumber: client.vatNumber })),
+      ...profiles.slice(0, 10).map(profile => ({ source: "boutique" as const, clientId: undefined, ...pick(profile), vatNumber: undefined })),
+    ];
+  },
+});
+
+export const createBillingClient = mutation({
+  args: billingClientFields,
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const client = cleanClient(args);
+    const now = Date.now();
+    return await ctx.db.insert("btBillingClients", { ...client, createdAt: now, updatedAt: now });
+  },
+});
+
+export const listBillingDocs = query({
+  args: { type: v.union(v.literal("devis"), v.literal("facture")) },
+  handler: async (ctx, { type }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const docs = await ctx.db.query("btBillingDocs").withIndex("by_type", q => q.eq("type", type)).order("desc").take(500);
+    return await Promise.all(docs.map(async doc => {
+      const linked = doc.invoiceId ? await ctx.db.get(doc.invoiceId) : doc.sourceQuoteId ? await ctx.db.get(doc.sourceQuoteId) : null;
+      return { ...doc, linkedNumber: linked?.number };
+    }));
+  },
+});
+
+async function nextBillingNumber(ctx: MutationCtx, issuer: Issuer, type: "devis" | "facture", issueDate: string) {
+  const year = Number(issueDate.slice(0, 4));
+  const last = await ctx.db.query("btBillingDocs").withIndex("by_issuer_type_year_seq", q => q.eq("issuer", issuer).eq("type", type).eq("year", year)).order("desc").first();
+  const seq = (last?.seq ?? 0) + 1;
+  return { year, seq, number: `${type === "devis" ? "DEV" : "FAC"}-${ISSUER_PREFIX[issuer]}-${year}-${String(seq).padStart(4, "0")}` };
+}
+
+/**
+ * Émet un devis ou une facture. L'émetteur découle des articles : mobilier →
+ * Recyclerie, le reste → MatériauSol. Un document ne mélange pas les deux.
+ */
+export const createBillingDoc = mutation({
+  args: {
+    type: v.union(v.literal("devis"), v.literal("facture")),
+    issuer: v.optional(v.union(v.literal("recyclerie"), v.literal("materiosol"))),
+    clientId: v.optional(v.id("btBillingClients")),
+    client: v.object(billingClientFields),
+    lines: v.array(v.object({ materialId: v.optional(v.id("btMaterials")), label: v.string(), quantity: v.number(), unit: v.optional(v.string()), unitPriceCents: v.number() })),
+    vatRate: v.number(),
+    validityDays: v.optional(v.number()),
+    dueDays: v.optional(v.number()),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const actor = await requireUser(ctx);
+    const client = cleanClient(args.client);
+    if (!args.lines.length || args.lines.length > 60) throw new ConvexError("Le document doit compter entre 1 et 60 lignes.");
+    if (![0, 5.5, 10, 20].includes(args.vatRate)) throw new ConvexError("Taux de TVA invalide.");
+    const issuers = new Set<Issuer>();
+    const lines = [];
+    for (const line of args.lines) {
+      const label = clean(line.label, 300);
+      if (!label) throw new ConvexError("Chaque ligne doit avoir une désignation.");
+      if (!Number.isFinite(line.quantity) || line.quantity <= 0 || line.quantity > 1_000_000) throw new ConvexError(`Quantité invalide pour « ${label} ».`);
+      if (!Number.isInteger(line.unitPriceCents) || line.unitPriceCents < 0 || line.unitPriceCents > 100_000_000) throw new ConvexError(`Prix invalide pour « ${label} ».`);
+      if (line.materialId) {
+        const material = await ctx.db.get(line.materialId);
+        if (!material) throw new ConvexError(`Article introuvable : « ${label} ».`);
+        issuers.add(issuerOfCategory(material.category));
+      }
+      lines.push({ materialId: line.materialId, label, quantity: line.quantity, unit: clean(line.unit, 20), unitPriceCents: line.unitPriceCents });
+    }
+    if (issuers.size > 1) throw new ConvexError("Le mobilier est facturé par la Recyclerie et les autres matériaux par MatériauSol : faites deux documents.");
+    const issuer = [...issuers][0] ?? args.issuer;
+    if (!issuer) throw new ConvexError("Choisissez l’émetteur du document.");
+    const totalCents = lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPriceCents), 0);
+    const now = Date.now();
+    const issueDate = isoDay(now);
+    const { year, seq, number } = await nextBillingNumber(ctx, issuer, args.type, issueDate);
+    let clientId = args.clientId;
+    if (!clientId && client.email) clientId = (await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", client.email)).first())?._id;
+    if (!clientId) clientId = await ctx.db.insert("btBillingClients", { ...client, createdAt: now, updatedAt: now });
+    const days = (value: number | undefined, fallback: number) => Math.min(365, Math.max(0, Math.round(value ?? fallback)));
+    const id = await ctx.db.insert("btBillingDocs", {
+      type: args.type, issuer, number, year, seq, status: args.type === "devis" ? "en_attente" : "a_regler",
+      clientId, client, lines, vatRate: args.vatRate, totalCents, issueDate,
+      ...(args.type === "devis" ? { validUntil: addDays(issueDate, days(args.validityDays, 30)) } : { dueDate: addDays(issueDate, days(args.dueDays, 30)) }),
+      notes: clean(args.notes, 1000), createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
+    });
+    return { id, number };
+  },
+});
+
+export const setQuoteStatus = mutation({
+  args: { id: v.id("btBillingDocs"), status: v.union(v.literal("en_attente"), v.literal("accepte"), v.literal("refuse"), v.literal("annule")) },
+  handler: async (ctx, { id, status }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const doc = await ctx.db.get(id);
+    if (!doc || doc.type !== "devis") throw new ConvexError("Devis introuvable.");
+    if (doc.invoiceId) throw new ConvexError("Ce devis a déjà été facturé.");
+    await ctx.db.patch(id, { status, statusAt: Date.now() });
+  },
+});
+
+/** Devis accepté → facture (mêmes lignes, client et émetteur), numérotée à part. */
+export const convertQuoteToInvoice = mutation({
+  args: { id: v.id("btBillingDocs"), dueDays: v.optional(v.number()) },
+  handler: async (ctx, { id, dueDays }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const actor = await requireUser(ctx);
+    const quote = await ctx.db.get(id);
+    if (!quote || quote.type !== "devis") throw new ConvexError("Devis introuvable.");
+    if (quote.invoiceId) throw new ConvexError("Ce devis a déjà été facturé.");
+    if (quote.status === "refuse" || quote.status === "annule") throw new ConvexError("Un devis refusé ou annulé ne peut pas être facturé.");
+    const now = Date.now();
+    const issueDate = isoDay(now);
+    const { year, seq, number } = await nextBillingNumber(ctx, quote.issuer, "facture", issueDate);
+    const invoiceId = await ctx.db.insert("btBillingDocs", {
+      type: "facture", issuer: quote.issuer, number, year, seq, status: "a_regler", clientId: quote.clientId, client: quote.client, lines: quote.lines,
+      vatRate: quote.vatRate, totalCents: quote.totalCents, issueDate, dueDate: addDays(issueDate, Math.min(365, Math.max(0, Math.round(dueDays ?? 30)))),
+      notes: quote.notes, sourceQuoteId: quote._id, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
+    });
+    await ctx.db.patch(quote._id, { status: "accepte", invoiceId, statusAt: now });
+    return { id: invoiceId, number };
+  },
+});
+
+export const setInvoicePaid = mutation({
+  args: { id: v.id("btBillingDocs"), paid: v.boolean(), paymentMethod: v.optional(v.string()) },
+  handler: async (ctx, { id, paid, paymentMethod }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const doc = await ctx.db.get(id);
+    if (!doc || doc.type !== "facture") throw new ConvexError("Facture introuvable.");
+    const now = Date.now();
+    await ctx.db.patch(id, paid ? { status: "payee", paidAt: now, paymentMethod: clean(paymentMethod, 60), statusAt: now } : { status: "a_regler", paidAt: undefined, paymentMethod: undefined, statusAt: now });
+  },
+});

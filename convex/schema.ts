@@ -3381,6 +3381,59 @@ export default defineSchema(
     .index("by_code", ["code"])
     .index("by_sourceOrderId", ["sourceOrderId"]),
 
+  /** Clients de facturation Bâtire (devis / factures), créés depuis le CRM. */
+  btBillingClients: defineTable({
+    company: v.optional(v.string()),
+    firstName: v.optional(v.string()),
+    lastName: v.optional(v.string()),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    address: v.optional(v.string()),
+    postalCode: v.optional(v.string()),
+    city: v.optional(v.string()),
+    siret: v.optional(v.string()),
+    vatNumber: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_email", ["email"]),
+
+  /**
+   * Devis et factures Bâtire. Émetteur : la Recyclerie pour le mobilier,
+   * MatériauSol pour le reste. Numérotation continue par émetteur, type et
+   * année ; le client est figé dans le document (copie au moment de l'émission).
+   */
+  btBillingDocs: defineTable({
+    type: v.union(v.literal("devis"), v.literal("facture")),
+    issuer: v.union(v.literal("recyclerie"), v.literal("materiosol")),
+    number: v.string(),
+    year: v.number(),
+    seq: v.number(),
+    status: v.union(v.literal("en_attente"), v.literal("accepte"), v.literal("refuse"), v.literal("annule"), v.literal("a_regler"), v.literal("payee")),
+    clientId: v.optional(v.id("btBillingClients")),
+    client: v.object({
+      company: v.optional(v.string()), firstName: v.optional(v.string()), lastName: v.optional(v.string()),
+      email: v.optional(v.string()), phone: v.optional(v.string()), address: v.optional(v.string()),
+      postalCode: v.optional(v.string()), city: v.optional(v.string()), siret: v.optional(v.string()), vatNumber: v.optional(v.string()),
+    }),
+    /** Prix TTC en centimes. */
+    lines: v.array(v.object({ materialId: v.optional(v.id("btMaterials")), label: v.string(), quantity: v.number(), unit: v.optional(v.string()), unitPriceCents: v.number() })),
+    vatRate: v.number(),
+    totalCents: v.number(),
+    issueDate: v.string(),
+    validUntil: v.optional(v.string()),
+    dueDate: v.optional(v.string()),
+    notes: v.optional(v.string()),
+    sourceQuoteId: v.optional(v.id("btBillingDocs")),
+    invoiceId: v.optional(v.id("btBillingDocs")),
+    paidAt: v.optional(v.number()),
+    paymentMethod: v.optional(v.string()),
+    statusAt: v.optional(v.number()),
+    createdBy: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_type", ["type"])
+    .index("by_issuer_type_year_seq", ["issuer", "type", "year", "seq"]),
+
   /** Emplacements de stockage Bâtire (« allée B3 »…), rattachés à un lieu. */
   btStorageSlots: defineTable({
     location: v.string(),
