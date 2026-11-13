@@ -3399,7 +3399,7 @@ export default defineSchema(
 
   /**
    * Devis et factures Bâtire. Émetteur : la Recyclerie pour le mobilier,
-   * MatériauSol pour le reste. Numérotation continue par émetteur, type et
+   * MATERIOSOL pour le reste. Numérotation continue par émetteur, type et
    * année ; le client est figé dans le document (copie au moment de l'émission).
    */
   btBillingDocs: defineTable({

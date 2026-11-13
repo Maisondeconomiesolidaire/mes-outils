@@ -34,13 +34,13 @@ function isRecyclerieFurniture(category: string) {
 
 /**
  * Mobilier → compte Stripe Recyclerie. Tout le reste → compte Stripe
- * MatériauSol / Déchet'Lab, dont la clé est administrée par Bennes Pro.
+ * MATERIOSOL / Déchet'Lab, dont la clé est administrée par Bennes Pro.
  */
 function stripeKeyForCategory(category: string) {
   if (isRecyclerieFurniture(category)) return recycappSecretKey();
   if (!env.BENNESPRO_STRIPE_SECRET_KEY) {
     throw new ConvexError(
-      "Paiement en ligne indisponible : la clé Stripe MatériauSol / Déchet'Lab n'est pas configurée côté Convex.",
+      "Paiement en ligne indisponible : la clé Stripe MATERIOSOL / Déchet'Lab n'est pas configurée côté Convex.",
     );
   }
   return env.BENNESPRO_STRIPE_SECRET_KEY;
@@ -4050,7 +4050,7 @@ export const removeStorageSlot = mutation({
 
 
 /* ------------------------------------------------------------------ */
-/* Facturation : devis et factures (Recyclerie / MatériauSol)           */
+/* Facturation : devis et factures (Recyclerie / MATERIOSOL)           */
 /* ------------------------------------------------------------------ */
 
 type Issuer = "recyclerie" | "materiosol";
@@ -4146,7 +4146,7 @@ async function nextBillingNumber(ctx: MutationCtx, issuer: Issuer, type: "devis"
 
 /**
  * Émet un devis ou une facture. L'émetteur découle des articles : mobilier →
- * Recyclerie, le reste → MatériauSol. Un document ne mélange pas les deux.
+ * Recyclerie, le reste → MATERIOSOL. Un document ne mélange pas les deux.
  */
 export const createBillingDoc = mutation({
   args: {
@@ -4180,7 +4180,7 @@ export const createBillingDoc = mutation({
       }
       lines.push({ materialId: line.materialId, label, quantity: line.quantity, unit: clean(line.unit, 20), unitPriceCents: line.unitPriceCents });
     }
-    if (issuers.size > 1) throw new ConvexError("Le mobilier est facturé par la Recyclerie et les autres matériaux par MatériauSol : faites deux documents.");
+    if (issuers.size > 1) throw new ConvexError("Le mobilier est facturé par la Recyclerie et les autres matériaux par MATERIOSOL : faites deux documents.");
     const issuer = [...issuers][0] ?? args.issuer;
     if (!issuer) throw new ConvexError("Choisissez l’émetteur du document.");
     const totalCents = lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPriceCents), 0);
