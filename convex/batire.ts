@@ -4137,6 +4137,19 @@ export const listBillingDocs = query({
   },
 });
 
+/** Devis et factures d'une demande (onglet Facturation de la popup). */
+export const orderBillingDocs = query({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "read");
+    const docs = await ctx.db.query("btBillingDocs").withIndex("by_orderId", q => q.eq("orderId", orderId)).order("desc").collect();
+    return await Promise.all(docs.map(async doc => {
+      const linked = doc.invoiceId ? await ctx.db.get(doc.invoiceId) : doc.sourceQuoteId ? await ctx.db.get(doc.sourceQuoteId) : null;
+      return { ...doc, linkedNumber: linked?.number };
+    }));
+  },
+});
+
 async function nextBillingNumber(ctx: MutationCtx, issuer: Issuer, type: "devis" | "facture", issueDate: string) {
   const year = Number(issueDate.slice(0, 4));
   const last = await ctx.db.query("btBillingDocs").withIndex("by_issuer_type_year_seq", q => q.eq("issuer", issuer).eq("type", type).eq("year", year)).order("desc").first();
@@ -4159,11 +4172,13 @@ export const createBillingDoc = mutation({
     validityDays: v.optional(v.number()),
     dueDays: v.optional(v.number()),
     notes: v.optional(v.string()),
+    orderId: v.optional(v.id("btOrders")),
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
     const actor = await requireUser(ctx);
     const client = cleanClient(args.client);
+    if (args.orderId && !(await ctx.db.get(args.orderId))) throw new ConvexError("Demande introuvable.");
     if (!args.lines.length || args.lines.length > 60) throw new ConvexError("Le document doit compter entre 1 et 60 lignes.");
     if (![0, 5.5, 10, 20].includes(args.vatRate)) throw new ConvexError("Taux de TVA invalide.");
     const issuers = new Set<Issuer>();
@@ -4172,7 +4187,8 @@ export const createBillingDoc = mutation({
       const label = clean(line.label, 300);
       if (!label) throw new ConvexError("Chaque ligne doit avoir une désignation.");
       if (!Number.isFinite(line.quantity) || line.quantity <= 0 || line.quantity > 1_000_000) throw new ConvexError(`Quantité invalide pour « ${label} ».`);
-      if (!Number.isInteger(line.unitPriceCents) || line.unitPriceCents < 0 || line.unitPriceCents > 100_000_000) throw new ConvexError(`Prix invalide pour « ${label} ».`);
+      // Une ligne libre peut être négative (remise, code promo) ; un article, non.
+      if (!Number.isInteger(line.unitPriceCents) || line.unitPriceCents < (line.materialId ? 0 : -100_000_000) || line.unitPriceCents > 100_000_000) throw new ConvexError(`Prix invalide pour « ${label} ».`);
       if (line.materialId) {
         const material = await ctx.db.get(line.materialId);
         if (!material) throw new ConvexError(`Article introuvable : « ${label} ».`);
@@ -4184,6 +4200,7 @@ export const createBillingDoc = mutation({
     const issuer = [...issuers][0] ?? args.issuer;
     if (!issuer) throw new ConvexError("Choisissez l’émetteur du document.");
     const totalCents = lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPriceCents), 0);
+    if (totalCents < 0) throw new ConvexError("Le total du document ne peut pas être négatif.");
     const now = Date.now();
     const issueDate = isoDay(now);
     const { year, seq, number } = await nextBillingNumber(ctx, issuer, args.type, issueDate);
@@ -4195,7 +4212,7 @@ export const createBillingDoc = mutation({
       type: args.type, issuer, number, year, seq, status: args.type === "devis" ? "en_attente" : "a_regler",
       clientId, client, lines, vatRate: args.vatRate, totalCents, issueDate,
       ...(args.type === "devis" ? { validUntil: addDays(issueDate, days(args.validityDays, 30)) } : { dueDate: addDays(issueDate, days(args.dueDays, 30)) }),
-      notes: clean(args.notes, 1000), createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
+      notes: clean(args.notes, 1000), orderId: args.orderId, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
     });
     return { id, number };
   },
@@ -4228,7 +4245,7 @@ export const convertQuoteToInvoice = mutation({
     const invoiceId = await ctx.db.insert("btBillingDocs", {
       type: "facture", issuer: quote.issuer, number, year, seq, status: "a_regler", clientId: quote.clientId, client: quote.client, lines: quote.lines,
       vatRate: quote.vatRate, totalCents: quote.totalCents, issueDate, dueDate: addDays(issueDate, Math.min(365, Math.max(0, Math.round(dueDays ?? 30)))),
-      notes: quote.notes, sourceQuoteId: quote._id, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
+      notes: quote.notes, sourceQuoteId: quote._id, orderId: quote.orderId, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
     });
     await ctx.db.patch(quote._id, { status: "accepte", invoiceId, statusAt: now });
     return { id: invoiceId, number };

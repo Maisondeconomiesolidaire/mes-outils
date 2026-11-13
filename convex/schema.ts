@@ -3425,6 +3425,8 @@ export default defineSchema(
     notes: v.optional(v.string()),
     sourceQuoteId: v.optional(v.id("btBillingDocs")),
     invoiceId: v.optional(v.id("btBillingDocs")),
+    /** Demande Bâtire d'origine (onglet Facturation de la popup). */
+    orderId: v.optional(v.id("btOrders")),
     paidAt: v.optional(v.number()),
     paymentMethod: v.optional(v.string()),
     statusAt: v.optional(v.number()),
@@ -3432,6 +3434,7 @@ export default defineSchema(
     createdAt: v.number(),
   })
     .index("by_type", ["type"])
+    .index("by_orderId", ["orderId"])
     .index("by_issuer_type_year_seq", ["issuer", "type", "year", "seq"]),
 
   /** Emplacements de stockage Bâtire (« allée B3 »…), rattachés à un lieu. */
