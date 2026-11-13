@@ -1020,6 +1020,9 @@ export const markOrderPaid = internalMutation({
       stripePaymentIntentId,
       paidAt: Date.now(),
     });
+    // Commande réglée : sa facture est émise d'office (étape « Payé »).
+    // Une erreur de facturation ne doit jamais bloquer l'encaissement : la facture reste générable à la main.
+    try { await ensureOrderInvoice(ctx, orderId); } catch (error) { console.error("Facture automatique impossible", orderId, error); }
 
     const material = await ctx.db.get(order.materialId);
     // Le reçu part de la mutation qui encaisse : c'est le seul endroit par
@@ -4295,5 +4298,61 @@ export const setInvoicePaid = mutation({
     if (!doc || doc.type !== "facture") throw new ConvexError("Facture introuvable.");
     const now = Date.now();
     await ctx.db.patch(id, paid ? { status: "payee", paidAt: now, paymentMethod: clean(paymentMethod, 60), statusAt: now } : { status: "a_regler", paidAt: undefined, paymentMethod: undefined, statusAt: now });
+  },
+});
+
+
+const PAYMENT_LABELS: Record<string, string> = { card: "Carte bancaire", cash: "Espèces", bank_transfer: "Virement" };
+
+/**
+ * Facture d'une demande payée : lot, transfert, remise du code promo, au
+ * montant réellement encaissé. Ne fait rien si la demande a déjà la sienne.
+ */
+async function ensureOrderInvoice(ctx: MutationCtx, orderId: Id<"btOrders">, createdBy = "Automatique (paiement)") {
+  const order = await ctx.db.get(orderId);
+  if (!order || order.status !== "payee") return null;
+  const existing = (await ctx.db.query("btBillingDocs").withIndex("by_orderId", q => q.eq("orderId", orderId)).collect()).find(doc => doc.type === "facture");
+  if (existing) return existing._id;
+  const material = await ctx.db.get(order.materialId);
+  const issuer = issuerOfCategory(material?.category ?? "");
+  const fee = order.pickupFeeCents ?? 0;
+  const discount = order.discountCents ?? 0;
+  const goods = order.amountCents - fee + discount;
+  const unitCents = Math.round(order.unitPrice * 100);
+  // Quantité fractionnaire dont l'arrondi diffère de l'encaissé : une seule ligne au montant exact.
+  const lot = Math.round(order.quantity * unitCents) === goods
+    ? { materialId: order.materialId, label: order.materialTitle, quantity: order.quantity, unit: order.unit, unitPriceCents: unitCents }
+    : { materialId: order.materialId, label: `${order.materialTitle} — ${order.quantity} ${order.unit}`, quantity: 1, unit: undefined, unitPriceCents: goods };
+  const lines = [lot,
+    ...(fee ? [{ materialId: undefined, label: "Transfert vers le lieu de retrait", quantity: 1, unit: undefined, unitPriceCents: fee }] : []),
+    ...(discount ? [{ materialId: undefined, label: `Remise${order.promoCode ? ` · code ${order.promoCode}` : ""}`, quantity: 1, unit: undefined, unitPriceCents: -discount }] : []),
+  ];
+  const now = Date.now();
+  const issueDate = isoDay(now);
+  const { year, seq, number } = await nextBillingNumber(ctx, issuer, "facture", issueDate);
+  const customer = order.customer;
+  const client = { company: customer.company, firstName: customer.firstName, lastName: customer.lastName, email: customer.email, phone: customer.phone };
+  const clientId = (await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", customer.email)).first())?._id
+    ?? await ctx.db.insert("btBillingClients", { ...client, createdAt: now, updatedAt: now });
+  return await ctx.db.insert("btBillingDocs", {
+    type: "facture", issuer, number, year, seq, status: "payee", clientId, client, lines, vatRate: 20,
+    totalCents: lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPriceCents), 0),
+    issueDate, dueDate: issueDate, notes: `Demande Bâtire #${order.pickupReference ?? order.purchaseReference ?? order.reference}`,
+    orderId, paidAt: order.paidAt ?? now, paymentMethod: PAYMENT_LABELS[order.paymentMethod ?? "card"],
+    createdBy, createdAt: now, statusAt: now,
+  });
+}
+
+/** Pour une demande payée avant la facturation automatique : émet sa facture. */
+export const generateOrderInvoice = mutation({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    const actor = await requireUser(ctx);
+    const order = await ctx.db.get(orderId);
+    if (!order || order.status !== "payee") throw new ConvexError("La demande n’est pas payée.");
+    const id = await ensureOrderInvoice(ctx, orderId, actor.name ?? actor.email ?? actor.subject);
+    if (!id) throw new ConvexError("Facture impossible à générer.");
+    return id;
   },
 });
