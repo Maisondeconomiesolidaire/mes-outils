@@ -3427,6 +3427,9 @@ export default defineSchema(
     invoiceId: v.optional(v.id("btBillingDocs")),
     /** Demande Bâtire d'origine (onglet Facturation de la popup). */
     orderId: v.optional(v.id("btOrders")),
+    /** Dernier envoi du PDF au client par email. */
+    sentAt: v.optional(v.number()),
+    sentTo: v.optional(v.string()),
     paidAt: v.optional(v.number()),
     paymentMethod: v.optional(v.string()),
     statusAt: v.optional(v.number()),

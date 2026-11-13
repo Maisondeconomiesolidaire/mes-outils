@@ -23,6 +23,7 @@ import {
   formatUserName,
 } from "./lib";
 import { recycappSecretKey, stripeRequest } from "./stripe";
+import { sendBillingDocMail } from "./batireEmails";
 import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
@@ -4134,6 +4135,40 @@ export const listBillingDocs = query({
       const linked = doc.invoiceId ? await ctx.db.get(doc.invoiceId) : doc.sourceQuoteId ? await ctx.db.get(doc.sourceQuoteId) : null;
       return { ...doc, linkedNumber: linked?.number };
     }));
+  },
+});
+
+export const billingDocById = internalQuery({
+  args: { id: v.id("btBillingDocs") },
+  handler: async (ctx, { id }) => await ctx.db.get(id),
+});
+
+export const markBillingDocSent = internalMutation({
+  args: { id: v.id("btBillingDocs"), to: v.string() },
+  handler: async (ctx, { id, to }) => { await ctx.db.patch(id, { sentAt: Date.now(), sentTo: to }); },
+});
+
+/** Envoie le PDF (généré dans le navigateur, celui que l'équipe vient de prévisualiser) au client. */
+export const sendBillingDoc = action({
+  args: { id: v.id("btBillingDocs"), to: v.string(), message: v.optional(v.string()), pdfBase64: v.string() },
+  handler: async (ctx, args) => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, PAGE_DEMANDES, "update")) throw new ConvexError("Accès CRM insuffisant.");
+    const doc = await ctx.runQuery(internal.batire.billingDocById, { id: args.id });
+    if (!doc) throw new ConvexError("Document introuvable.");
+    const to = args.to.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) throw new ConvexError("Adresse email invalide.");
+    if (!/^[A-Za-z0-9+/]+=*$/.test(args.pdfBase64) || args.pdfBase64.length > 4_000_000) throw new ConvexError("PDF invalide.");
+    const issuerName = doc.issuer === "recyclerie" ? "Recyclerie du Pays de Bray" : "MATERIOSOL";
+    const fr = (day?: string) => day ? new Date(`${day}T12:00:00Z`).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" }) : undefined;
+    const name = doc.client.company ? "" : [doc.client.firstName, doc.client.lastName].filter(Boolean).join(" ");
+    const ok = await sendBillingDocMail({
+      to, name, type: doc.type, number: doc.number, issuerName,
+      total: (doc.totalCents / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR" }),
+      until: fr(doc.type === "devis" ? doc.validUntil : doc.dueDate), message: args.message?.trim().slice(0, 2000) || undefined, pdfBase64: args.pdfBase64,
+    });
+    if (!ok) throw new ConvexError("L’email n’a pas pu être envoyé. Réessayez dans un instant.");
+    await ctx.runMutation(internal.batire.markBillingDocSent, { id: args.id, to });
   },
 });
 

@@ -480,3 +480,21 @@ export const sendPromoCode = internalAction({
     }), FROM);
   },
 });
+
+
+/**
+ * Devis ou facture envoyé au client, PDF en pièce jointe. Fonction simple
+ * (pas une action) : l'action qui l'appelle vérifie les droits et trace l'envoi.
+ */
+export async function sendBillingDocMail(args: { to: string; name: string; type: "devis" | "facture"; number: string; issuerName: string; total: string; until?: string; message?: string; pdfBase64: string }) {
+  const label = args.type === "devis" ? "devis" : "facture";
+  const html = shell({
+    preheader: `Votre ${label} ${args.number} — ${args.total}`,
+    heading: args.type === "devis" ? "Votre devis" : "Votre facture",
+    intro: `Bonjour${args.name ? ` ${esc(args.name)}` : ""},<br/><br/>Veuillez trouver ci-joint ${args.type === "devis" ? "le devis" : "la facture"} <strong>${esc(args.number)}</strong> émis${args.type === "devis" ? "" : "e"} par <strong>${esc(args.issuerName)}</strong>, d’un montant de <strong>${esc(args.total)}</strong>.`,
+    contentHtml: (args.message ? note("Message", args.message) : "")
+      + note(args.type === "devis" ? "Validité" : "Échéance", args.until ? `${args.type === "devis" ? "Devis valable jusqu’au" : "À régler au plus tard le"} ${args.until}.` : "Voir le document joint.")
+      + (args.type === "devis" ? `<p style="margin:0 0 18px;font-family:Helvetica,Arial,sans-serif;font-size:14px;line-height:1.6;color:#3f3f46;">Pour l’accepter, renvoyez-le daté et signé avec la mention « Bon pour accord ».</p>` : ""),
+  });
+  return await resendSend(args.to, `${args.type === "devis" ? "Devis" : "Facture"} ${args.number} — ${args.issuerName}`, html, FROM, [{ filename: `${args.number}.pdf`, content: args.pdfBase64 }]);
+}
