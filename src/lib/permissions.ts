@@ -61,6 +61,7 @@ export type AppDefinition = {
     | "cycleenbray"
     | "bennespro"
     | "pointeuse"
+    | "meslogistic"
     | "batire"
     | "pointage"
     | "collecte";
@@ -76,7 +77,8 @@ export type AppDefinition = {
 };
 
 export type PermissionPage = {
-  app: "recycapp" | "mesoutils" | "mestodo" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse" | "feedback" | "batire";
+  app: "recycapp" | "mesoutils" | "mestodo" | "klyde" | "cycleenbray" | "bennespro" | "pointeuse" | "feedback" | "meslogistic"
+    | "batire";
   key: string;
   label: string;
   description: string;
@@ -537,7 +539,9 @@ export const BATIRE_PAGES: PermissionPage[] = [
   },
 ];
 
-export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...MESTODO_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES, ...FEEDBACK_PAGES, ...BATIRE_PAGES];
+export const MESLOGISTIC_PAGES: PermissionPage[] = [{ app: "meslogistic", key: "meslogistic:demandes", label: "Demandes de navette", description: "Transport, préparation et traçabilité des objets Bâtire.", actions: ["read", "create", "update"] }];
+
+export const ALL_PERMISSION_PAGES = [...RECYCAPP_PAGES, ...MESOUTILS_PAGES, ...MESTODO_PAGES, ...KLYDE_PAGES, ...CYCLEENBRAY_PAGES, ...BENNESPRO_PAGES, ...POINTEUSE_PAGES, ...FEEDBACK_PAGES, ...BATIRE_PAGES, ...MESLOGISTIC_PAGES];
 export const KNOWN_PAGE_KEYS = new Set(ALL_PERMISSION_PAGES.map((page) => page.key));
 
 export const APPS: AppDefinition[] = [
@@ -603,6 +607,17 @@ export const APPS: AppDefinition[] = [
     external: true,
     accent: "from-sky-600 to-lime-500",
     cardBg: "#ffffff",
+  },
+  {
+    key: "meslogistic",
+    label: "Meslogistic",
+    description: "Navettes et traçabilité des objets Bâtire.",
+    icon: Truck,
+    logoSrc: "/meslogistic-logo.svg",
+    href: "https://meslogistic.groupemes.fr",
+    external: true,
+    accent: "from-sky-600 to-cyan-700",
+    cardBg: "#e6f1f6",
   },
   {
     key: "pointeuse",
@@ -716,6 +731,7 @@ export function appCanAccess(access: Access | undefined, appKey: AppDefinition["
   if (appKey === "pointeuse") {
     return access.grants.some((grant) => grant.pageKey.startsWith("pointeuse:"));
   }
+  if (appKey === "meslogistic") return access.grants.some(grant => grant.pageKey.startsWith("meslogistic:"));
   if (appKey === "batire") {
     return access.grants.some((grant) => grant.pageKey.startsWith("batire:"));
   }
@@ -733,5 +749,6 @@ export function groupPagesByApp() {
     { key: "pointeuse", label: "Pointeuse", pages: POINTEUSE_PAGES },
     { key: "feedback", label: "Feedback", pages: FEEDBACK_PAGES },
     { key: "batire", label: "Bâtire", pages: BATIRE_PAGES },
+    { key: "meslogistic", label: "Meslogistic", pages: MESLOGISTIC_PAGES },
   ] as const;
 }

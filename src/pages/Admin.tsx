@@ -144,6 +144,7 @@ const SIGNUP_APP_LABELS: Record<string, string> = {
   cycleenbray: "Cycle en Bray",
   bennespro: "Bennes & Pro",
   batire: "Bâtire",
+  meslogistic: "Meslogistic",
   pointeuse: "Pointeuse",
   feedback: "Feedback",
 };
@@ -943,6 +944,7 @@ const APP_LOGOS: Record<string, string | undefined> = {
   cycleenbray: "/cycle-en-bray-logo.webp",
   bennespro: "/bennespro-logo.png",
   pointeuse: "/logo-lsdb.png",
+  meslogistic: "/meslogistic-logo.svg",
   feedback: undefined,
 };
 
