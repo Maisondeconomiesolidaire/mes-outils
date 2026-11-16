@@ -17,7 +17,7 @@ const PAGE = "meslogistic:demandes";
 type ShuttleStatus = "planifiee" | "en_route" | "terminee";
 
 /** Statut d'une navette : explicite, ou déduit de ses demandes pour les navettes d'avant la v2. */
-function shuttleStatus(shuttle: Doc<"mlShuttles">, transits: Doc<"mlRequests">[]): ShuttleStatus {
+export function shuttleStatus(shuttle: Doc<"mlShuttles">, transits: Doc<"mlRequests">[]): ShuttleStatus {
   if (shuttle.status) return shuttle.status;
   const live = transits.filter(row => row.status !== "annulee");
   if (live.length && live.every(row => row.status === "receptionnee")) return "terminee";
@@ -47,7 +47,7 @@ export const board = query({
     const view = async (row: Doc<"mlRequests">) => transitView(row, await materialPhoto(ctx, row.materialId), await materialSlot(ctx, row.materialId, slots));
     const rows = await Promise.all(shuttles.map(async shuttle => {
       const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
-      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, transits: await Promise.all(transits.map(view)) };
+      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
     return { shuttles: rows, unassigned: await Promise.all(unassigned.map(view)) };

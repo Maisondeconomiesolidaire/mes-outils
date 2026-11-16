@@ -663,6 +663,7 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
   "/reservations": [
     { key: "rooms", label: "Salles", icon: DoorOpen },
     { key: "vehicles", label: "Véhicules", icon: CarFront },
+    { key: "navettes", label: "Navettes", icon: Truck },
     { key: "equipment", label: "Équipements", icon: Boxes, pageKey: "mesoutils:equipements" },
     { key: "mine", label: "Mes réservations", icon: CalendarCheck },
   ],

@@ -22,6 +22,7 @@ import {
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 import { awardEngagementPoints } from "./points";
+import { cleanTrip, destinationValidator, releaseTripTransits } from "./navettes";
 
 /** Photo de profil de l'identité Clerk courante, si présente. */
 function pictureUrl(identity: unknown): string | undefined {
@@ -1299,6 +1300,12 @@ export const requestVehicle = mutation({
     expectedKm: v.optional(v.number()),
     willTransport: v.optional(v.boolean()),
     transportDetails: v.optional(v.string()),
+    /** Trajet (onglet Navettes) : destination, aller-retour calculé, sites sur la route. */
+    destination: v.optional(destinationValidator),
+    routeKm: v.optional(v.number()),
+    sitesOnRoute: v.optional(v.array(v.string())),
+    /** Le kilométrage `expectedKm` a été confirmé ou corrigé par l'utilisateur. */
+    kmConfirmed: v.optional(v.boolean()),
     start: v.number(),
     end: v.number(),
     forClerkId: v.optional(v.string()),
@@ -1341,6 +1348,7 @@ export const requestVehicle = mutation({
     const transportDetails = willTransport
       ? args.transportDetails?.trim() || undefined
       : undefined;
+    const trip = cleanTrip(args);
     const reservationId = await ctx.db.insert("vehicleReservations", {
       vehicleId: args.vehicleId,
       clerkId: identity.subject,
@@ -1352,6 +1360,10 @@ export const requestVehicle = mutation({
       expectedKm: args.expectedKm,
       willTransport,
       transportDetails,
+      destination: trip.destination,
+      routeKm: trip.destination ? trip.routeKm : undefined,
+      sitesOnRoute: trip.destination ? trip.sitesOnRoute : undefined,
+      kmConfirmed: args.kmConfirmed,
       start: args.start,
       end: args.end,
       status: "pending",
@@ -1471,6 +1483,9 @@ async function applyVehicleReservationDecision(
       reservation._id,
     );
   }
+
+  // Refusée : les objets pris sur ce trajet redeviennent disponibles.
+  if (args.decision === "rejected") await releaseTripTransits(ctx, reservation._id, "réservation refusée");
 
   await ctx.db.patch(args.reservationId, {
     status: args.decision,
@@ -1598,6 +1613,8 @@ export const cancelRecyclerieVehicleReservation = mutation({
     if (vehicle?.recycappEnabled !== true) {
       throw new Error("Ce véhicule n'est pas rattaché à la Recyclerie.");
     }
+    // Annulée : les objets pris sur ce trajet redeviennent disponibles.
+    await releaseTripTransits(ctx, args.reservationId, "réservation annulée");
     if (canPermanentlyDelete(identity)) {
       await ctx.db.delete(args.reservationId);
       return;
@@ -1656,6 +1673,8 @@ export const cancelVehicleReservation = mutation({
       throw new Error("Annulation non autorisée.");
     }
     const vehicle = await ctx.db.get(reservation.vehicleId);
+    // Annulée : les objets pris sur ce trajet redeviennent disponibles.
+    await releaseTripTransits(ctx, args.reservationId, "réservation annulée");
     if (canPermanentlyDelete(identity)) {
       await ctx.db.delete(args.reservationId);
       return;

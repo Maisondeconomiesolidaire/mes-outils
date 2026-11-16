@@ -26,6 +26,9 @@ import { useUpload } from "../lib/useUpload";
 import { BookEquipment } from "./Equipements";
 import { ReservationSearch, type ReservationSearchValue } from "../components/reservations/ReservationSearch";
 import { ReservationIntro } from "../components/reservations/ReservationIntro";
+import { KmConfirm, Navettes, usePlanTrip } from "../components/navettes/Navettes";
+import { PlaceSearch, type Destination } from "../components/navettes/PlaceSearch";
+import { transitOnRoute } from "../../convex/lib/navettesRoute";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -75,7 +78,7 @@ export function Reservations() {
   const [searchParams] = useSearchParams();
   const access = usePermissionsAccess();
   const canBookEquipment = canAccess(access, "mesoutils:equipements");
-  const tab = (["rooms", "vehicles", "equipment", "mine"].includes(searchParams.get("v") ?? "") ? searchParams.get("v") : "rooms") as "rooms" | "vehicles" | "equipment" | "mine";
+  const tab = (["rooms", "vehicles", "navettes", "equipment", "mine"].includes(searchParams.get("v") ?? "") ? searchParams.get("v") : "rooms") as "rooms" | "vehicles" | "navettes" | "equipment" | "mine";
 
   return (
     <div className="space-y-6">
@@ -83,6 +86,8 @@ export function Reservations() {
       <SectionTabs />
       {tab === "mine" ? (
         <MyReservations />
+      ) : tab === "navettes" ? (
+        <Navettes />
       ) : tab === "equipment" ? (
         // Réutilise l'écran de réservation d'équipement : la page /equipements
         // ne sert plus qu'à gérer le parc. L'onglet est masqué sans le droit,
@@ -166,7 +171,14 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const [roomUsage, setRoomUsage] = useState<string>(ROOM_USAGES[0]);
   const [attendees, setAttendees] = useState("");
   const [vehicleUsage, setVehicleUsage] = useState<"pro" | "personal">("pro");
-  const [expectedKm, setExpectedKm] = useState("");
+  // Trajet du véhicule : destination (lieu ou adresse), aller-retour calculé
+  // depuis le Solidarium, puis confirmation du kilométrage avant l'envoi.
+  const planTrip = usePlanTrip();
+  const openTransits = useQuery(api.navettes.openTransits, tab === "vehicles" ? {} : "skip");
+  const [destination, setDestination] = useState<Destination | null>(null);
+  const [tripPlan, setTripPlan] = useState<{ roundTripKm: number; sitesOnRoute: string[] } | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [confirmingKm, setConfirmingKm] = useState(false);
   const [willTransport, setWillTransport] = useState(false);
   const [transportDetails, setTransportDetails] = useState("");
   const [forUser, setForUser] = useState<Person | null>(null);
@@ -177,7 +189,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     setBookingRoom(room); setBookingVehicle(vehicle);
     setLabel(""); setNotes(""); setForUser(null); setError(null);
     setRoomUsage(usage === "personal" ? "Evenement personnel" : ROOM_USAGES[0]); setAttendees("");
-    setExpectedKm("");
+    setDestination(null); setTripPlan(null); setConfirmingKm(false);
     setWillTransport(false); setTransportDetails("");
     setVehicleUsage(usage ?? "pro");
   }
@@ -189,14 +201,38 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     rangeValid &&
     Boolean(label.trim()) &&
     (!bookingRoom || (attendeesValue >= 1 && !overCapacity)) &&
-    (!bookingVehicle || !willTransport || Boolean(transportDetails.trim()));
+    (!bookingVehicle || !willTransport || Boolean(transportDetails.trim())) &&
+    (!bookingVehicle || Boolean(destination && tripPlan));
 
-  async function submitBooking() {
+  async function chooseDestination(next: Destination | null) {
+    setDestination(next); setTripPlan(null); setConfirmingKm(false);
+    if (!next) return;
+    setPlanning(true); setError(null);
+    try {
+      const plan = await planTrip({ longitude: next.longitude, latitude: next.latitude });
+      setTripPlan({ roundTripKm: plan.roundTripKm, sitesOnRoute: plan.sitesOnRoute });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Itinéraire introuvable vers cette destination.");
+    } finally {
+      setPlanning(false);
+    }
+  }
+
+  async function submitBooking(confirmedKm?: number) {
     if (!range || !rangeValid || !canSubmit) return;
+    // Véhicule : on confirme d'abord le kilométrage aller-retour calculé.
+    if (bookingVehicle && confirmedKm === undefined) { setConfirmingKm(true); return; }
     setSubmitting(true); setError(null);
     try {
       if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
-      else if (bookingVehicle) await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: expectedKm ? Number(expectedKm) : undefined, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
+      else if (bookingVehicle && destination && tripPlan) {
+        const reservationId = await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: confirmedKm, kmConfirmed: true, destination, routeKm: tripPlan.roundTripKm, sitesOnRoute: tripPlan.sitesOnRoute, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
+        // Des objets attendent un transit sur sa route : on lui montre l'onglet Navettes.
+        const helpful = (openTransits ?? []).some((t) => transitOnRoute(t, tripPlan.sitesOnRoute));
+        closeBooking();
+        if (helpful && !forUser) navigate(`/reservations?v=navettes&trip=${reservationId}`);
+        return;
+      }
       closeBooking();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Réservation impossible.");
@@ -383,12 +419,16 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           ) : bookingVehicle ? (
             <>
               <p className="text-sm font-semibold">Usage {vehicleUsage === "personal" ? "personnel" : "professionnel"}</p>
-              <Field label="Kilométrage estimé" hint="Nombre de kilomètres que vous pensez réaliser.">
-                <div className="flex items-center gap-2">
-                  <Input type="number" min={0} value={expectedKm} onChange={(e) => setExpectedKm(e.target.value)} placeholder="0" />
-                  <span className="text-sm font-medium text-[var(--muted-foreground)]">km</span>
-                </div>
+              <Field label="Destination" required hint="Départ et retour au Solidarium (4 rue de la Prairie, Lachapelle-aux-Pots). Cherchez un lieu (« Starbucks Beauvais ») ou une adresse.">
+                <PlaceSearch value={destination} onChange={(next) => void chooseDestination(next)} />
               </Field>
+              {planning ? <p className="text-xs text-[var(--muted-foreground)]">Calcul de l'itinéraire…</p> : null}
+              {tripPlan && !confirmingKm ? (
+                <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+                  Aller-retour : <strong className="text-[var(--foreground)]">{tripPlan.roundTripKm.toLocaleString("fr-FR")} km</strong>
+                  {tripPlan.sitesOnRoute.length > 1 ? " · votre route passe par un site logistique : vous pourrez emporter des objets (onglet Navettes)." : ""}
+                </p>
+              ) : null}
               <Field label="Transport de matériel">
                 <Checkbox
                   checked={willTransport}
@@ -413,10 +453,19 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           {directoryError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">{directoryError}</p> : null}
           {bookingVehicle ? <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">La réservation d'un véhicule est soumise à l'approbation d'un responsable.</p> : null}
           {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
-          <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
-            <Button variant="ghost" onClick={closeBooking}>Annuler</Button>
-            <Button size="lg" onClick={submitBooking} disabled={submitting || !canSubmit}>{submitting ? "Envoi..." : bookingRoom ? "Réserver" : "Demander"}</Button>
-          </div>
+          {bookingVehicle && confirmingKm && destination && tripPlan ? (
+            <div className="space-y-2 border-t border-[var(--border)] pt-4">
+              <KmConfirm routeKm={tripPlan.roundTripKm} destinationLabel={destination.label} busy={submitting} onConfirm={(km) => void submitBooking(km)} />
+              <div className="flex justify-end">
+                <Button variant="ghost" disabled={submitting} onClick={() => setConfirmingKm(false)}>Retour</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
+              <Button variant="ghost" onClick={closeBooking}>Annuler</Button>
+              <Button size="lg" onClick={() => void submitBooking()} disabled={submitting || planning || !canSubmit}>{submitting ? "Envoi..." : bookingRoom ? "Réserver" : "Demander"}</Button>
+            </div>
+          )}
         </div>
       </Modal>
     </div>

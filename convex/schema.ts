@@ -531,7 +531,13 @@ export default defineSchema(
     status: v.optional(v.union(v.literal("planifiee"), v.literal("en_route"), v.literal("terminee"))),
     departedAt: v.optional(v.number()),
     completedAt: v.optional(v.number()),
-  }),
+    /** Navette née d'une réservation de véhicule Mes Outils (onglet Navettes). */
+    vehicleReservationId: v.optional(v.id("vehicleReservations")),
+    /** Conducteur : la personne qui a pris les objets sur son trajet. */
+    driverName: v.optional(v.string()),
+    driverClerkId: v.optional(v.string()),
+    vehicleName: v.optional(v.string()),
+  }).index("by_vehicleReservationId", ["vehicleReservationId"]),
   mlRequests: defineTable({
     shuttleId: v.optional(v.id("mlShuttles")),
     receivedQuantity: v.optional(v.number()),
@@ -1570,6 +1576,23 @@ export default defineSchema(
     // Transport d'objets/matériel (déménagement, collecte volumineuse…).
     willTransport: v.optional(v.boolean()),
     transportDetails: v.optional(v.string()),
+    /**
+     * Destination du trajet (lieu ou adresse choisi via la recherche Mapbox).
+     * Le départ est toujours le Solidarium (4 rue de la Prairie, Lachapelle-aux-Pots)
+     * et le trajet est un aller-retour.
+     */
+    destination: v.optional(v.object({
+      label: v.string(),
+      address: v.optional(v.string()),
+      longitude: v.number(),
+      latitude: v.number(),
+    })),
+    /** Kilométrage aller-retour calculé (Solidarium → destination × 2), en km. */
+    routeKm: v.optional(v.number()),
+    /** L'utilisateur a confirmé (ou corrigé) le kilométrage, repris dans `expectedKm`. */
+    kmConfirmed: v.optional(v.boolean()),
+    /** Sites logistiques sur la route (clés Meslogistic : comptoir_c, esspace_150…). */
+    sitesOnRoute: v.optional(v.array(v.string())),
     start: v.number(),
     end: v.number(),
     status: v.union(
