@@ -226,9 +226,12 @@ function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
     }, ids.length > 1 ? `${ids.length} objets ajoutés à votre trajet. Merci !` : "Objet ajouté à votre trajet. Merci !");
   }
 
+  const estimatedKm = trip.expectedKm ?? trip.routeKm;
+
   return (
-    <div className="space-y-5">
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-5">
+    <section className="grid overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] lg:grid-cols-2">
+      {/* ── Colonne gauche : la réservation et son trajet ───────────────── */}
+      <div className="space-y-4 p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
@@ -249,30 +252,37 @@ function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
         </div>
 
         {!trip.destination || editingDestination ? (
-          <div className="mt-4 space-y-2">
+          <div className="space-y-2">
             <p className="text-sm font-semibold text-[var(--foreground)]">Où allez-vous ?</p>
             <PlaceSearch value={null} onChange={(d) => void chooseDestination(d)} autoFocus />
             {busy ? <p className="text-xs text-[var(--muted-foreground)]">Calcul de l'itinéraire…</p> : null}
+            {editingDestination ? (
+              <Button size="sm" variant="ghost" onClick={() => setEditingDestination(false)}>Annuler</Button>
+            ) : null}
           </div>
         ) : (
           <>
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
-              <Route className="h-4 w-4 text-brand-600" />
-              <span>Solidarium</span>
-              <ArrowRight className="h-4 w-4 text-[var(--muted-foreground)]" />
-              <span className="inline-flex items-center gap-1"><MapPin className="h-4 w-4 text-brand-600" />{trip.destination.label}</span>
-              <ArrowRight className="h-4 w-4 text-[var(--muted-foreground)]" />
-              <span>Solidarium</span>
-              {trip.kmConfirmed && trip.expectedKm !== null ? (
-                <span className="ml-1 rounded-full bg-[var(--accent)] px-2 py-0.5 text-xs">{trip.expectedKm.toLocaleString("fr-FR")} km aller-retour</span>
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-[var(--foreground)]">
+                <Route className="h-4 w-4 text-brand-600" />
+                <span>Solidarium</span>
+                <ArrowRight className="h-4 w-4 text-[var(--muted-foreground)]" />
+                <span className="inline-flex items-center gap-1"><MapPin className="h-4 w-4 text-brand-600" />{trip.destination.label}</span>
+                <ArrowRight className="h-4 w-4 text-[var(--muted-foreground)]" />
+                <span>Solidarium</span>
+              </div>
+              {trip.destination.address ? <p className="text-xs text-[var(--muted-foreground)]">{trip.destination.address}</p> : null}
+              {estimatedKm !== null ? (
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  ≈ {estimatedKm.toLocaleString("fr-FR")} km aller-retour{trip.kmConfirmed ? "" : " (estimé, à confirmer au retour du véhicule)"}
+                </p>
               ) : null}
             </div>
-            {trip.destination.address ? <p className="mt-1 text-xs text-[var(--muted-foreground)]">{trip.destination.address}</p> : null}
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="flex flex-col gap-2">
               {SITE_KEYS.map((key) => (
                 <span
                   key={key}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${onRouteSites.has(key) ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}
+                  className={`inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${onRouteSites.has(key) ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300" : "bg-[var(--muted)] text-[var(--muted-foreground)]"}`}
                   title={SITES[key].address}
                 >
                   {onRouteSites.has(key) ? <CircleCheck className="h-3.5 w-3.5" /> : null}
@@ -280,94 +290,90 @@ function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
                 </span>
               ))}
             </div>
-            {!trip.kmConfirmed && trip.routeKm !== null ? (
-              <div className="mt-4">
-                <KmConfirm
-                  routeKm={trip.routeKm}
-                  destinationLabel={trip.destination.label}
-                  busy={busy}
-                  onConfirm={(km) => void run(() => setTripDetails({ reservationId: trip._id, expectedKm: km }), "Kilométrage confirmé.")}
-                />
-              </div>
-            ) : null}
           </>
         )}
-        {error ? <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
-        {notice ? <p className="mt-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p> : null}
-      </section>
+        {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
+        {notice ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p> : null}
+      </div>
 
-      {trip.transits.length > 0 ? (
-        <section className="space-y-3">
+      {/* ── Colonne droite : les objets à transporter (défilante) ───────── */}
+      <div className="flex max-h-[70vh] min-h-[320px] flex-col border-t border-[var(--border)] lg:border-l lg:border-t-0">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h3 className="flex items-center gap-2 text-base font-bold text-[var(--foreground)]">
-            <PackageCheck className="h-5 w-5 text-brand-600" /> Ce que vous transportez ({trip.transits.length})
+            <Truck className="h-5 w-5 text-brand-600" /> Objets à transporter
           </h3>
-          <ul className="grid gap-2 md:grid-cols-2">
-            {trip.transits.map((t) => (
-              <TransitCard
-                key={t._id}
-                transit={t}
-                action={
-                  t.status === "a_preparer" && planned ? (
-                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => releaseTransit({ requestId: t._id }), "Objet reposé : il redevient disponible.")}>
-                      <Undo2 className="h-4 w-4" /> Reposer
-                    </Button>
-                  ) : (
-                    <span className="text-xs font-semibold text-emerald-700">{t.status === "en_transit" ? "En route" : t.status === "receptionnee" ? "Livré" : ""}</span>
-                  )
-                }
-              />
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {hasRoute ? (
-        <section className="space-y-3">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h3 className="flex items-center gap-2 text-base font-bold text-[var(--foreground)]">
-                <Truck className="h-5 w-5 text-brand-600" /> Objets sur votre route ({onRoute.length})
-              </h3>
-              <p className="text-sm text-[var(--muted-foreground)]">
-                À récupérer et à déposer sans détour, à l'aller ou au retour. Cochez ceux que vous pouvez emporter.
-              </p>
-            </div>
-            {planned ? (
-              <Button disabled={busy || selected.size === 0} onClick={() => void take()}>
-                <PackageCheck className="h-4 w-4" /> Prendre le produit{selected.size > 1 ? ` (${selected.size})` : ""}
-              </Button>
-            ) : null}
-          </div>
-          {!planned ? (
-            <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--muted-foreground)]">Votre navette est partie : on ne peut plus y ajouter d'objets.</p>
+          {hasRoute && planned ? (
+            <Button size="sm" disabled={busy || selected.size === 0} onClick={() => void take()}>
+              <PackageCheck className="h-4 w-4" /> Prendre le produit{selected.size > 1 ? ` (${selected.size})` : ""}
+            </Button>
           ) : null}
-          {onRoute.length === 0 ? (
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+          {trip.transits.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Dans votre véhicule ({trip.transits.length})</p>
+              <ul className="space-y-2">
+                {trip.transits.map((t) => (
+                  <TransitCard
+                    key={t._id}
+                    transit={t}
+                    action={
+                      t.status === "a_preparer" && planned ? (
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => releaseTransit({ requestId: t._id }), "Objet reposé : il redevient disponible.")}>
+                          <Undo2 className="h-4 w-4" /> Reposer
+                        </Button>
+                      ) : (
+                        <span className="text-xs font-semibold text-emerald-700">{t.status === "en_transit" ? "En route" : t.status === "receptionnee" ? "Livré" : ""}</span>
+                      )
+                    }
+                  />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {!hasRoute ? (
             <p className="rounded-xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted-foreground)]">
-              Aucun objet en attente sur votre route pour le moment. Merci d'avoir regardé !
+              Indiquez votre destination pour voir les objets sur votre route.
             </p>
           ) : (
-            <ul className="grid gap-2 md:grid-cols-2">
-              {onRoute.map((t) => (
-                <TransitCard key={t._id} transit={t} selectable={planned} selected={selected.has(t._id)} onToggle={() => toggle(t._id)} />
-              ))}
-            </ul>
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Sur votre route ({onRoute.length})</p>
+              {!planned ? (
+                <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--muted-foreground)]">Votre navette est partie : on ne peut plus y ajouter d'objets.</p>
+              ) : onRoute.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted-foreground)]">
+                  Aucun objet en attente sur votre route pour le moment. Merci d'avoir regardé !
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-[var(--muted-foreground)]">À récupérer et à déposer sans détour, à l'aller ou au retour. Cochez ceux que vous pouvez emporter.</p>
+                  <ul className="space-y-2">
+                    {onRoute.map((t) => (
+                      <TransitCard key={t._id} transit={t} selectable selected={selected.has(t._id)} onToggle={() => toggle(t._id)} />
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
           )}
-        </section>
-      ) : null}
 
-      {offRoute.length > 0 ? (
-        <details className="rounded-2xl border border-[var(--border)] bg-[var(--card)] p-4">
-          <summary className="cursor-pointer text-sm font-semibold text-[var(--foreground)]">
-            Autres objets en attente, hors de votre route ({offRoute.length})
-          </summary>
-          <ul className="mt-3 grid gap-2 opacity-70 md:grid-cols-2">
-            {offRoute.map((t) => (
-              <TransitCard key={t._id} transit={t} />
-            ))}
-          </ul>
-        </details>
-      ) : null}
-    </div>
+          {offRoute.length > 0 ? (
+            <details>
+              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
+                Hors de votre route ({offRoute.length})
+              </summary>
+              <ul className="mt-2 space-y-2 opacity-70">
+                {offRoute.map((t) => (
+                  <TransitCard key={t._id} transit={t} />
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      </div>
+    </section>
   );
 }
 

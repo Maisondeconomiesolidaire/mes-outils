@@ -5,7 +5,7 @@ import { useUser } from "@clerk/clerk-react";
 import { format } from "date-fns";
 import { fr } from "date-fns/locale";
 
-import { Boxes, CalendarCheck, CarFront, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
+import { Boxes, CalendarCheck, CarFront, Check, Clock, DoorOpen, ImagePlus, MapPin, MessagesSquare, Search, Users, X } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { SectionHeader } from "../components/SectionHeader";
@@ -61,6 +61,8 @@ type MyReservation = {
   status: "confirmed" | "pending" | "approved" | "rejected" | "cancelled";
   feedbackSubmittedAt?: number;
   lastRecordedMileage?: number;
+  routeKm?: number;
+  destinationLabel?: string;
 };
 type DaySelection = { start: number; end: number };
 
@@ -178,7 +180,6 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const [destination, setDestination] = useState<Destination | null>(null);
   const [tripPlan, setTripPlan] = useState<{ roundTripKm: number; sitesOnRoute: string[] } | null>(null);
   const [planning, setPlanning] = useState(false);
-  const [confirmingKm, setConfirmingKm] = useState(false);
   const [willTransport, setWillTransport] = useState(false);
   const [transportDetails, setTransportDetails] = useState("");
   const [forUser, setForUser] = useState<Person | null>(null);
@@ -189,7 +190,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     setBookingRoom(room); setBookingVehicle(vehicle);
     setLabel(""); setNotes(""); setForUser(null); setError(null);
     setRoomUsage(usage === "personal" ? "Evenement personnel" : ROOM_USAGES[0]); setAttendees("");
-    setDestination(null); setTripPlan(null); setConfirmingKm(false);
+    setDestination(null); setTripPlan(null);
     setWillTransport(false); setTransportDetails("");
     setVehicleUsage(usage ?? "pro");
   }
@@ -205,7 +206,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     (!bookingVehicle || Boolean(destination && tripPlan));
 
   async function chooseDestination(next: Destination | null) {
-    setDestination(next); setTripPlan(null); setConfirmingKm(false);
+    setDestination(next); setTripPlan(null);
     if (!next) return;
     setPlanning(true); setError(null);
     try {
@@ -218,15 +219,13 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     }
   }
 
-  async function submitBooking(confirmedKm?: number) {
+  async function submitBooking() {
     if (!range || !rangeValid || !canSubmit) return;
-    // Véhicule : on confirme d'abord le kilométrage aller-retour calculé.
-    if (bookingVehicle && confirmedKm === undefined) { setConfirmingKm(true); return; }
     setSubmitting(true); setError(null);
     try {
       if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
       else if (bookingVehicle && destination && tripPlan) {
-        const reservationId = await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: confirmedKm, kmConfirmed: true, destination, routeKm: tripPlan.roundTripKm, sitesOnRoute: tripPlan.sitesOnRoute, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
+        const reservationId = await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: tripPlan.roundTripKm, kmConfirmed: false, destination, routeKm: tripPlan.roundTripKm, sitesOnRoute: tripPlan.sitesOnRoute, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
         // Des objets attendent un transit sur sa route : on lui montre l'onglet Navettes.
         const helpful = (openTransits ?? []).some((t) => transitOnRoute(t, tripPlan.sitesOnRoute));
         closeBooking();
@@ -423,9 +422,9 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
                 <PlaceSearch value={destination} onChange={(next) => void chooseDestination(next)} />
               </Field>
               {planning ? <p className="text-xs text-[var(--muted-foreground)]">Calcul de l'itinéraire…</p> : null}
-              {tripPlan && !confirmingKm ? (
+              {tripPlan ? (
                 <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-                  Aller-retour : <strong className="text-[var(--foreground)]">{tripPlan.roundTripKm.toLocaleString("fr-FR")} km</strong>
+                  Aller-retour estimé : <strong className="text-[var(--foreground)]">{tripPlan.roundTripKm.toLocaleString("fr-FR")} km</strong> (à confirmer au retour du véhicule)
                   {tripPlan.sitesOnRoute.length > 1 ? " · votre route passe par un site logistique : vous pourrez emporter des objets (onglet Navettes)." : ""}
                 </p>
               ) : null}
@@ -453,19 +452,10 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           {directoryError ? <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950/40 dark:text-red-300">{directoryError}</p> : null}
           {bookingVehicle ? <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">La réservation d'un véhicule est soumise à l'approbation d'un responsable.</p> : null}
           {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
-          {bookingVehicle && confirmingKm && destination && tripPlan ? (
-            <div className="space-y-2 border-t border-[var(--border)] pt-4">
-              <KmConfirm routeKm={tripPlan.roundTripKm} destinationLabel={destination.label} busy={submitting} onConfirm={(km) => void submitBooking(km)} />
-              <div className="flex justify-end">
-                <Button variant="ghost" disabled={submitting} onClick={() => setConfirmingKm(false)}>Retour</Button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
-              <Button variant="ghost" onClick={closeBooking}>Annuler</Button>
-              <Button size="lg" onClick={() => void submitBooking()} disabled={submitting || planning || !canSubmit}>{submitting ? "Envoi..." : bookingRoom ? "Réserver" : "Demander"}</Button>
-            </div>
-          )}
+          <div className="flex justify-end gap-2 border-t border-[var(--border)] pt-4">
+            <Button variant="ghost" onClick={closeBooking}>Annuler</Button>
+            <Button size="lg" onClick={() => void submitBooking()} disabled={submitting || planning || !canSubmit}>{submitting ? "Envoi..." : bookingRoom ? "Réserver" : "Demander"}</Button>
+          </div>
         </div>
       </Modal>
     </div>
@@ -665,6 +655,8 @@ function MyReservations() {
     notes: "",
   };
   const [feedbackForm, setFeedbackForm] = useState(emptyFeedback);
+  // Kilométrage du trajet (aller-retour calculé) confirmé ou corrigé au retour.
+  const [tripKm, setTripKm] = useState<number | null>(null);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const upload = useUpload();
   // Pièces jointes du retour véhicule : sélectionnées localement (aperçu
@@ -723,11 +715,13 @@ function MyReservations() {
   }
 
   function closeFeedback() {
+    setTripKm(null);
     setFeedbackTarget(null);
     clearFeedbackMedia();
   }
 
   function openFeedback(reservation: MyReservation) {
+    setTripKm(null);
     setFeedbackTarget(reservation);
     setFeedbackForm(emptyFeedback);
     clearFeedbackMedia();
@@ -782,6 +776,11 @@ function MyReservations() {
         return;
       }
       if (feedbackTarget.kind === "vehicle") {
+        if (typeof feedbackTarget.routeKm === "number" && tripKm === null) {
+          void alertDialog("Merci de confirmer le kilométrage du trajet.");
+          setFeedbackSubmitting(false);
+          return;
+        }
         const mileage = Number(feedbackForm.mileage);
         if (!feedbackForm.mileage.trim() || !Number.isFinite(mileage) || mileage < 0) {
           void alertDialog("Merci de renseigner le kilométrage relevé.");
@@ -802,6 +801,7 @@ function MyReservations() {
         await submitVehicleFeedback({
           reservationId: feedbackTarget._id as Id<"vehicleReservations">,
           mileage,
+          tripKm: tripKm ?? undefined,
           fuelRestored: feedbackTarget.usageType === "personal" ? feedbackForm.fuelRestored : undefined,
           vehicleEmpty: feedbackForm.vehicleEmpty,
           vehicleClean: feedbackForm.vehicleClean,
@@ -938,6 +938,18 @@ function MyReservations() {
                     </p>
                   ) : null}
                 </div>
+                {typeof feedbackTarget.routeKm === "number" ? (
+                  <div className="sm:col-span-3">
+                    {tripKm === null ? (
+                      <KmConfirm routeKm={feedbackTarget.routeKm} destinationLabel={feedbackTarget.destinationLabel ?? "destination"} onConfirm={setTripKm} />
+                    ) : (
+                      <p className="flex flex-wrap items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--foreground)]">
+                        <Check className="h-4 w-4 text-brand-600" /> Kilométrage du trajet : <strong>{tripKm.toLocaleString("fr-FR")} km</strong>
+                        <button type="button" className="text-xs font-semibold text-brand-600 underline" onClick={() => setTripKm(null)}>Modifier</button>
+                      </p>
+                    )}
+                  </div>
+                ) : null}
                 {feedbackTarget.usageType === "personal" ? (
                   <Checkbox
                     checked={feedbackForm.fuelRestored}

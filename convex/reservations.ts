@@ -793,6 +793,9 @@ export const listMyReservations = query({
           status: reservation.status,
           feedbackSubmittedAt: reservation.feedbackSubmittedAt,
           lastRecordedMileage: lastMileageByVehicleId.get(String(reservation.vehicleId)),
+          /** Trajet calculé (onglet Navettes) : confirmé ou corrigé au retour. */
+          routeKm: reservation.routeKm,
+          destinationLabel: reservation.destination?.label,
         })),
       // Les équipements se réservent depuis la même page que salles et
       // véhicules : « Mes réservations » doit donc tout regrouper, sinon
@@ -821,6 +824,8 @@ export const submitVehicleFeedback = mutation({
   args: {
     reservationId: v.id("vehicleReservations"),
     mileage: v.number(),
+    /** Kilométrage aller-retour du trajet, confirmé ou corrigé au retour du véhicule. */
+    tripKm: v.optional(v.number()),
     fuelRestored: v.optional(v.boolean()),
     vehicleEmpty: v.boolean(),
     vehicleClean: v.boolean(),
@@ -870,7 +875,11 @@ export const submitVehicleFeedback = mutation({
       );
     }
 
+    if (args.tripKm !== undefined && (!Number.isFinite(args.tripKm) || args.tripKm < 0 || args.tripKm > 20000)) {
+      throw new Error("Kilométrage du trajet invalide.");
+    }
     await ctx.db.patch(args.reservationId, {
+      ...(args.tripKm !== undefined ? { expectedKm: Math.round(args.tripKm), kmConfirmed: true } : {}),
       feedbackSubmittedAt: Date.now(),
       feedbackMileage: Math.round(args.mileage),
       feedbackFuelRestored:
