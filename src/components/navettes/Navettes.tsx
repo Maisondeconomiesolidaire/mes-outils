@@ -147,16 +147,14 @@ function Intro() {
         <div className="min-w-0 space-y-2 text-sm text-[var(--muted-foreground)]">
           <h2 className="text-base font-bold text-[var(--foreground)]">Vous prenez un véhicule ? Faites voyager des objets avec vous</h2>
           <p>
-            Chaque trajet part du <strong className="text-[var(--foreground)]">Solidarium (4 rue de la Prairie, Lachapelle-aux-Pots)</strong>, va
-            à votre destination puis revient : c'est toujours un aller-retour. Si votre route passe par <strong className="text-[var(--foreground)]">Beauvais</strong> (Comptoir C)
+            Si votre route passe par <strong className="text-[var(--foreground)]">Beauvais</strong> (Comptoir C)
             ou <strong className="text-[var(--foreground)]">Gournay-en-Bray</strong> (Esspace 150), vous pouvez y déposer ou y récupérer des objets qui attendent un transit.
           </p>
           <p className="flex items-start gap-2">
             <Leaf className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
             <span>
               Ça aide énormément la logistique : chaque objet emporté évite un trajet dédié, économise du carburant et des heures de conduite, et les clients
-              récupèrent leurs achats plus vite. Choisissez les objets, cliquez sur « Prendre le produit » : votre trajet apparaît dans le calendrier Meslogistic
-              avec ce que vous transportez.
+              récupèrent leurs achats plus vite. Choisissez les objets, puis cliquez sur « Prendre le produit ».
             </span>
           </p>
         </div>
