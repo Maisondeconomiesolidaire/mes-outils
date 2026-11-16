@@ -26,7 +26,14 @@
 set -uo pipefail
 
 CANON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # = ~/mesoutils
-SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" "$HOME/feedback" "$HOME/recyccaisse" "$HOME/batire" "$HOME/mestodo" )
+SIBLINGS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" "$HOME/feedback" "$HOME/recyccaisse" "$HOME/batire" "$HOME/mestodo" "$HOME/meslogistic" )
+# Windows checkouts live beside the canonical repository.
+for i in "${!SIBLINGS[@]}"; do
+  name="$(basename "${SIBLINGS[$i]}")"
+  sibling="$(dirname "$CANON")/$name"
+  [ "$name" = "bennepro" ] && [ -d "$(dirname "$CANON")/bennespro" ] && sibling="$(dirname "$CANON")/bennespro"
+  [ -d "$sibling" ] && SIBLINGS[$i]="$sibling"
+done
 
 echo "Backend canonique : $CANON/convex"
 
@@ -42,7 +49,12 @@ fi
 for sib in "${SIBLINGS[@]}"; do
   if [ -d "$sib/convex" ] || [ -d "$sib" ]; then
     mkdir -p "$sib/convex"
-    rsync -a --delete "$CANON/convex/" "$sib/convex/"
+    if command -v rsync >/dev/null 2>&1; then
+      rsync -a --delete "$CANON/convex/" "$sib/convex/" || exit 1
+    else
+      # Git Bash has no rsync; additive sync preserves unrelated local files.
+      cp -a "$CANON/convex/." "$sib/convex/" || exit 1
+    fi
     echo "✓ $sib/convex synchronisé"
   else
     echo "⚠ $sib introuvable — ignoré"

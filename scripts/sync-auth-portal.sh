@@ -26,7 +26,14 @@
 set -uo pipefail
 
 CANON="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"   # = ~/mesoutils
-TARGETS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" "$HOME/feedback" "$HOME/batire" "$HOME/mestodo" )
+TARGETS=( "$HOME/recycapp" "$HOME/klyde" "$HOME/cycleenbray" "$HOME/bennepro" "$HOME/pointeuselsdb" "$HOME/feedback" "$HOME/batire" "$HOME/mestodo" "$HOME/meslogistic" )
+# Windows checkouts live beside the canonical repository.
+for i in "${!TARGETS[@]}"; do
+  name="$(basename "${TARGETS[$i]}")"
+  sibling="$(dirname "$CANON")/$name"
+  [ "$name" = "bennepro" ] && [ -d "$(dirname "$CANON")/bennespro" ] && sibling="$(dirname "$CANON")/bennespro"
+  [ -d "$sibling" ] && TARGETS[$i]="$sibling"
+done
 
 COMPONENT="$CANON/src/components/ui/auth-switch.tsx"
 CSS="$CANON/src/index.css"
@@ -49,7 +56,13 @@ for app in "${TARGETS[@]}"; do
 
   if [ ! -f "$app/src/index.css" ]; then echo "⚠ $name : pas de src/index.css, CSS non propagé"; continue; fi
 
-  CANON_CSS="$CSS" TARGET_CSS="$app/src/index.css" python3 - <<'PY'
+  CANON_PATH="$CSS"
+  TARGET_PATH="$app/src/index.css"
+  PYTHON=python3
+  case "$(uname -s)" in
+    MINGW*|MSYS*) PYTHON=python; CANON_PATH="$(cygpath -w "$CSS")"; TARGET_PATH="$(cygpath -w "$app/src/index.css")" ;;
+  esac
+  CANON_CSS="$CANON_PATH" TARGET_CSS="$TARGET_PATH" "$PYTHON" - <<'PY' 
 import os
 
 begin = "/* >>> AUTH-PORTAL >>> */"
@@ -66,6 +79,7 @@ else:
     css = css.rstrip("\n") + "\n\n" + block + "\n"
 open(path, "w", encoding="utf-8").write(css)
 PY
+  if [ $? -ne 0 ]; then echo "✗ $name : échec synchronisation CSS"; exit 1; fi
   echo "✓ $name"
 done
 
