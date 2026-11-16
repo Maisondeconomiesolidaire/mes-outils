@@ -51,6 +51,7 @@ import type * as klydeReports from "../klydeReports.js";
 import type * as klydeTaxonomy from "../klydeTaxonomy.js";
 import type * as leaves from "../leaves.js";
 import type * as lib from "../lib.js";
+import type * as lib_bpBillingExempt from "../lib/bpBillingExempt.js";
 import type * as lib_bpMonthlyBilling from "../lib/bpMonthlyBilling.js";
 import type * as lib_bpReceiptPdf from "../lib/bpReceiptPdf.js";
 import type * as lib_klydeSalesRevenue from "../lib/klydeSalesRevenue.js";
@@ -147,6 +148,7 @@ declare const fullApi: ApiFromModules<{
   klydeTaxonomy: typeof klydeTaxonomy;
   leaves: typeof leaves;
   lib: typeof lib;
+  "lib/bpBillingExempt": typeof lib_bpBillingExempt;
   "lib/bpMonthlyBilling": typeof lib_bpMonthlyBilling;
   "lib/bpReceiptPdf": typeof lib_bpReceiptPdf;
   "lib/klydeSalesRevenue": typeof lib_klydeSalesRevenue;

@@ -3,6 +3,7 @@ import { env, internalAction, internalMutation, internalQuery, type ActionCtx } 
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { aggregateBillingLines, billingMonth, depositInvoiceDetails, stripeDetailLines } from "./lib/bpMonthlyBilling";
+import { isBillingExemptCompany } from "./lib/bpBillingExempt";
 import { StripeApiError, stripeGet, stripeRequest, stripeVatTaxRateId } from "./bennespro";
 import { checkSources, replaceSources } from "./bennesproGrouping";
 
@@ -40,6 +41,9 @@ export const claim = internalMutation({
     const company = await ctx.db.get(companyId);
     if (!company) throw new Error("Entreprise introuvable.");
     let batch = await ctx.db.query("bpMonthlyInvoices").withIndex("by_company_month", q => q.eq("companyId", companyId).eq("month", month)).unique();
+    // Matériosol dépose gratuitement : jamais de nouvelle facture mensuelle, même
+    // si un ancien dépôt porte encore un montant en attente.
+    if (!batch && isBillingExemptCompany(company)) return null;
     if (!batch) {
       const all = await ctx.db.query("bpDepots").withIndex("by_company_month", q => q.eq("companyId", companyId).eq("billing.month", month)).take(1001);
       if (all.length > 1000) throw new Error("Plus de 1000 dépôts sur le mois : traitement manuel requis.");

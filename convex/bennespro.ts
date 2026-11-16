@@ -18,6 +18,7 @@ import { bytesToBase64, resendSend, storageImageUrl, type EmailAttachment } from
 import { bpBilling, bpCompanyType, bpMaterial, bpTradeCategory, bpUnit } from "./schema";
 import { resolveActingProfile } from "./bennesproProfiles";
 import { billingMonth } from "./lib/bpMonthlyBilling";
+import { isBillingExemptCompany } from "./lib/bpBillingExempt";
 
 /* ─── Entreprises ─────────────────────────────────────────────────────────── */
 
@@ -971,6 +972,8 @@ export const listDepots = query({
           ...depot,
           companyName: company?.name ?? "—",
           vehicleLabel: vehicle?.label ?? "—",
+          /** Dépôt gratuit (Matériosol) : jamais facturé, quel que soit le poids. */
+          freeOfCharge: isBillingExemptCompany(company),
         };
       }),
     );
@@ -1068,7 +1071,7 @@ export const createDepot = mutation({
       .first();
     const depotNumber = (last?.depotNumber ?? 0) + 1;
 
-    const billing = await buildBilling(ctx, args.items);
+    const billing = await buildBilling(ctx, args.items, args.companyId);
 
     const depotId = await ctx.db.insert("bpDepots", {
       ...depotArgs,
@@ -1109,7 +1112,9 @@ function materialWeightKg(items: DepotItems, material: string): number {
   return Math.round(kg * 100) / 100;
 }
 
-async function buildBilling(ctx: QueryCtx | MutationCtx, items: DepotItems) {
+async function buildBilling(ctx: QueryCtx | MutationCtx, items: DepotItems, companyId: Id<"bpCompanies">) {
+  // Matériosol dépose gratuitement, DIB et bois compris : aucun montant à facturer.
+  if (isBillingExemptCompany(await ctx.db.get(companyId))) return undefined;
   const [dibPriceCentsPerKg, woodPriceCentsPerKg] = await Promise.all([readDibPrice(ctx), readWoodPrice(ctx)]);
   const billableItems = ([
     { material: DIB_MATERIAL, weightKg: materialWeightKg(items, DIB_MATERIAL), priceCentsPerKg: dibPriceCentsPerKg },
@@ -1224,7 +1229,10 @@ export const billDepot = mutation({
       throw new Error("Ce dépôt est déjà facturé.");
     }
     if (depot.billing?.month) return;
-    const billing = await buildBilling(ctx, depot.items);
+    if (isBillingExemptCompany(await ctx.db.get(depot.companyId))) {
+      throw new Error("Les dépôts de Matériosol sont gratuits : rien à facturer.");
+    }
+    const billing = await buildBilling(ctx, depot.items, depot.companyId);
     if (!billing) {
       throw new Error("Aucun poids de DIB ou de bois facturable (kg ou tonne) sur ce dépôt.");
     }
