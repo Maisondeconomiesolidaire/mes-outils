@@ -23,7 +23,8 @@ export type AppKey =
   | "cycleenbray"
   | "bennespro"
   | "pointeuse"
-  | "batire";
+  | "batire"
+  | "meslogistic";
 
 type Access = {
   role: string;
@@ -103,6 +104,14 @@ const APPS: PortalApp[] = [
     cardBg: "#ffffff",
   },
   {
+    key: "meslogistic",
+    label: "Meslogistic",
+    description: "Navettes et traçabilité des objets Bâtire.",
+    logoSrc: "/meslogistic-logo.svg",
+    href: appUrl("VITE_MESLOGISTIC_URL", "https://meslogistic.groupemes.fr"),
+    cardBg: "#e6f1f6",
+  },
+  {
     key: "pointeuse",
     label: "Pointeuse",
     description: "Suivi des salariés et des chantiers : pointages, projets, dépenses et factures.",
@@ -121,6 +130,7 @@ function appCanAccess(access: Access, key: AppKey): boolean {
   if (key === "cycleenbray") return access.grants.some((g) => g.pageKey.startsWith("cycle:"));
   if (key === "bennespro") return access.grants.some((g) => g.pageKey.startsWith("bennespro:"));
   if (key === "pointeuse") return access.grants.some((g) => g.pageKey.startsWith("pointeuse:"));
+  if (key === "meslogistic") return access.grants.some((g) => g.pageKey.startsWith("meslogistic:"));
   if (key === "batire") return access.grants.some((g) => g.pageKey.startsWith("batire:"));
   // recycapp : pages sans préfixe d'application (flotte, demandes, tournees…).
   return access.grants.some((g) => !g.pageKey.includes(":"));
