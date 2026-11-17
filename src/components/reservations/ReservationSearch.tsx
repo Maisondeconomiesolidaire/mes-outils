@@ -3,7 +3,7 @@ import { Dialog, Select } from "radix-ui";
 import { addMonths, eachDayOfInterval, endOfMonth, format, startOfDay, startOfMonth } from "date-fns";
 import { fr } from "date-fns/locale";
 import { BriefcaseBusiness, CalendarDays, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Repeat, Search, UserRound, X } from "lucide-react";
-import { MAX_RECURRENCE_SLOTS, RECURRENCE_UNITS, recurrenceSlots, type Recurrence } from "../../lib/recurrence";
+import { MAX_RECURRENCE_SLOTS, recurrenceLabel, recurrenceSlots, type Recurrence } from "../../lib/recurrence";
 import { cn } from "../../lib/cn";
 import { Button } from "../ui/Button";
 
@@ -27,9 +27,9 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
   const [dates, setDates] = useState<Dates>(EMPTY_DATES);
   const [draft, setDraft] = useState<Dates>(EMPTY_DATES);
   const [usage, setUsage] = useState<"pro" | "personal" | null>(null);
-  // Réservation récurrente : « tous les {every} {unit} jusqu'au {until} ».
+  // Réservation récurrente : chaque semaine, même jour et mêmes heures, jusqu'au {until}.
   const [recurring, setRecurring] = useState(false);
-  const [recurrence, setRecurrence] = useState<Recurrence>({ every: 1, unit: "week", until: "" });
+  const [recurrence, setRecurrence] = useState<Recurrence>({ until: "" });
   const [activeDate, setActiveDate] = useState<"start" | "end">("start");
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const today = format(new Date(), "yyyy-MM-dd");
@@ -69,14 +69,14 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
   }
 
   function recurrenceValid(source: Dates) {
-    return recurrence.every >= 1 && Boolean(recurrence.until) && recurrence.until > source.start;
+    return Boolean(recurrence.until) && recurrence.until > source.start;
   }
   function toggleRecurring(next: boolean) {
     setRecurring(next);
     if (next && !recurrence.until && dates.start) {
       const until = new Date(`${dates.start}T12:00:00`);
       until.setMonth(until.getMonth() + 1);
-      setRecurrence((current) => ({ ...current, until: format(until, "yyyy-MM-dd") }));
+      setRecurrence({ until: format(until, "yyyy-MM-dd") });
     }
   }
   const occurrenceCount = recurring && recurrenceValid(dates)
@@ -162,17 +162,12 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
               </div>
               {recurring && <div className="mt-4 space-y-2">
                 <p className="flex flex-wrap items-center gap-2 text-base">
-                  <span>Tous les</span>
-                  <input aria-label="Intervalle" type="number" min={1} max={99} value={recurrence.every} onChange={(e) => setRecurrence((current) => ({ ...current, every: Math.max(1, Math.min(99, Number(e.target.value) || 1)) }))} className="w-16 rounded-xl border-2 border-[var(--border)] bg-transparent px-2 py-1.5 text-center font-semibold outline-none focus:border-brand-500" />
-                  <select aria-label="Unité" value={recurrence.unit} onChange={(e) => setRecurrence((current) => ({ ...current, unit: e.target.value as Recurrence["unit"] }))} className="rounded-xl border-2 border-[var(--border)] bg-[var(--card)] px-2 py-1.5 font-semibold outline-none focus:border-brand-500">
-                    {RECURRENCE_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
-                  </select>
-                  <span>jusqu'au</span>
-                  <input aria-label="Fin de la récurrence" type="date" min={dates.start || today} value={recurrence.until} onChange={(e) => setRecurrence((current) => ({ ...current, until: e.target.value }))} className="rounded-xl border-2 border-[var(--border)] bg-transparent px-2 py-1.5 font-semibold outline-none focus:border-brand-500" />
+                  <span>Jusqu'au</span>
+                  <input aria-label="Fin de la récurrence" type="date" min={dates.start || today} value={recurrence.until} onChange={(e) => setRecurrence({ until: e.target.value })} className="rounded-xl border-2 border-[var(--border)] bg-transparent px-2 py-1.5 font-semibold outline-none focus:border-brand-500" />
                 </p>
                 <p className="text-sm text-[var(--muted-foreground)]">
                   {!recurrenceValid(dates) ? "Choisissez une date de fin après le premier jour réservé."
-                    : `Même jour et mêmes horaires que le créneau choisi : ${occurrenceCount} date${occurrenceCount > 1 ? "s" : ""}${occurrenceCount >= MAX_RECURRENCE_SLOTS ? ` (maximum ${MAX_RECURRENCE_SLOTS})` : ""}.`}
+                    : `${recurrenceLabel(recurrence, timestamp(dates.start, dates.startTime), timestamp(dates.end, dates.endTime))} : ${occurrenceCount} date${occurrenceCount > 1 ? "s" : ""}${occurrenceCount >= MAX_RECURRENCE_SLOTS ? ` (maximum ${MAX_RECURRENCE_SLOTS})` : ""}.`.replace(/^./, (c) => c.toUpperCase())}
                 </p>
               </div>}
             </div>

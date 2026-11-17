@@ -50,7 +50,10 @@ export const board = query({
     const view = async (row: Doc<"mlRequests">) => transitView(row, await materialPhoto(ctx, row.materialId), await materialSlot(ctx, row.materialId, slots));
     const rows = await Promise.all(shuttles.map(async shuttle => {
       const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
-      return { _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
+      // Trajet d'un salarié : son créneau et le motif de sa réservation de véhicule.
+      const reservation = shuttle.vehicleReservationId ? await ctx.db.get(shuttle.vehicleReservationId) : null;
+      const trip = reservation ? { start: reservation.start, end: reservation.end, purpose: reservation.purpose } : null;
+      return { trip, _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
     return { shuttles: rows, unassigned: await Promise.all(unassigned.map(view)) };

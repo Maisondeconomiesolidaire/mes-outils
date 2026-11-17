@@ -216,7 +216,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     (!bookingVehicle || Boolean(destination && tripPlan)) &&
     (!slots || slots.length < 2 || (conflicts !== undefined && freeSlotCount > 0));
   const seriesArgs = slots && slots.length > 1 && recurrence
-    ? { slots, recurrenceLabel: recurrenceLabel(recurrence) }
+    ? { slots, recurrenceLabel: recurrenceLabel(recurrence, slots[0].start, slots[0].end) }
     : {};
 
   async function chooseDestination(next: Destination | null) {
@@ -399,7 +399,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           {slots && slots.length > 1 && recurrence ? (
             <div className="space-y-2 rounded-lg border border-brand-500/40 bg-brand-500/5 px-3 py-2 text-sm">
               <p className="font-semibold text-[var(--foreground)]">
-                Réservation récurrente : {recurrenceLabel(recurrence)} · {slots.length} dates
+                Réservation récurrente : {recurrenceLabel(recurrence, slots[0].start, slots[0].end)} · {slots.length} dates
               </p>
               {conflicts === undefined ? (
                 <p className="text-xs text-[var(--muted-foreground)]">Vérification des disponibilités…</p>
