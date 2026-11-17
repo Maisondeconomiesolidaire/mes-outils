@@ -9,7 +9,7 @@
  * lui sont PROPOSÉS, et il les accepte ou les refuse depuis la page Navettes.
  */
 import { ConvexError, v } from "convex/values";
-import { action, mutation, query } from "./_generated/server";
+import { action, internalMutation, mutation, query } from "./_generated/server";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireCrmPermission, requireUser } from "./lib";
@@ -27,7 +27,7 @@ import {
   SITES,
 } from "./lib/navettesRoute";
 
-const PAGE_KEY = "mesoutils:reservations";
+const PAGE_KEY = "mesoutils:navettes";
 const MAPBOX = "https://api.mapbox.com";
 
 function mapboxToken(): string {
@@ -390,4 +390,61 @@ export async function releaseTripTransits(ctx: MutationCtx, reservationId: Id<"v
   }
   const remaining = await ctx.db.query("mlRequests").withIndex("by_shuttleId", (q) => q.eq("shuttleId", shuttle._id)).first();
   if (!remaining) await ctx.db.delete(shuttle._id);
+}
+
+// ─── Cycle de vie automatique : départ au début de la réservation, arrivée au retour ───
+
+/**
+ * Le trajet commence : la navette part. Les objets acceptés passent « en
+ * transit » ; ceux encore en attente de réponse retournent « À planifier ».
+ */
+async function departTripShuttle(ctx: MutationCtx, shuttle: Doc<"mlShuttles">, actor: string) {
+  const transits = await liveTransits(ctx, shuttle._id);
+  if (shuttleStatus(shuttle, transits) !== "planifiee") return;
+  const now = Date.now();
+  for (const row of transits.filter((item) => item.status === "a_preparer")) {
+    if (row.driverDecision === "proposee") {
+      await detachTransit(ctx, row, `Sans réponse de ${shuttle.driverName ?? "?"} au départ de son trajet : à replanifier`, actor);
+      continue;
+    }
+    await ctx.db.patch(row._id, { status: "en_transit", prepared: true, loadedAt: row.loadedAt ?? now, loadedBy: row.loadedBy ?? shuttle.driverName, updatedAt: Math.max(now, row.updatedAt + 1) });
+    await logTransit(ctx, row._id, `En transit · départ du trajet de ${shuttle.driverName ?? "?"} (« ${shuttle.name} »)`, actor);
+  }
+  await ctx.db.patch(shuttle._id, { status: "en_route", departedAt: now });
+}
+
+/** Toutes les 5 minutes : les trajets approuvés dont l'heure de début est passée partent. */
+export const departStartedTrips = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const started = await ctx.db
+      .query("vehicleReservations")
+      .withIndex("by_start", (q) => q.gt("start", now - 7 * 24 * 3600 * 1000).lte("start", now))
+      .take(500);
+    for (const reservation of started) {
+      if (reservation.status !== "approved" || reservation.feedbackSubmittedAt) continue;
+      const shuttle = await tripShuttle(ctx, reservation._id);
+      if (shuttle) await departTripShuttle(ctx, shuttle, "Mes Outils");
+    }
+  },
+});
+
+/**
+ * Retour du véhicule effectué : la navette est terminée et les objets
+ * transportés sont livrés (disponibles à destination).
+ */
+export async function completeTripShuttle(ctx: MutationCtx, reservationId: Id<"vehicleReservations">, actor: string) {
+  let shuttle = await tripShuttle(ctx, reservationId);
+  if (!shuttle) return;
+  await departTripShuttle(ctx, shuttle, actor);
+  shuttle = (await ctx.db.get(shuttle._id))!;
+  const transits = await liveTransits(ctx, shuttle._id);
+  if (shuttleStatus(shuttle, transits) === "terminee") return;
+  const now = Date.now();
+  for (const row of transits.filter((item) => item.status === "en_transit")) {
+    await ctx.db.patch(row._id, { status: "receptionnee", receivedQuantity: row.quantity, receivedAt: now, updatedAt: Math.max(now, row.updatedAt + 1) });
+    await logTransit(ctx, row._id, `Livrée · retour du véhicule de ${shuttle.driverName ?? "?"} (« ${shuttle.name} »)`, actor);
+  }
+  await ctx.db.patch(shuttle._id, { status: "terminee", completedAt: now });
 }

@@ -240,6 +240,13 @@ export const MESOUTILS_PAGES: PermissionPage[] = [
   },
   {
     app: "mesoutils",
+    key: "mesoutils:navettes",
+    label: "Navettes",
+    description: "Trajets en vehicule et objets a transporter proposes par la logistique (accepter / refuser).",
+    actions: ["read"],
+  },
+  {
+    app: "mesoutils",
     key: "mesoutils:gotravaux",
     label: "Gotravaux",
     description:
@@ -636,7 +643,7 @@ export const PORTAL_NAV = [
   { to: "/portail", label: "Portail", icon: Home },
   { to: "/actualites", label: "Espace partage", pageKey: "mesoutils:actualites", icon: Newspaper },
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations", icon: CalendarCheck },
-  { to: "/navettes", label: "Navettes", pageKey: "mesoutils:reservations", icon: Truck },
+  { to: "/navettes", label: "Navettes", pageKey: "mesoutils:navettes", icon: Truck },
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
   { to: "/equipements", label: "Équipements", pageKey: "mesoutils:equipements", icon: Boxes },

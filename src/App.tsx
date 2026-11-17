@@ -51,7 +51,7 @@ export default function App() {
         <Route
           path="/navettes"
           element={
-            <RequirePermission pageKey="mesoutils:reservations">
+            <RequirePermission pageKey="mesoutils:navettes">
               <NavettesPage />
             </RequirePermission>
           }

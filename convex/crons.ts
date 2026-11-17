@@ -15,6 +15,10 @@ crons.daily(
   internal.vehicleControlReminders.sendControlReminders,
 );
 
+// Navettes : un trajet de salarié part (« en route » dans Meslogistic) dès
+// l'heure de début de sa réservation de véhicule.
+crons.interval("depart navettes des trajets", { minutes: 5 }, internal.navettes.departStartedTrips, {});
+
 crons.hourly(
   "emails retour reservations vehicules",
   { minuteUTC: 10 },

@@ -22,7 +22,7 @@ import {
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 import { awardEngagementPoints } from "./points";
-import { cleanTrip, destinationValidator, releaseTripTransits, syncTripShuttle } from "./navettes";
+import { cleanTrip, completeTripShuttle, destinationValidator, releaseTripTransits, syncTripShuttle } from "./navettes";
 
 /** Photo de profil de l'identité Clerk courante, si présente. */
 function pictureUrl(identity: unknown): string | undefined {
@@ -901,6 +901,8 @@ export const submitVehicleFeedback = mutation({
       odometerKm: Math.round(args.mileage),
       odometerUpdatedAt: new Date().toISOString(),
     });
+    // Retour effectué : la navette Meslogistic du trajet est terminée.
+    await completeTripShuttle(ctx, args.reservationId, displayName(identity));
     await awardEngagementPoints(ctx, {
       clerkId: identity.subject,
       displayName: displayName(identity),
@@ -936,6 +938,7 @@ export const markVehicleReturned = mutation({
       feedbackManualReturnBy: displayName(identity),
       feedbackNotes: [reservation.feedbackNotes, "Retour confirmé manuellement par l'équipe."].filter(Boolean).join("\n"),
     });
+    await completeTripShuttle(ctx, reservationId, displayName(identity));
   },
 });
 
