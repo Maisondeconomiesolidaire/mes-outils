@@ -620,6 +620,8 @@ type TokenResponse = {
   access_token?: string;
   refresh_token?: string;
   expires_in?: number;
+  /** Scopes réellement accordés (l'écran Google permet de décocher Gmail). */
+  scope?: string;
   error?: string;
   error_description?: string;
 };
@@ -692,12 +694,20 @@ async function accessTokenFor(
   return refreshed.access_token!;
 }
 
+/** Message affiché quand le jeton n'a pas le droit de lire Gmail. */
+export const GMAIL_SCOPE_MISSING =
+  "Accès Gmail non accordé : clique sur « Reconnecter » et, sur l'écran Google, coche bien la case « Afficher vos e-mails et vos paramètres Gmail ».";
+
 async function gmailGet<T>(token: string, path: string): Promise<T> {
   const response = await fetch(`${GMAIL_API}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
-    throw new Error(`Gmail ${path} → ${response.status} ${(await response.text()).slice(0, 300)}`);
+    const body = await response.text();
+    if (response.status === 403 && /insufficient(Permissions| authentication scopes)/i.test(body)) {
+      throw new Error(GMAIL_SCOPE_MISSING);
+    }
+    throw new Error(`Gmail ${path} → ${response.status} ${body.slice(0, 300)}`);
   }
   return (await response.json()) as T;
 }
@@ -801,6 +811,13 @@ export const completeOAuth = internalAction({
 
     try {
       const tokens = await exchangeCode(args.code);
+      // Consentement granulaire : Google laisse décocher la lecture Gmail.
+      // Sans ce scope, toutes les synchros échouent en 403 : on refuse tout de suite.
+      if (tokens.scope && !tokens.scope.split(" ").includes("https://www.googleapis.com/auth/gmail.readonly")) {
+        throw new Error(
+          "Google n'a pas accordé la lecture des e-mails. Recommence et coche la case « Afficher vos e-mails et vos paramètres Gmail ».",
+        );
+      }
       const profile = (await (
         await fetch(GOOGLE_USERINFO_URL, {
           headers: { Authorization: `Bearer ${tokens.access_token}` },
