@@ -141,8 +141,10 @@ export function Navettes() {
   );
 }
 
+/** Objets qui attendent une action : réponse à une proposition, ou confirmation de réception. */
 function pendingOf(trip: Trip) {
-  return trip.transits.filter((t) => t.driverDecision === "proposee" && t.status === "a_preparer").length;
+  const planned = !trip.shuttle || trip.shuttle.status === "planifiee";
+  return trip.transits.filter((t) => (planned && t.driverDecision === "proposee" && t.status === "a_preparer") || t.status === "en_transit").length;
 }
 
 function Intro() {
@@ -176,6 +178,7 @@ function TripPanel({ trip }: { trip: Trip }) {
   const planTrip = usePlanTrip();
   const setTripDetails = useMutation(api.navettes.setTripDetails);
   const respond = useMutation(api.navettes.respondToTransit);
+  const confirmReception = useMutation(api.navettes.confirmReception);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingDestination, setEditingDestination] = useState(false);
@@ -283,14 +286,16 @@ function TripPanel({ trip }: { trip: Trip }) {
           <h3 className="flex items-center gap-2 text-base font-bold text-[var(--foreground)]">
             <Truck className="h-5 w-5 text-brand-600" /> Objets à transporter
           </h3>
-          {proposed.length > 0 && planned ? (
-            <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">{proposed.length} à confirmer</span>
+          {pendingOf(trip) > 0 ? (
+            <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">{pendingOf(trip)} à confirmer</span>
           ) : null}
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
           {!planned ? (
-            <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--muted-foreground)]">Votre navette est partie : la liste ne change plus.</p>
+            <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--muted-foreground)]">
+              {trip.shuttle?.status === "terminee" ? "Trajet terminé." : "Votre navette est en route."} Une fois chaque objet déposé, cliquez sur « Je confirme la réception ».
+            </p>
           ) : null}
 
           {proposed.length > 0 && planned ? (
@@ -332,8 +337,12 @@ function TripPanel({ trip }: { trip: Trip }) {
                         <Button size="sm" variant="ghost" disabled={busy} onClick={() => answer(t._id, false)}>
                           <Undo2 className="h-4 w-4" /> Je ne peux plus
                         </Button>
+                      ) : t.status === "en_transit" ? (
+                        <Button size="sm" disabled={busy} onClick={() => void run(t._id, () => confirmReception({ requestId: t._id }))}>
+                          <PackageCheck className="h-4 w-4" /> Je confirme la réception
+                        </Button>
                       ) : (
-                        <span className="text-xs font-semibold text-emerald-700">{t.status === "en_transit" ? "En route" : t.status === "receptionnee" ? "Livré" : ""}</span>
+                        <span className="text-xs font-semibold text-emerald-700">{t.status === "receptionnee" ? "Réception confirmée" : ""}</span>
                       )
                     }
                   />

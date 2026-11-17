@@ -197,8 +197,21 @@ async function activeTripsOf(ctx: QueryCtx, subject: string) {
     ctx.db.query("vehicleReservations").withIndex("by_bookedForClerkId", (q) => q.eq("bookedForClerkId", subject)).order("desc").take(100),
   ]);
   const byId = new Map<string, Doc<"vehicleReservations">>();
-  for (const reservation of [...mine, ...forMe]) if (isActive(reservation, now)) byId.set(reservation._id, reservation);
+  for (const reservation of [...mine, ...forMe]) {
+    if (byId.has(reservation._id)) continue;
+    // Trajet à venir ou en cours, ou trajet passé dont des objets attendent
+    // encore la confirmation de réception du conducteur.
+    if (isActive(reservation, now) || (reservation.status === "approved" && (await awaitsReception(ctx, reservation._id)))) {
+      byId.set(reservation._id, reservation);
+    }
+  }
   return [...byId.values()].sort((a, b) => a.start - b.start);
+}
+
+async function awaitsReception(ctx: QueryCtx, reservationId: Id<"vehicleReservations">) {
+  const shuttle = await tripShuttle(ctx, reservationId);
+  if (!shuttle) return false;
+  return (await liveTransits(ctx, shuttle._id)).some((row) => row.status === "en_transit");
 }
 
 async function tripShuttle(ctx: QueryCtx, reservationId: Id<"vehicleReservations">) {
@@ -244,7 +257,10 @@ export const myTrips = query({
   },
 });
 
-/** Nombre d'objets proposés auxquels je n'ai pas encore répondu (badge du menu). */
+/**
+ * Badge du menu : objets proposés auxquels je n'ai pas répondu, plus objets
+ * transportés dont je dois confirmer la réception.
+ */
 export const pendingProposalsCount = query({
   args: {},
   handler: async (ctx) => {
@@ -255,8 +271,8 @@ export const pendingProposalsCount = query({
       const shuttle = await tripShuttle(ctx, reservation._id);
       if (!shuttle) continue;
       const transits = await liveTransits(ctx, shuttle._id);
-      if (shuttleStatus(shuttle, transits) !== "planifiee") continue;
-      count += transits.filter((row) => row.status === "a_preparer" && row.driverDecision === "proposee").length;
+      const planned = shuttleStatus(shuttle, transits) === "planifiee";
+      count += transits.filter((row) => (planned && row.status === "a_preparer" && row.driverDecision === "proposee") || row.status === "en_transit").length;
     }
     return count;
   },
@@ -431,8 +447,9 @@ export const departStartedTrips = internalMutation({
 });
 
 /**
- * Retour du véhicule effectué : la navette est terminée et les objets
- * transportés sont livrés (disponibles à destination).
+ * Retour du véhicule effectué : la navette est terminée. Les objets restent
+ * « en transit » tant que le conducteur n'a pas confirmé leur réception
+ * (page Navettes) : une navette peut être terminée sans objets livrés.
  */
 export async function completeTripShuttle(ctx: MutationCtx, reservationId: Id<"vehicleReservations">, actor: string) {
   let shuttle = await tripShuttle(ctx, reservationId);
@@ -441,10 +458,24 @@ export async function completeTripShuttle(ctx: MutationCtx, reservationId: Id<"v
   shuttle = (await ctx.db.get(shuttle._id))!;
   const transits = await liveTransits(ctx, shuttle._id);
   if (shuttleStatus(shuttle, transits) === "terminee") return;
-  const now = Date.now();
-  for (const row of transits.filter((item) => item.status === "en_transit")) {
-    await ctx.db.patch(row._id, { status: "receptionnee", receivedQuantity: row.quantity, receivedAt: now, updatedAt: Math.max(now, row.updatedAt + 1) });
-    await logTransit(ctx, row._id, `Livrée · retour du véhicule de ${shuttle.driverName ?? "?"} (« ${shuttle.name} »)`, actor);
-  }
-  await ctx.db.patch(shuttle._id, { status: "terminee", completedAt: now });
+  await ctx.db.patch(shuttle._id, { status: "terminee", completedAt: Date.now() });
 }
+
+/** « Je confirme la réception » : le conducteur valide la livraison d'un objet transporté. */
+export const confirmReception = mutation({
+  args: { requestId: v.id("mlRequests") },
+  handler: async (ctx, { requestId }) => {
+    await requireCrmPermission(ctx, PAGE_KEY, "read");
+    const identity = await requireUser(ctx);
+    const row = await ctx.db.get(requestId);
+    if (!row?.shuttleId) throw new ConvexError("Objet introuvable.");
+    const shuttle = await ctx.db.get(row.shuttleId);
+    if (!shuttle?.vehicleReservationId) throw new ConvexError("Cet objet n'est pas sur un de vos trajets.");
+    const reservation = await loadOwnTrip(ctx, shuttle.vehicleReservationId, identity.subject);
+    if (row.status === "receptionnee") return;
+    if (row.status !== "en_transit") throw new ConvexError("Cet objet n'est pas encore parti.");
+    const now = Date.now();
+    await ctx.db.patch(row._id, { status: "receptionnee", receivedQuantity: row.quantity, receivedAt: now, updatedAt: Math.max(now, row.updatedAt + 1) });
+    await logTransit(ctx, row._id, `Réception confirmée par ${reservation.userName} (« ${shuttle.name} »)`, reservation.userName);
+  },
+});
