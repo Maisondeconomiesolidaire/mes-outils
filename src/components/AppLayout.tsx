@@ -186,6 +186,7 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
   const unreadMessages = useQuery(api.community.unreadDirectCount, hasMesoutilsAccess ? {} : "skip") ?? 0;
   const pendingVehicleReservations = useQuery(api.reservations.pendingVehicleReservationsCount, access ? {} : "skip") ?? 0;
   const unreadNotifications = useQuery(api.mesoutilsNotifications.unreadCount, hasMesoutilsAccess ? {} : "skip") ?? 0;
+  const pendingNavettes = useQuery(api.navettes.pendingProposalsCount, hasMesoutilsAccess ? {} : "skip") ?? 0;
 
   if (access === undefined) return <FullSpinner label="Chargement du portail..." />;
 
@@ -209,7 +210,9 @@ function AuthenticatedShell({ theme, setTheme }: { theme: "light" | "dark"; setT
           ? pendingVehicleReservations
           : item.to === "/notifications"
             ? unreadNotifications
-            : 0,
+            : item.to === "/navettes"
+              ? pendingNavettes
+              : 0,
   }));
 
   const isMessagerie = location.pathname.startsWith("/messagerie");

@@ -22,7 +22,7 @@ import {
 import { vehicleBusyReason } from "./fleet";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 import { awardEngagementPoints } from "./points";
-import { cleanTrip, destinationValidator, releaseTripTransits } from "./navettes";
+import { cleanTrip, destinationValidator, releaseTripTransits, syncTripShuttle } from "./navettes";
 
 /** Photo de profil de l'identité Clerk courante, si présente. */
 function pictureUrl(identity: unknown): string | undefined {
@@ -1378,6 +1378,8 @@ export const requestVehicle = mutation({
       status: "pending",
       createdAt: Date.now(),
     });
+    // Le trajet apparaît aussitôt dans le calendrier Meslogistic (navette à son nom).
+    await syncTripShuttle(ctx, reservationId);
     await awardEngagementPoints(ctx, {
       clerkId: target.clerkId ?? identity.subject,
       displayName: target.name,

@@ -11,6 +11,7 @@ import { Portail } from "./pages/Portail";
 import { Conges } from "./pages/Conges";
 import { RessourcesHumaines } from "./pages/RessourcesHumaines";
 import { Reservations } from "./pages/Reservations";
+import { NavettesPage } from "./pages/NavettesPage";
 import { Salles } from "./pages/Salles";
 import { Equipements } from "./pages/Equipements";
 import { ConfirmRoot } from "./lib/confirm";
@@ -44,6 +45,14 @@ export default function App() {
           element={
             <RequirePermission pageKey="mesoutils:reservations">
               <Reservations />
+            </RequirePermission>
+          }
+        />
+        <Route
+          path="/navettes"
+          element={
+            <RequirePermission pageKey="mesoutils:reservations">
+              <NavettesPage />
             </RequirePermission>
           }
         />

@@ -636,6 +636,7 @@ export const PORTAL_NAV = [
   { to: "/portail", label: "Portail", icon: Home },
   { to: "/actualites", label: "Espace partage", pageKey: "mesoutils:actualites", icon: Newspaper },
   { to: "/reservations", label: "Reservations", pageKey: "mesoutils:reservations", icon: CalendarCheck },
+  { to: "/navettes", label: "Navettes", pageKey: "mesoutils:reservations", icon: Truck },
   { to: "/gotravaux", label: "Gotravaux", pageKey: "mesoutils:gotravaux", icon: Wrench },
   { to: "/salles", label: "Salles", pageKey: "mesoutils:salles", icon: DoorOpen },
   { to: "/equipements", label: "Équipements", pageKey: "mesoutils:equipements", icon: Boxes },
@@ -663,7 +664,6 @@ export const SECTION_SUBNAV: Record<string, SubNavItem[]> = {
   "/reservations": [
     { key: "rooms", label: "Salles", icon: DoorOpen },
     { key: "vehicles", label: "Véhicules", icon: CarFront },
-    { key: "navettes", label: "Navettes", icon: Truck },
     { key: "equipment", label: "Équipements", icon: Boxes, pageKey: "mesoutils:equipements" },
     { key: "mine", label: "Mes réservations", icon: CalendarCheck },
   ],

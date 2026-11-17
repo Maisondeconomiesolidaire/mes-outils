@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useAction, useMutation, useQuery } from "convex/react";
 import type { FunctionReturnType } from "convex/server";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowRight, CalendarClock, Check, CircleCheck, Leaf, MapPin, PackageCheck, Pencil, Repeat2, Route, Truck, Undo2 } from "lucide-react";
+import { ArrowRight, CalendarClock, Check, CircleCheck, Leaf, MapPin, PackageCheck, Pencil, Repeat2, Route, Truck, Undo2, X } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { HOME_SITE, SITES, SITE_KEYS, transitOnRoute, type SiteKey } from "../../../convex/lib/navettesRoute";
+import { HOME_SITE, SITES, SITE_KEYS, type SiteKey } from "../../../convex/lib/navettesRoute";
 import { Button } from "../ui/Button";
 import { EmptyState } from "../ui/EmptyState";
 import { Input } from "../ui/Field";
@@ -14,7 +14,6 @@ import { formatDateTime } from "../../lib/format";
 import { PlaceSearch, type Destination } from "./PlaceSearch";
 
 type Trip = FunctionReturnType<typeof api.navettes.myTrips>[number];
-type Transit = FunctionReturnType<typeof api.navettes.openTransits>[number];
 
 const SHORT: Record<SiteKey, string> = {
   recyclerie_pays_de_bray: "Solidarium",
@@ -95,13 +94,12 @@ export function KmConfirm({
 
 export function Navettes() {
   const trips = useQuery(api.navettes.myTrips, {});
-  const transits = useQuery(api.navettes.openTransits, {});
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const selectedId = searchParams.get("trip");
-  const trip = trips?.find((t) => t._id === selectedId) ?? trips?.[0];
+  const trip = trips?.find((t) => t._id === selectedId) ?? trips?.find((t) => pendingOf(t) > 0) ?? trips?.[0];
 
-  if (trips === undefined || transits === undefined) return <FullSpinner />;
+  if (trips === undefined) return <FullSpinner />;
 
   return (
     <div className="space-y-5">
@@ -110,31 +108,41 @@ export function Navettes() {
         <EmptyState
           icon={<Truck className="h-8 w-8" />}
           title="Aucun trajet à venir"
-          description="Réservez un véhicule en indiquant votre destination : vous verrez ici les objets que vous pouvez emporter sur votre route."
+          description="Réservez un véhicule en indiquant votre destination : votre trajet apparaîtra ici, avec les objets que la logistique vous propose d'emporter."
           action={<Button onClick={() => navigate("/reservations?v=vehicles")}>Réserver un véhicule</Button>}
         />
       ) : (
         <>
           {trips.length > 1 ? (
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {trips.map((t) => (
-                <button
-                  key={t._id}
-                  type="button"
-                  onClick={() => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set("trip", t._id); return next; })}
-                  className={`shrink-0 rounded-xl border px-3 py-2 text-left text-sm transition ${t._id === trip?._id ? "border-brand-500 bg-brand-500/10" : "border-[var(--border)] bg-[var(--card)] hover:bg-[var(--accent)]"}`}
-                >
-                  <span className="block font-semibold text-[var(--foreground)]">{t.destination?.label ?? "Destination à préciser"}</span>
-                  <span className="block text-xs text-[var(--muted-foreground)]">{formatDateTime(t.start)} · {t.vehicleName}</span>
-                </button>
-              ))}
+              {trips.map((t) => {
+                const pending = pendingOf(t);
+                return (
+                  <button
+                    key={t._id}
+                    type="button"
+                    onClick={() => setSearchParams((prev) => { const next = new URLSearchParams(prev); next.set("trip", t._id); return next; })}
+                    className={`relative shrink-0 rounded-xl border px-3 py-2 text-left text-sm transition ${t._id === trip?._id ? "border-brand-500 bg-brand-500/10" : "border-[var(--border)] bg-[var(--card)] hover:bg-[var(--accent)]"}`}
+                  >
+                    <span className="block font-semibold text-[var(--foreground)]">{t.destination?.label ?? "Destination à préciser"}</span>
+                    <span className="block text-xs text-[var(--muted-foreground)]">{formatDateTime(t.start)} · {t.vehicleName}</span>
+                    {pending > 0 ? (
+                      <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold text-white">{pending}</span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
           ) : null}
-          {trip ? <TripPanel key={trip._id} trip={trip} transits={transits} /> : null}
+          {trip ? <TripPanel key={trip._id} trip={trip} /> : null}
         </>
       )}
     </div>
   );
+}
+
+function pendingOf(trip: Trip) {
+  return trip.transits.filter((t) => t.driverDecision === "proposee" && t.status === "a_preparer").length;
 }
 
 function Intro() {
@@ -148,13 +156,14 @@ function Intro() {
           <h2 className="text-base font-bold text-[var(--foreground)]">Vous prenez un véhicule ? Faites voyager des objets avec vous</h2>
           <p>
             Si votre route passe par <strong className="text-[var(--foreground)]">Beauvais</strong> (Comptoir C)
-            ou <strong className="text-[var(--foreground)]">Gournay-en-Bray</strong> (Esspace 150), vous pouvez y déposer ou y récupérer des objets qui attendent un transit.
+            ou <strong className="text-[var(--foreground)]">Gournay-en-Bray</strong> (Esspace 150), l'équipe logistique peut vous proposer des objets
+            à y déposer ou à y récupérer.
           </p>
           <p className="flex items-start gap-2">
             <Leaf className="mt-0.5 h-4 w-4 shrink-0 text-brand-600" />
             <span>
               Ça aide énormément la logistique : chaque objet emporté évite un trajet dédié, économise du carburant et des heures de conduite, et les clients
-              récupèrent leurs achats plus vite. Choisissez les objets, puis cliquez sur « Prendre le produit ».
+              récupèrent leurs achats plus vite. Acceptez les objets que vous pouvez emporter, refusez les autres.
             </span>
           </p>
         </div>
@@ -163,68 +172,43 @@ function Intro() {
   );
 }
 
-function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
+function TripPanel({ trip }: { trip: Trip }) {
   const planTrip = usePlanTrip();
   const setTripDetails = useMutation(api.navettes.setTripDetails);
-  const takeTransits = useMutation(api.navettes.takeTransits);
-  const releaseTransit = useMutation(api.navettes.releaseTransit);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState(false);
+  const respond = useMutation(api.navettes.respondToTransit);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [editingDestination, setEditingDestination] = useState(false);
 
   const onRouteSites = useMemo(() => new Set<string>([HOME_SITE, ...(trip.sitesOnRoute ?? [])]), [trip.sitesOnRoute]);
   const planned = !trip.shuttle || trip.shuttle.status === "planifiee";
-  const hasRoute = Boolean(trip.destination && trip.sitesOnRoute);
-  const { onRoute, offRoute } = useMemo(() => {
-    const on: Transit[] = [];
-    const off: Transit[] = [];
-    for (const t of transits) (hasRoute && transitOnRoute(t, trip.sitesOnRoute ?? []) ? on : off).push(t);
-    return { onRoute: on, offRoute: off };
-  }, [transits, trip.sitesOnRoute, hasRoute]);
+  const proposed = trip.transits.filter((t) => t.driverDecision === "proposee" && t.status === "a_preparer");
+  const accepted = trip.transits.filter((t) => !(t.driverDecision === "proposee" && t.status === "a_preparer"));
 
-  async function run(task: () => Promise<unknown>, success?: string) {
-    setBusy(true);
+  async function run(id: string, task: () => Promise<unknown>) {
+    setBusyId(id);
     setError(null);
-    setNotice(null);
     try {
       await task();
-      if (success) setNotice(success);
     } catch (caught) {
       setError(errorText(caught));
     } finally {
-      setBusy(false);
+      setBusyId(null);
     }
   }
 
   async function chooseDestination(destination: Destination | null) {
     if (!destination) return;
-    await run(async () => {
+    await run("destination", async () => {
       const plan = await planTrip({ longitude: destination.longitude, latitude: destination.latitude });
       await setTripDetails({ reservationId: trip._id, destination, routeKm: plan.roundTripKm, sitesOnRoute: plan.sitesOnRoute });
       setEditingDestination(false);
     });
   }
 
-  function toggle(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  async function take() {
-    const ids = [...selected] as Id<"mlRequests">[];
-    await run(async () => {
-      await takeTransits({ reservationId: trip._id, requestIds: ids });
-      setSelected(new Set());
-    }, ids.length > 1 ? `${ids.length} objets ajoutés à votre trajet. Merci !` : "Objet ajouté à votre trajet. Merci !");
-  }
-
+  const answer = (id: Id<"mlRequests">, accept: boolean) => void run(id, () => respond({ requestId: id, accept }));
   const estimatedKm = trip.expectedKm ?? trip.routeKm;
+  const busy = busyId !== null;
 
   return (
     <section className="grid overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--card)] lg:grid-cols-2">
@@ -253,7 +237,7 @@ function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
           <div className="space-y-2">
             <p className="text-sm font-semibold text-[var(--foreground)]">Où allez-vous ?</p>
             <PlaceSearch value={null} onChange={(d) => void chooseDestination(d)} autoFocus />
-            {busy ? <p className="text-xs text-[var(--muted-foreground)]">Calcul de l'itinéraire…</p> : null}
+            {busyId === "destination" ? <p className="text-xs text-[var(--muted-foreground)]">Calcul de l'itinéraire…</p> : null}
             {editingDestination ? (
               <Button size="sm" variant="ghost" onClick={() => setEditingDestination(false)}>Annuler</Button>
             ) : null}
@@ -291,35 +275,62 @@ function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
           </>
         )}
         {error ? <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
-        {notice ? <p className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">{notice}</p> : null}
       </div>
 
-      {/* ── Colonne droite : les objets à transporter (défilante) ───────── */}
+      {/* ── Colonne droite : les objets proposés / acceptés (défilante) ─── */}
       <div className="flex max-h-[70vh] min-h-[320px] flex-col border-t border-[var(--border)] lg:border-l lg:border-t-0">
-        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] px-4 py-3">
           <h3 className="flex items-center gap-2 text-base font-bold text-[var(--foreground)]">
             <Truck className="h-5 w-5 text-brand-600" /> Objets à transporter
           </h3>
-          {hasRoute && planned ? (
-            <Button size="sm" disabled={busy || selected.size === 0} onClick={() => void take()}>
-              <PackageCheck className="h-4 w-4" /> Prendre le produit{selected.size > 1 ? ` (${selected.size})` : ""}
-            </Button>
+          {proposed.length > 0 && planned ? (
+            <span className="rounded-full bg-red-500 px-2 py-0.5 text-xs font-bold text-white">{proposed.length} à confirmer</span>
           ) : null}
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
-          {trip.transits.length > 0 ? (
+          {!planned ? (
+            <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--muted-foreground)]">Votre navette est partie : la liste ne change plus.</p>
+          ) : null}
+
+          {proposed.length > 0 && planned ? (
             <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Dans votre véhicule ({trip.transits.length})</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Proposés par la logistique ({proposed.length})</p>
+              <p className="text-xs text-[var(--muted-foreground)]">Pouvez-vous les emporter sur votre trajet ?</p>
               <ul className="space-y-2">
-                {trip.transits.map((t) => (
+                {proposed.map((t) => (
+                  <TransitCard
+                    key={t._id}
+                    transit={t}
+                    highlight
+                    action={
+                      <span className="flex flex-col gap-1.5">
+                        <Button size="sm" disabled={busy} onClick={() => answer(t._id, true)}>
+                          <Check className="h-4 w-4" /> Accepter
+                        </Button>
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => answer(t._id, false)}>
+                          <X className="h-4 w-4" /> Refuser
+                        </Button>
+                      </span>
+                    }
+                  />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {accepted.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Dans votre véhicule ({accepted.length})</p>
+              <ul className="space-y-2">
+                {accepted.map((t) => (
                   <TransitCard
                     key={t._id}
                     transit={t}
                     action={
                       t.status === "a_preparer" && planned ? (
-                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run(() => releaseTransit({ requestId: t._id }), "Objet reposé : il redevient disponible.")}>
-                          <Undo2 className="h-4 w-4" /> Reposer
+                        <Button size="sm" variant="ghost" disabled={busy} onClick={() => answer(t._id, false)}>
+                          <Undo2 className="h-4 w-4" /> Je ne peux plus
                         </Button>
                       ) : (
                         <span className="text-xs font-semibold text-emerald-700">{t.status === "en_transit" ? "En route" : t.status === "receptionnee" ? "Livré" : ""}</span>
@@ -331,43 +342,10 @@ function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
             </div>
           ) : null}
 
-          {!hasRoute ? (
+          {trip.transits.length === 0 ? (
             <p className="rounded-xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted-foreground)]">
-              Indiquez votre destination pour voir les objets sur votre route.
+              Aucun objet proposé pour le moment. Votre trajet est visible par l'équipe logistique : si un objet peut voyager avec vous, il apparaîtra ici.
             </p>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Sur votre route ({onRoute.length})</p>
-              {!planned ? (
-                <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--muted-foreground)]">Votre navette est partie : on ne peut plus y ajouter d'objets.</p>
-              ) : onRoute.length === 0 ? (
-                <p className="rounded-xl border border-dashed border-[var(--border)] p-6 text-center text-sm text-[var(--muted-foreground)]">
-                  Aucun objet en attente sur votre route pour le moment. Merci d'avoir regardé !
-                </p>
-              ) : (
-                <>
-                  <p className="text-xs text-[var(--muted-foreground)]">À récupérer et à déposer sans détour, à l'aller ou au retour. Cochez ceux que vous pouvez emporter.</p>
-                  <ul className="space-y-2">
-                    {onRoute.map((t) => (
-                      <TransitCard key={t._id} transit={t} selectable selected={selected.has(t._id)} onToggle={() => toggle(t._id)} />
-                    ))}
-                  </ul>
-                </>
-              )}
-            </div>
-          )}
-
-          {offRoute.length > 0 ? (
-            <details>
-              <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">
-                Hors de votre route ({offRoute.length})
-              </summary>
-              <ul className="mt-2 space-y-2 opacity-70">
-                {offRoute.map((t) => (
-                  <TransitCard key={t._id} transit={t} />
-                ))}
-              </ul>
-            </details>
           ) : null}
         </div>
       </div>
@@ -375,26 +353,9 @@ function TripPanel({ trip, transits }: { trip: Trip; transits: Transit[] }) {
   );
 }
 
-function TransitCard({
-  transit,
-  selectable,
-  selected,
-  onToggle,
-  action,
-}: {
-  transit: Transit | Trip["transits"][number];
-  selectable?: boolean;
-  selected?: boolean;
-  onToggle?: () => void;
-  action?: React.ReactNode;
-}) {
-  const body = (
-    <>
-      {selectable ? (
-        <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${selected ? "border-brand-500 bg-brand-500 text-white" : "border-[var(--border)]"}`}>
-          {selected ? <Check className="h-3.5 w-3.5" /> : null}
-        </span>
-      ) : null}
+function TransitCard({ transit, highlight, action }: { transit: Trip["transits"][number]; highlight?: boolean; action?: React.ReactNode }) {
+  return (
+    <li className={`flex w-full items-start gap-3 rounded-xl border p-3 ${highlight ? "border-brand-500/50 bg-brand-500/5" : "border-[var(--border)] bg-[var(--card)]"}`}>
       {transit.photoUrl ? (
         <img src={transit.photoUrl} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" />
       ) : (
@@ -420,18 +381,6 @@ function TransitCard({
         ) : null}
       </span>
       {action ? <span className="shrink-0 self-center">{action}</span> : null}
-    </>
-  );
-  const className = `flex w-full items-start gap-3 rounded-xl border p-3 text-left transition ${selected ? "border-brand-500 bg-brand-500/10" : "border-[var(--border)] bg-[var(--card)]"}`;
-  return (
-    <li>
-      {selectable ? (
-        <button type="button" onClick={onToggle} className={`${className} hover:bg-[var(--accent)]`} aria-pressed={selected}>
-          {body}
-        </button>
-      ) : (
-        <div className={className}>{body}</div>
-      )}
     </li>
   );
 }

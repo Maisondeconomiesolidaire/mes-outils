@@ -12,6 +12,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireCrmPermission, requireUser } from "./lib";
 import { materialPhoto, materialSlot } from "./meslogistic";
+import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE = "meslogistic:demandes";
 type ShuttleStatus = "planifiee" | "en_route" | "terminee";
@@ -35,6 +36,8 @@ const transitView = (row: Doc<"mlRequests">, photoUrl: string | null, storageSlo
   customerName: row.customerName, origin: row.origin, destination: row.destination, dueDate: row.dueDate,
   status: row.status, fromOrder: Boolean(row.orderId), notes: row.notes,
   loadedAt: row.loadedAt, loadedBy: row.loadedBy,
+  /** Trajet d'un salarié : objet en attente de sa réponse, ou accepté. */
+  driverDecision: row.driverDecision ?? null,
 });
 
 /** Tableau des navettes et des demandes encore sans navette. */
@@ -71,12 +74,29 @@ export const addRequests = mutation({
     const { shuttle, status } = await loadShuttle(ctx, shuttleId);
     if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie : on ne peut plus y ajouter de demandes.");
     const now = Date.now();
+    // Trajet d'un salarié (réservation de véhicule Mes Outils) : les objets lui
+    // sont proposés, il les accepte ou les refuse depuis la page Navettes.
+    const proposal = Boolean(shuttle.vehicleReservationId);
+    let proposed = 0;
     for (const id of requestIds) {
       const row = await ctx.db.get(id);
       if (!row || row.status !== "a_preparer") throw new ConvexError("Une des demandes n’est plus disponible. Actualisez la page.");
       if (row.shuttleId && row.shuttleId !== shuttleId) throw new ConvexError(`La demande ${row.reference} est déjà dans une autre navette.`);
-      await ctx.db.patch(id, { shuttleId, scheduledDate: shuttle.scheduledDate, prepared: true, updatedAt: Math.max(now, row.updatedAt + 1) });
-      await log(ctx, id, `Ajoutée à la navette « ${shuttle.name} » du ${shuttle.scheduledDate}`, user.name ?? user.subject);
+      if (row.shuttleId === shuttleId) continue;
+      await ctx.db.patch(id, { shuttleId, scheduledDate: shuttle.scheduledDate, prepared: true, driverDecision: proposal ? "proposee" : undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await log(ctx, id, proposal ? `Proposée à ${shuttle.driverName ?? "?"} pour son trajet du ${shuttle.scheduledDate}` : `Ajoutée à la navette « ${shuttle.name} » du ${shuttle.scheduledDate}`, user.name ?? user.subject);
+      proposed += 1;
+    }
+    if (proposal && proposed > 0) {
+      await createMesoutilsNotification(ctx, {
+        recipientClerkId: shuttle.driverClerkId,
+        kind: "navette_proposal",
+        title: proposed > 1 ? `${proposed} objets à transporter vous sont proposés` : "Un objet à transporter vous est proposé",
+        body: [shuttle.destination, shuttle.vehicleName, shuttle.scheduledDate].filter(Boolean).join(" · "),
+        actorName: user.name ?? undefined,
+        actorClerkId: user.subject,
+        href: "/navettes",
+      });
     }
   },
 });
@@ -91,7 +111,7 @@ export const removeRequest = mutation({
     if (!row?.shuttleId) return;
     if (row.status !== "a_preparer") throw new ConvexError("Cette demande est déjà partie.");
     const shuttle = await ctx.db.get(row.shuttleId);
-    await ctx.db.patch(requestId, { shuttleId: undefined, scheduledDate: undefined, prepared: false, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
+    await ctx.db.patch(requestId, { shuttleId: undefined, scheduledDate: undefined, prepared: false, driverDecision: undefined, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
     await log(ctx, requestId, `Retirée de la navette « ${shuttle?.name ?? "?"} »`, user.name ?? user.subject);
   },
 });
@@ -125,7 +145,7 @@ export const deleteShuttle = mutation({
     if (status !== "planifiee") throw new ConvexError("Une navette partie ne peut pas être supprimée.");
     const now = Date.now();
     for (const row of transits) {
-      await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, driverDecision: undefined, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
       await log(ctx, row._id, `Navette « ${shuttle.name} » supprimée : demande à replanifier`, user.name ?? user.subject);
     }
     await ctx.db.delete(shuttleId);
@@ -176,7 +196,7 @@ export const departShuttle = mutation({
       await log(ctx, row._id, `En transit · départ de la navette « ${shuttle.name} »`, actor);
     }
     for (const row of waiting.filter(item => !item.loadedAt)) {
-      await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, driverDecision: undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
       await log(ctx, row._id, `Non chargé au départ de la navette « ${shuttle.name} » : à replanifier`, actor);
     }
     await ctx.db.patch(shuttleId, { status: "en_route", departedAt: now });

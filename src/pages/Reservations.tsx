@@ -26,9 +26,8 @@ import { useUpload } from "../lib/useUpload";
 import { BookEquipment } from "./Equipements";
 import { ReservationSearch, type ReservationSearchValue } from "../components/reservations/ReservationSearch";
 import { ReservationIntro } from "../components/reservations/ReservationIntro";
-import { KmConfirm, Navettes, usePlanTrip } from "../components/navettes/Navettes";
+import { KmConfirm, usePlanTrip } from "../components/navettes/Navettes";
 import { PlaceSearch, type Destination } from "../components/navettes/PlaceSearch";
-import { transitOnRoute } from "../../convex/lib/navettesRoute";
 
 const ROOM_USAGES = [
   "Réunion",
@@ -80,7 +79,7 @@ export function Reservations() {
   const [searchParams] = useSearchParams();
   const access = usePermissionsAccess();
   const canBookEquipment = canAccess(access, "mesoutils:equipements");
-  const tab = (["rooms", "vehicles", "navettes", "equipment", "mine"].includes(searchParams.get("v") ?? "") ? searchParams.get("v") : "rooms") as "rooms" | "vehicles" | "navettes" | "equipment" | "mine";
+  const tab = (["rooms", "vehicles", "equipment", "mine"].includes(searchParams.get("v") ?? "") ? searchParams.get("v") : "rooms") as "rooms" | "vehicles" | "equipment" | "mine";
 
   return (
     <div className="space-y-6">
@@ -88,8 +87,6 @@ export function Reservations() {
       <SectionTabs />
       {tab === "mine" ? (
         <MyReservations />
-      ) : tab === "navettes" ? (
-        <Navettes />
       ) : tab === "equipment" ? (
         // Réutilise l'écran de réservation d'équipement : la page /equipements
         // ne sert plus qu'à gérer le parc. L'onglet est masqué sans le droit,
@@ -176,7 +173,6 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   // Trajet du véhicule : destination (lieu ou adresse), aller-retour calculé
   // depuis le Solidarium, puis confirmation du kilométrage avant l'envoi.
   const planTrip = usePlanTrip();
-  const openTransits = useQuery(api.navettes.openTransits, tab === "vehicles" ? {} : "skip");
   const [destination, setDestination] = useState<Destination | null>(null);
   const [tripPlan, setTripPlan] = useState<{ roundTripKm: number; sitesOnRoute: string[] } | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -225,12 +221,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     try {
       if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
       else if (bookingVehicle && destination && tripPlan) {
-        const reservationId = await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: tripPlan.roundTripKm, kmConfirmed: false, destination, routeKm: tripPlan.roundTripKm, sitesOnRoute: tripPlan.sitesOnRoute, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
-        // Des objets attendent un transit sur sa route : on lui montre l'onglet Navettes.
-        const helpful = (openTransits ?? []).some((t) => transitOnRoute(t, tripPlan.sitesOnRoute));
-        closeBooking();
-        if (helpful && !forUser) navigate(`/reservations?v=navettes&trip=${reservationId}`);
-        return;
+        await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: tripPlan.roundTripKm, kmConfirmed: false, destination, routeKm: tripPlan.roundTripKm, sitesOnRoute: tripPlan.sitesOnRoute, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
       }
       closeBooking();
     } catch (caught) {
@@ -425,7 +416,7 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
               {tripPlan ? (
                 <p className="rounded-lg bg-[var(--accent)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
                   Aller-retour estimé : <strong className="text-[var(--foreground)]">{tripPlan.roundTripKm.toLocaleString("fr-FR")} km</strong> (à confirmer au retour du véhicule)
-                  {tripPlan.sitesOnRoute.length > 1 ? " · votre route passe par un site logistique : vous pourrez emporter des objets (onglet Navettes)." : ""}
+                  {tripPlan.sitesOnRoute.length > 1 ? " · votre route passe par un site logistique : la logistique pourra vous proposer des objets à emporter (page Navettes)." : ""}
                 </p>
               ) : null}
               <Field label="Transport de matériel">

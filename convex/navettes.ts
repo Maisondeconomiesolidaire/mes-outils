@@ -1,12 +1,12 @@
 /**
- * Onglet « Navettes » de Mes Outils.
+ * Page « Navettes » de Mes Outils.
  *
  * Quand un salarié réserve un véhicule, il indique sa destination. Son trajet
- * part toujours du Solidarium (Lachapelle-aux-Pots) et y revient. On regarde
+ * part toujours du Solidarium (Lachapelle-aux-Pots) et y revient ; on note
  * quels sites logistiques (Comptoir C à Beauvais, Esspace 150 à Gournay) sont
- * sur sa route, et donc quels transits Meslogistic en attente il peut emporter.
- * Quand il « prend » des objets, une navette Meslogistic à son nom est créée
- * pour la date de sa réservation : elle apparaît dans le calendrier Meslogistic.
+ * sur sa route. Le trajet apparaît aussitôt comme navette à son nom dans le
+ * calendrier Meslogistic. L'équipe logistique peut y ajouter des objets : ils
+ * lui sont PROPOSÉS, et il les accepte ou les refuse depuis la page Navettes.
  */
 import { ConvexError, v } from "convex/values";
 import { action, mutation, query } from "./_generated/server";
@@ -25,7 +25,6 @@ import {
   roundTripKm,
   SITE_KEYS,
   SITES,
-  transitOnRoute,
 } from "./lib/navettesRoute";
 
 const PAGE_KEY = "mesoutils:reservations";
@@ -191,26 +190,36 @@ async function transitRow(ctx: QueryCtx, row: Doc<"mlRequests">) {
   };
 }
 
-/** Mes trajets à venir (réservations de véhicule en cours ou futures) et ce que j'y transporte. */
+async function activeTripsOf(ctx: QueryCtx, subject: string) {
+  const now = Date.now();
+  const [mine, forMe] = await Promise.all([
+    ctx.db.query("vehicleReservations").withIndex("by_clerkId", (q) => q.eq("clerkId", subject)).order("desc").take(100),
+    ctx.db.query("vehicleReservations").withIndex("by_bookedForClerkId", (q) => q.eq("bookedForClerkId", subject)).order("desc").take(100),
+  ]);
+  const byId = new Map<string, Doc<"vehicleReservations">>();
+  for (const reservation of [...mine, ...forMe]) if (isActive(reservation, now)) byId.set(reservation._id, reservation);
+  return [...byId.values()].sort((a, b) => a.start - b.start);
+}
+
+async function tripShuttle(ctx: QueryCtx, reservationId: Id<"vehicleReservations">) {
+  return await ctx.db.query("mlShuttles").withIndex("by_vehicleReservationId", (q) => q.eq("vehicleReservationId", reservationId)).first();
+}
+
+async function liveTransits(ctx: QueryCtx, shuttleId: Id<"mlShuttles">) {
+  return (await ctx.db.query("mlRequests").withIndex("by_shuttleId", (q) => q.eq("shuttleId", shuttleId)).take(100)).filter((row) => row.status !== "annulee");
+}
+
+/** Mes trajets à venir et les objets que Meslogistic m'a proposés / que j'ai acceptés. */
 export const myTrips = query({
   args: {},
   handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
-    const now = Date.now();
-    const [mine, forMe] = await Promise.all([
-      ctx.db.query("vehicleReservations").withIndex("by_clerkId", (q) => q.eq("clerkId", identity.subject)).order("desc").take(100),
-      ctx.db.query("vehicleReservations").withIndex("by_bookedForClerkId", (q) => q.eq("bookedForClerkId", identity.subject)).order("desc").take(100),
-    ]);
-    const byId = new Map<string, Doc<"vehicleReservations">>();
-    for (const reservation of [...mine, ...forMe]) if (isActive(reservation, now)) byId.set(reservation._id, reservation);
-    const trips = [...byId.values()].sort((a, b) => a.start - b.start);
+    const trips = await activeTripsOf(ctx, identity.subject);
     return await Promise.all(trips.map(async (reservation) => {
       const vehicle = await ctx.db.get(reservation.vehicleId);
-      const shuttle = await ctx.db.query("mlShuttles").withIndex("by_vehicleReservationId", (q) => q.eq("vehicleReservationId", reservation._id)).first();
-      const transits = shuttle
-        ? (await ctx.db.query("mlRequests").withIndex("by_shuttleId", (q) => q.eq("shuttleId", shuttle._id)).take(100)).filter((row) => row.status !== "annulee")
-        : [];
+      const shuttle = await tripShuttle(ctx, reservation._id);
+      const transits = shuttle ? await liveTransits(ctx, shuttle._id) : [];
       return {
         _id: reservation._id,
         vehicleName: vehicle?.name ?? "Véhicule",
@@ -225,22 +234,66 @@ export const myTrips = query({
         kmConfirmed: reservation.kmConfirmed ?? false,
         sitesOnRoute: reservation.sitesOnRoute ?? null,
         shuttle: shuttle ? { _id: shuttle._id, status: shuttleStatus(shuttle, transits) } : null,
-        transits: await Promise.all(transits.map((row) => transitRow(ctx, row))),
+        transits: await Promise.all(transits.map(async (row) => ({
+          ...(await transitRow(ctx, row)),
+          // Absent : objet pris par le conducteur lui-même (ancien fonctionnement).
+          driverDecision: row.driverDecision ?? "acceptee",
+        }))),
       };
     }));
   },
 });
 
-/** Objets en attente de transit, pas encore pris par une navette. */
-export const openTransits = query({
+/** Nombre d'objets proposés auxquels je n'ai pas encore répondu (badge du menu). */
+export const pendingProposalsCount = query({
   args: {},
   handler: async (ctx) => {
-    await requireCrmPermission(ctx, PAGE_KEY, "read");
-    const rows = (await ctx.db.query("mlRequests").withIndex("by_status", (q) => q.eq("status", "a_preparer")).take(300)).filter((row) => !row.shuttleId);
-    rows.sort((a, b) => (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999") || a.createdAt - b.createdAt);
-    return await Promise.all(rows.map((row) => transitRow(ctx, row)));
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return 0;
+    let count = 0;
+    for (const reservation of await activeTripsOf(ctx, identity.subject)) {
+      const shuttle = await tripShuttle(ctx, reservation._id);
+      if (!shuttle) continue;
+      const transits = await liveTransits(ctx, shuttle._id);
+      if (shuttleStatus(shuttle, transits) !== "planifiee") continue;
+      count += transits.filter((row) => row.status === "a_preparer" && row.driverDecision === "proposee").length;
+    }
+    return count;
   },
 });
+
+// ─── Navette Meslogistic du trajet ────────────────────────────────────────────
+
+/**
+ * Chaque trajet avec une destination a sa navette dans le calendrier
+ * Meslogistic, au nom du conducteur, même vide : l'équipe logistique peut
+ * alors lui proposer des objets. Met à jour nom, date et destination tant
+ * que la navette n'est pas partie.
+ */
+export async function syncTripShuttle(ctx: MutationCtx, reservationId: Id<"vehicleReservations">) {
+  const reservation = await ctx.db.get(reservationId);
+  if (!reservation?.destination || !isActive(reservation, Date.now())) return null;
+  const vehicle = await ctx.db.get(reservation.vehicleId);
+  const fields = {
+    name: `${reservation.userName} → ${reservation.destination.label}`.slice(0, 100),
+    scheduledDate: parisDay(reservation.start),
+    origin: LOCATIONS[HOME_SITE],
+    destination: reservation.destination.label.slice(0, 300),
+    driverName: reservation.userName,
+    driverClerkId: reservation.bookedForClerkId ?? reservation.clerkId,
+    vehicleName: vehicle?.name,
+  };
+  const shuttle = await tripShuttle(ctx, reservationId);
+  if (!shuttle) return await ctx.db.insert("mlShuttles", { ...fields, vehicleReservationId: reservationId, createdAt: Date.now() });
+  const transits = await liveTransits(ctx, shuttle._id);
+  if (shuttleStatus(shuttle, transits) !== "planifiee") return shuttle._id;
+  await ctx.db.patch(shuttle._id, fields);
+  const now = Date.now();
+  for (const row of transits) {
+    if (row.scheduledDate !== fields.scheduledDate) await ctx.db.patch(row._id, { scheduledDate: fields.scheduledDate, updatedAt: Math.max(now, row.updatedAt + 1) });
+  }
+  return shuttle._id;
+}
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
 
@@ -274,6 +327,7 @@ export const setTripDetails = mutation({
       patch.destination = trip.destination;
       patch.routeKm = trip.routeKm;
       patch.sitesOnRoute = trip.sitesOnRoute ?? [HOME_SITE];
+      patch.expectedKm = trip.routeKm;
       patch.kmConfirmed = false;
     }
     if (args.expectedKm !== undefined) {
@@ -281,6 +335,7 @@ export const setTripDetails = mutation({
       patch.kmConfirmed = true;
     }
     await ctx.db.patch(reservation._id, patch);
+    if (trip.destination) await syncTripShuttle(ctx, reservation._id);
   },
 });
 
@@ -288,90 +343,51 @@ async function logTransit(ctx: MutationCtx, requestId: Id<"mlRequests">, message
   await ctx.db.insert("mlEvents", { requestId, message, actor, createdAt: Date.now() });
 }
 
-/** « Prendre le produit » : les objets choisis rejoignent la navette du conducteur. */
-export const takeTransits = mutation({
-  args: { reservationId: v.id("vehicleReservations"), requestIds: v.array(v.id("mlRequests")) },
-  handler: async (ctx, { reservationId, requestIds }) => {
-    await requireCrmPermission(ctx, PAGE_KEY, "read");
-    const identity = await requireUser(ctx);
-    if (!requestIds.length || requestIds.length > 30) throw new ConvexError("Choisissez entre 1 et 30 objets.");
-    const reservation = await loadOwnTrip(ctx, reservationId, identity.subject);
-    if (!isActive(reservation, Date.now())) throw new ConvexError("Cette réservation est terminée ou annulée.");
-    if (!reservation.destination || !reservation.sitesOnRoute) throw new ConvexError("Indiquez d'abord la destination de votre trajet.");
-    const vehicle = await ctx.db.get(reservation.vehicleId);
-    const scheduledDate = parisDay(reservation.start);
-    const actor = reservation.userName;
-
-    let shuttle = await ctx.db.query("mlShuttles").withIndex("by_vehicleReservationId", (q) => q.eq("vehicleReservationId", reservationId)).first();
-    if (shuttle) {
-      const current = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", (q) => q.eq("shuttleId", shuttle!._id)).take(100)).filter((row) => row.status !== "annulee");
-      if (shuttleStatus(shuttle, current) !== "planifiee") throw new ConvexError("Votre navette est déjà partie : on ne peut plus y ajouter d'objets.");
-    } else {
-      const shuttleId = await ctx.db.insert("mlShuttles", {
-        name: `${reservation.userName} → ${reservation.destination.label}`.slice(0, 100),
-        scheduledDate,
-        origin: LOCATIONS[HOME_SITE],
-        destination: reservation.destination.label.slice(0, 300),
-        vehicleReservationId: reservationId,
-        driverName: reservation.userName,
-        driverClerkId: reservation.bookedForClerkId ?? reservation.clerkId,
-        vehicleName: vehicle?.name,
-        createdAt: Date.now(),
-      });
-      shuttle = (await ctx.db.get(shuttleId))!;
-    }
-
-    const now = Date.now();
-    for (const id of requestIds) {
-      const row = await ctx.db.get(id);
-      if (!row || row.status !== "a_preparer") throw new ConvexError("Un des objets n'est plus disponible. Actualisez la page.");
-      if (row.shuttleId === shuttle._id) continue;
-      if (row.shuttleId) throw new ConvexError(`L'objet ${row.reference} a déjà été pris par une autre navette.`);
-      if (!transitOnRoute(row, reservation.sitesOnRoute)) throw new ConvexError(`« ${row.title} » n'est pas sur votre route.`);
-      await ctx.db.patch(id, { shuttleId: shuttle._id, scheduledDate, prepared: true, assignee: actor, updatedAt: Math.max(now, row.updatedAt + 1) });
-      await logTransit(ctx, id, `Pris par ${actor} sur son trajet du ${scheduledDate} (${vehicle?.name ?? "véhicule"} → ${reservation.destination.label})`, actor);
-    }
-    return shuttle._id;
-  },
-});
-
-/** Repose un objet pris : il redevient disponible pour une autre navette. */
-export const releaseTransit = mutation({
-  args: { requestId: v.id("mlRequests") },
-  handler: async (ctx, { requestId }) => {
+/**
+ * Réponse du conducteur à un objet proposé par Meslogistic : il l'accepte, ou
+ * le refuse (l'objet retourne « À planifier »). Un objet accepté peut encore
+ * être rendu tant que la navette n'est pas partie.
+ */
+export const respondToTransit = mutation({
+  args: { requestId: v.id("mlRequests"), accept: v.boolean() },
+  handler: async (ctx, { requestId, accept }) => {
     await requireCrmPermission(ctx, PAGE_KEY, "read");
     const identity = await requireUser(ctx);
     const row = await ctx.db.get(requestId);
-    if (!row?.shuttleId) return;
+    if (!row?.shuttleId) throw new ConvexError("Cet objet n'est plus proposé sur votre trajet.");
     const shuttle = await ctx.db.get(row.shuttleId);
-    if (!shuttle?.vehicleReservationId) throw new ConvexError("Cet objet n'est pas dans une de vos navettes.");
+    if (!shuttle?.vehicleReservationId) throw new ConvexError("Cet objet n'est pas sur un de vos trajets.");
     const reservation = await loadOwnTrip(ctx, shuttle.vehicleReservationId, identity.subject);
-    if (row.status !== "a_preparer") throw new ConvexError("Cet objet est déjà parti.");
-    await detachTransit(ctx, row, `Reposé par ${reservation.userName} : de nouveau disponible`, reservation.userName);
-    await deleteShuttleIfEmpty(ctx, shuttle._id);
+    if (row.status !== "a_preparer" || shuttleStatus(shuttle, await liveTransits(ctx, shuttle._id)) !== "planifiee") {
+      throw new ConvexError("Votre navette est déjà partie.");
+    }
+    const actor = reservation.userName;
+    if (accept) {
+      if (row.driverDecision === "acceptee") return;
+      await ctx.db.patch(row._id, { driverDecision: "acceptee", assignee: actor, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
+      await logTransit(ctx, row._id, `Accepté par ${actor} sur son trajet du ${shuttle.scheduledDate}`, actor);
+    } else {
+      await detachTransit(ctx, row, `Refusé par ${actor} (trajet du ${shuttle.scheduledDate}) : à replanifier`, actor);
+    }
   },
 });
 
 async function detachTransit(ctx: MutationCtx, row: Doc<"mlRequests">, message: string, actor: string) {
-  await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, assignee: undefined, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
+  await ctx.db.patch(row._id, { shuttleId: undefined, scheduledDate: undefined, prepared: false, assignee: undefined, driverDecision: undefined, loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(Date.now(), row.updatedAt + 1) });
   await logTransit(ctx, row._id, message, actor);
-}
-
-async function deleteShuttleIfEmpty(ctx: MutationCtx, shuttleId: Id<"mlShuttles">) {
-  const remaining = await ctx.db.query("mlRequests").withIndex("by_shuttleId", (q) => q.eq("shuttleId", shuttleId)).first();
-  if (!remaining) await ctx.db.delete(shuttleId);
 }
 
 /**
  * Réservation annulée ou refusée : les objets pas encore partis redeviennent
- * disponibles, et la navette vide disparaît du calendrier Meslogistic.
+ * disponibles, et la navette disparaît du calendrier Meslogistic.
  */
 export async function releaseTripTransits(ctx: MutationCtx, reservationId: Id<"vehicleReservations">, reason: string) {
-  const shuttle = await ctx.db.query("mlShuttles").withIndex("by_vehicleReservationId", (q) => q.eq("vehicleReservationId", reservationId)).first();
+  const shuttle = await tripShuttle(ctx, reservationId);
   if (!shuttle) return;
   const rows = await ctx.db.query("mlRequests").withIndex("by_shuttleId", (q) => q.eq("shuttleId", shuttle._id)).take(100);
   for (const row of rows) {
-    if (row.status === "a_preparer") await detachTransit(ctx, row, `Navette de ${shuttle.driverName ?? "?"} annulée (${reason}) : de nouveau disponible`, "Mes Outils");
+    if (row.status === "a_preparer") await detachTransit(ctx, row, `Trajet de ${shuttle.driverName ?? "?"} annulé (${reason}) : à replanifier`, "Mes Outils");
   }
-  await deleteShuttleIfEmpty(ctx, shuttle._id);
+  const remaining = await ctx.db.query("mlRequests").withIndex("by_shuttleId", (q) => q.eq("shuttleId", shuttle._id)).first();
+  if (!remaining) await ctx.db.delete(shuttle._id);
 }

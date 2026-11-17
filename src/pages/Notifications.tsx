@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { Bell, CalendarCheck, CarFront, MessageCircle, Tag, ThumbsUp } from "lucide-react";
+import { Bell, CalendarCheck, CarFront, MessageCircle, Tag, ThumbsUp, Truck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -12,7 +12,7 @@ import { formatRelative } from "../lib/format";
 
 type NotificationItem = {
   _id: Id<"mesoutilsNotifications">;
-  kind: "room_reservation_confirmed" | "vehicle_reservation_decided" | "new_direct_message" | "post_liked" | "post_commented" | "deal_interest" | "vehicle_reservation_request";
+  kind: "room_reservation_confirmed" | "vehicle_reservation_decided" | "new_direct_message" | "post_liked" | "post_commented" | "deal_interest" | "vehicle_reservation_request" | "navette_proposal";
   title: string;
   body?: string;
   actorName?: string;
@@ -117,6 +117,7 @@ function iconFor(kind: NotificationItem["kind"]) {
   if (kind === "post_liked") return ThumbsUp;
   if (kind === "post_commented") return MessageCircle;
   if (kind === "vehicle_reservation_decided" || kind === "vehicle_reservation_request") return CarFront;
+  if (kind === "navette_proposal") return Truck;
   if (kind === "deal_interest") return Tag;
   return CalendarCheck;
 }

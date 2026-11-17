@@ -122,11 +122,11 @@ export const assignShuttle = mutation({
     if (args.shuttleId) {
       const shuttle = await ctx.db.get(args.shuttleId);
       if (!shuttle) throw new ConvexError("Navette introuvable.");
-      await ctx.db.patch(row._id, { shuttleId: shuttle._id, scheduledDate: shuttle.scheduledDate, prepared: true, updatedAt });
+      await ctx.db.patch(row._id, { shuttleId: shuttle._id, scheduledDate: shuttle.scheduledDate, prepared: true, driverDecision: shuttle.vehicleReservationId ? "proposee" : undefined, updatedAt });
       await event(ctx, row._id, `Affecté à la navette « ${shuttle.name} » du ${shuttle.scheduledDate}`, user.name ?? user.subject);
     } else {
       if (!row.shuttleId) return { updatedAt: row.updatedAt };
-      await ctx.db.patch(row._id, { shuttleId: undefined, updatedAt });
+      await ctx.db.patch(row._id, { shuttleId: undefined, driverDecision: undefined, updatedAt });
       await event(ctx, row._id, "Retiré de sa navette", user.name ?? user.subject);
     }
     return { updatedAt };
