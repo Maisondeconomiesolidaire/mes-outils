@@ -1513,8 +1513,13 @@ export default defineSchema(
     attendees: v.optional(v.number()),
     start: v.number(),
     end: v.number(),
-    status: v.optional(v.union(v.literal("confirmed"), v.literal("cancelled"))),
+    /** « pending » : date d'une série récurrente en attente de validation (Salles › Réservations). */
+    status: v.optional(v.union(v.literal("confirmed"), v.literal("cancelled"), v.literal("pending"))),
     notes: v.optional(v.string()),
+    /** Réservation récurrente : toutes les dates d'une série partagent cet identifiant. */
+    recurrenceId: v.optional(v.string()),
+    /** Règle lisible de la série, ex. « tous les 1 semaine jusqu'au 30/06/2027 ». */
+    recurrenceLabel: v.optional(v.string()),
     createdAt: v.number(),
     // Retour (« remarques ») demandé automatiquement après le créneau.
     feedbackRequestedAt: v.optional(v.number()),
@@ -1530,7 +1535,8 @@ export default defineSchema(
     .index("by_roomId", ["roomId"])
     .index("by_clerkId", ["clerkId"])
     .index("by_bookedForClerkId", ["bookedForClerkId"])
-    .index("by_start", ["start"]),
+    .index("by_start", ["start"])
+    .index("by_recurrenceId", ["recurrenceId"]),
 
   /** Équipements réservables (mêmes règles que les salles : créneau libre = confirmé). */
   equipments: defineTable({
@@ -1637,13 +1643,17 @@ export default defineSchema(
         }),
       ),
     ),
+    /** Réservation récurrente : toutes les dates d'une série partagent cet identifiant. */
+    recurrenceId: v.optional(v.string()),
+    recurrenceLabel: v.optional(v.string()),
     createdAt: v.number(),
   })
     .index("by_vehicleId", ["vehicleId"])
     .index("by_clerkId", ["clerkId"])
     .index("by_bookedForClerkId", ["bookedForClerkId"])
     .index("by_status", ["status"])
-    .index("by_start", ["start"]),
+    .index("by_start", ["start"])
+    .index("by_recurrenceId", ["recurrenceId"]),
 
   vehicleMaintenanceTasks: defineTable({
     vehicleId: v.id("vehicles"),

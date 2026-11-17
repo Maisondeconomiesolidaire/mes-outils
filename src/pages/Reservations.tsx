@@ -25,6 +25,7 @@ import { confirmPermanentDelete, alertDialog } from "../lib/confirm";
 import { useUpload } from "../lib/useUpload";
 import { BookEquipment } from "./Equipements";
 import { ReservationSearch, type ReservationSearchValue } from "../components/reservations/ReservationSearch";
+import { recurrenceLabel, recurrenceSlots } from "../lib/recurrence";
 import { ReservationIntro } from "../components/reservations/ReservationIntro";
 import { KmConfirm, usePlanTrip } from "../components/navettes/Navettes";
 import { PlaceSearch, type Destination } from "../components/navettes/PlaceSearch";
@@ -132,6 +133,12 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const range = search;
   const rangeValid = range !== null && range.start < range.end;
   const usage = search?.usage ?? null;
+  const recurrence = search?.recurrence ?? null;
+  // Réservation récurrente : toutes les dates de la série (la 1re = le créneau choisi).
+  const slots = useMemo(
+    () => (search && recurrence ? recurrenceSlots(search.start, search.end, recurrence) : null),
+    [search, recurrence],
+  );
 
   const [query, setQuery] = useState("");
   const [minSeats, setMinSeats] = useState("");
@@ -181,6 +188,13 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
   const [forUser, setForUser] = useState<Person | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const conflicts = useQuery(
+    api.reservations.recurrenceConflicts,
+    slots && slots.length > 1 && (bookingRoom || bookingVehicle)
+      ? { roomId: bookingRoom?._id, vehicleId: bookingRoom ? undefined : bookingVehicle?._id, slots }
+      : "skip",
+  );
+  const freeSlotCount = slots ? slots.length - (conflicts?.length ?? 0) : 1;
 
   function openBooking(room: Room | null, vehicle: Vehicle | null) {
     setBookingRoom(room); setBookingVehicle(vehicle);
@@ -199,7 +213,11 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     Boolean(label.trim()) &&
     (!bookingRoom || (attendeesValue >= 1 && !overCapacity)) &&
     (!bookingVehicle || !willTransport || Boolean(transportDetails.trim())) &&
-    (!bookingVehicle || Boolean(destination && tripPlan));
+    (!bookingVehicle || Boolean(destination && tripPlan)) &&
+    (!slots || slots.length < 2 || (conflicts !== undefined && freeSlotCount > 0));
+  const seriesArgs = slots && slots.length > 1 && recurrence
+    ? { slots, recurrenceLabel: recurrenceLabel(recurrence) }
+    : {};
 
   async function chooseDestination(next: Destination | null) {
     setDestination(next); setTripPlan(null);
@@ -219,9 +237,9 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
     if (!range || !rangeValid || !canSubmit) return;
     setSubmitting(true); setError(null);
     try {
-      if (bookingRoom) await bookRoom({ roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
+      if (bookingRoom) await bookRoom({ ...seriesArgs, roomId: bookingRoom._id, title: label, usageType: roomUsage, attendees: attendeesValue || undefined, start: range.start, end: range.end, notes: notes || undefined, forClerkId: forUser?.clerkId, forName: forUser?.name });
       else if (bookingVehicle && destination && tripPlan) {
-        await requestVehicle({ vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: tripPlan.roundTripKm, kmConfirmed: false, destination, routeKm: tripPlan.roundTripKm, sitesOnRoute: tripPlan.sitesOnRoute, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
+        await requestVehicle({ ...seriesArgs, vehicleId: bookingVehicle._id, purpose: label, usageType: vehicleUsage, expectedKm: tripPlan.roundTripKm, kmConfirmed: false, destination, routeKm: tripPlan.roundTripKm, sitesOnRoute: tripPlan.sitesOnRoute, willTransport, transportDetails: willTransport ? transportDetails : undefined, start: range.start, end: range.end, forClerkId: forUser?.clerkId, forName: forUser?.name });
       }
       closeBooking();
     } catch (caught) {
@@ -378,6 +396,34 @@ function BrowseAndBook({ tab }: { tab: "rooms" | "vehicles" }) {
           <div className="rounded-lg bg-[var(--accent)] px-3 py-2 text-sm text-[var(--foreground)]">
             {rangeValid ? `${formatDateTime(range.start)} → ${formatDateTime(range.end)}` : "Créneau non défini"}
           </div>
+          {slots && slots.length > 1 && recurrence ? (
+            <div className="space-y-2 rounded-lg border border-brand-500/40 bg-brand-500/5 px-3 py-2 text-sm">
+              <p className="font-semibold text-[var(--foreground)]">
+                Réservation récurrente : {recurrenceLabel(recurrence)} · {slots.length} dates
+              </p>
+              {conflicts === undefined ? (
+                <p className="text-xs text-[var(--muted-foreground)]">Vérification des disponibilités…</p>
+              ) : conflicts.length > 0 ? (
+                <div className="space-y-1">
+                  <ul className="max-h-40 space-y-1 overflow-y-auto">
+                    {conflicts.map((conflict) => (
+                      <li key={conflict.start} className="rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900 dark:bg-amber-500/15 dark:text-amber-200">
+                        Le {new Date(conflict.start).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })} : {conflict.userName ? `déjà réservé par ${conflict.userName}` : conflict.reason ?? "indisponible"}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-xs text-[var(--muted-foreground)]">
+                    {freeSlotCount > 0 ? `Ces dates seront ignorées : ${freeSlotCount} date${freeSlotCount > 1 ? "s" : ""} sur ${slots.length} seront réservées.` : "Aucune date de la série n'est disponible."}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-[var(--muted-foreground)]">Toutes les dates sont disponibles.</p>
+              )}
+              {bookingRoom ? (
+                <p className="text-xs text-[var(--muted-foreground)]">Une réservation récurrente de salle doit être validée par un responsable (Salles › Réservations).</p>
+              ) : null}
+            </div>
+          ) : null}
           <Field label={bookingRoom ? "Objet de la réservation" : "Motif de la réservation"} required>
             {bookingRoom ? <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Réunion équipe..." /> : <Textarea value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Collecte, déménagement..." />}
           </Field>

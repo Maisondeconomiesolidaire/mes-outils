@@ -43,8 +43,10 @@ type RoomReservation = {
   bookedByName?: string;
   start: number;
   end: number;
-  status?: "confirmed" | "cancelled";
+  status?: "confirmed" | "cancelled" | "pending";
   notes?: string;
+  recurrenceId?: string;
+  recurrenceLabel?: string;
 };
 
 const emptyRoomForm = {
@@ -195,7 +197,7 @@ export function Salles() {
           )
         ) : null}
 
-        {sub === "reservations" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} mode="agenda" /> : null}
+        {sub === "reservations" && canSeeReservations ? <><PendingRoomSeries rooms={rooms} /><RoomReservationsAgenda rooms={rooms} mode="agenda" /></> : null}
         {sub === "remarques" ? <ReservationRemarks kind="room" /> : null}
         {sub === "calendar" && canSeeReservations ? <RoomReservationsAgenda rooms={rooms} mode="calendar" /> : null}
       </div>
@@ -241,6 +243,81 @@ export function Salles() {
         </div>
       </Modal>
     </>
+  );
+}
+
+/**
+ * Réservations récurrentes en attente : elles ne sont jamais acceptées
+ * automatiquement, un responsable valide ou refuse toute la série.
+ */
+function PendingRoomSeries({ rooms }: { rooms: Room[] }) {
+  const access = usePermissionsAccess();
+  const canDecide = canAccess(access, "mesoutils:salles", "update") || canAccess(access, "mesoutils:reservations", "manage");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const dayStart = today.getTime();
+  const reservations = useQuery(api.reservations.listRoomReservations, {
+    start: dayStart - 365 * 86_400_000,
+    end: dayStart + 2 * 365 * 86_400_000,
+  }) as RoomReservation[] | undefined;
+  const decide = useMutation(api.reservations.decideRoomSeries);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const roomById = new Map(rooms.map((room) => [String(room._id), room]));
+  const series = new Map<string, RoomReservation[]>();
+  for (const reservation of reservations ?? []) {
+    if (reservation.status !== "pending" || !reservation.recurrenceId) continue;
+    series.set(reservation.recurrenceId, [...(series.get(reservation.recurrenceId) ?? []), reservation]);
+  }
+  if (series.size === 0) return null;
+
+  async function answer(recurrenceId: string, decision: "approved" | "rejected") {
+    setBusy(recurrenceId);
+    setError(null);
+    try {
+      await decide({ recurrenceId, decision });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Décision impossible.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className="premium-panel mb-5 overflow-hidden rounded-2xl border border-amber-300 dark:border-amber-500/40">
+      <div className="border-b border-[var(--border)] bg-amber-50 px-5 py-2.5 dark:bg-amber-500/10">
+        <p className="text-sm font-bold text-[var(--foreground)]">Réservations récurrentes à valider ({series.size})</p>
+      </div>
+      {error ? <p className="mx-5 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/40 dark:text-red-300">{error}</p> : null}
+      <div className="divide-y divide-[var(--border)]">
+        {[...series.entries()].map(([recurrenceId, items]) => {
+          const sorted = [...items].sort((a, b) => a.start - b.start);
+          const first = sorted[0];
+          const room = roomById.get(String(first.roomId));
+          return (
+            <div key={recurrenceId} className="flex flex-wrap items-center gap-4 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-[var(--foreground)]">{first.title} · {room?.name ?? "Salle"}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  {first.userName} · {first.recurrenceLabel ?? "récurrente"} · {sorted.length} date{sorted.length > 1 ? "s" : ""}
+                </p>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  Du {formatDateTime(first.start)} au {formatDateTime(sorted[sorted.length - 1].start)}
+                </p>
+              </div>
+              {canDecide ? (
+                <div className="flex gap-2">
+                  <Button size="sm" disabled={busy !== null} onClick={() => void answer(recurrenceId, "approved")}>Accepter</Button>
+                  <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void answer(recurrenceId, "rejected")}>Refuser</Button>
+                </div>
+              ) : (
+                <span className="text-xs font-semibold text-amber-700">En attente de validation</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -455,6 +532,8 @@ function RoomReservationsAgenda({ rooms, mode }: { rooms: Room[]; mode: "agenda"
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-[var(--foreground)]">
                     {reservation.title} · {room?.name ?? "Salle"}
+                    {reservation.status === "pending" ? <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:bg-amber-500/20 dark:text-amber-200">En attente de validation</span> : null}
+                    {reservation.recurrenceId ? <span className="ml-2 rounded-full bg-brand-500/10 px-2 py-0.5 text-[11px] font-bold text-brand-700">Récurrente</span> : null}
                   </p>
                   <p className="truncate text-xs text-[var(--muted-foreground)]">
                     {reservation.userName} · {formatDateTime(reservation.start)} → {formatDateTime(reservation.end)}

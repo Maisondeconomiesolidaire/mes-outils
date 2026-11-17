@@ -2,11 +2,12 @@ import { useId, useRef, useState } from "react";
 import { Dialog, Select } from "radix-ui";
 import { addMonths, eachDayOfInterval, endOfMonth, format, startOfDay, startOfMonth } from "date-fns";
 import { fr } from "date-fns/locale";
-import { BriefcaseBusiness, CalendarDays, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Search, UserRound, X } from "lucide-react";
+import { BriefcaseBusiness, CalendarDays, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Repeat, Search, UserRound, X } from "lucide-react";
+import { MAX_RECURRENCE_SLOTS, RECURRENCE_UNITS, recurrenceSlots, type Recurrence } from "../../lib/recurrence";
 import { cn } from "../../lib/cn";
 import { Button } from "../ui/Button";
 
-export type ReservationSearchValue = { start: number; end: number; usage: "pro" | "personal" };
+export type ReservationSearchValue = { start: number; end: number; usage: "pro" | "personal"; recurrence: Recurrence | null };
 type Dates = { start: string; end: string; startTime: string; endTime: string };
 const EMPTY_DATES: Dates = { start: "", end: "", startTime: "09:00", endTime: "10:00" };
 const HOURS = Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`);
@@ -26,6 +27,9 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
   const [dates, setDates] = useState<Dates>(EMPTY_DATES);
   const [draft, setDraft] = useState<Dates>(EMPTY_DATES);
   const [usage, setUsage] = useState<"pro" | "personal" | null>(null);
+  // Réservation récurrente : « tous les {every} {unit} jusqu'au {until} ».
+  const [recurring, setRecurring] = useState(false);
+  const [recurrence, setRecurrence] = useState<Recurrence>({ every: 1, unit: "week", until: "" });
   const [activeDate, setActiveDate] = useState<"start" | "end">("start");
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const today = format(new Date(), "yyyy-MM-dd");
@@ -59,9 +63,25 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
     const to = timestamp(source.end, source.endTime);
     if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to <= Date.now()) { openDates(); return; }
     if (withUsage && !usage) { setStep("usage"); return; }
-    onSearch({ start: from, end: to, usage: usage ?? "pro" });
+    if (withUsage && recurring && !recurrenceValid(source)) { setStep("usage"); return; }
+    onSearch({ start: from, end: to, usage: usage ?? "pro", recurrence: withUsage && recurring ? recurrence : null });
     setStep(null);
   }
+
+  function recurrenceValid(source: Dates) {
+    return recurrence.every >= 1 && Boolean(recurrence.until) && recurrence.until > source.start;
+  }
+  function toggleRecurring(next: boolean) {
+    setRecurring(next);
+    if (next && !recurrence.until && dates.start) {
+      const until = new Date(`${dates.start}T12:00:00`);
+      until.setMonth(until.getMonth() + 1);
+      setRecurrence((current) => ({ ...current, until: format(until, "yyyy-MM-dd") }));
+    }
+  }
+  const occurrenceCount = recurring && recurrenceValid(dates)
+    ? recurrenceSlots(timestamp(dates.start, dates.startTime), timestamp(dates.end, dates.endTime), recurrence).length
+    : 0;
 
   const datesLabel = dates.start && dates.end
     ? `${format(new Date(`${dates.start}T12:00:00`), "dd MMM", { locale: fr })} · ${dates.startTime} → ${format(new Date(`${dates.end}T12:00:00`), "dd MMM", { locale: fr })} · ${dates.endTime}`
@@ -76,7 +96,7 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
         </button>
         {withUsage && <button type="button" onClick={() => setStep("usage")} className={cn("flex items-center gap-3 rounded-full px-5 py-4 text-left transition hover:bg-[var(--card)] focus-visible:outline-brand-500 sm:min-w-52", step === "usage" && "bg-[var(--card)] shadow-md")}>
           <BriefcaseBusiness className="h-5 w-5 shrink-0 text-brand-600" />
-          <span><span className="block text-sm font-bold">2 · Usage</span><span className="block text-sm text-[var(--muted-foreground)]">{usage === "pro" ? "Professionnel" : usage === "personal" ? "Personnel" : "Pour quel usage ?"}</span></span>
+          <span><span className="block text-sm font-bold">2 · Usage</span><span className="block text-sm text-[var(--muted-foreground)]">{usage === "pro" ? "Professionnel" : usage === "personal" ? "Personnel" : "Pour quel usage ?"}{usage && recurring ? " · récurrente" : ""}</span></span>
         </button>}
         <Button type="button" size="lg" className="h-14 rounded-full px-6" onClick={() => search()}><Search className="h-5 w-5" />Rechercher</Button>
       </div>
@@ -130,10 +150,32 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
                 </div>)}
               </div>
               {error && <p role="alert" className="mt-4 text-sm text-red-600">{error}</p>}
-            </> : <div className="grid gap-4 sm:grid-cols-2">
+            </> : <div className="space-y-6"><div className="grid gap-4 sm:grid-cols-2">
               {([{ value: "pro", label: "Professionnel", description: "Réunion, mission ou activité professionnelle.", Icon: BriefcaseBusiness }, { value: "personal", label: "Personnel", description: "Événement ou besoin personnel.", Icon: UserRound }] as const).map(({ value, label, description, Icon }) => <button key={value} type="button" aria-pressed={usage === value} onClick={() => setUsage(value)} className={cn("relative rounded-3xl border-2 p-6 text-left transition hover:border-brand-500", usage === value ? "border-brand-500 bg-brand-500/5" : "border-[var(--border)]")}>
                 <Icon className="mb-5 h-8 w-8" />{usage === value && <Check className="absolute right-5 top-5 h-5 w-5 text-brand-600" />}<span className="block text-xl font-bold">{label}</span><span className="mt-2 block text-sm text-[var(--muted-foreground)]">{description}</span>
               </button>)}
+            </div>
+            <div className="rounded-3xl border-2 border-[var(--border)] p-5">
+              <p className="flex items-center gap-2 font-bold"><Repeat className="h-5 w-5 text-brand-600" />Réservation récurrente ?</p>
+              <div className="mt-3 flex gap-2">
+                {([false, true] as const).map((value) => <button key={String(value)} type="button" aria-pressed={recurring === value} onClick={() => toggleRecurring(value)} className={cn("rounded-full border-2 px-5 py-2 text-sm font-semibold transition", recurring === value ? "border-brand-500 bg-brand-500/10" : "border-[var(--border)] hover:border-brand-500")}>{value ? "Oui" : "Non"}</button>)}
+              </div>
+              {recurring && <div className="mt-4 space-y-2">
+                <p className="flex flex-wrap items-center gap-2 text-base">
+                  <span>Tous les</span>
+                  <input aria-label="Intervalle" type="number" min={1} max={99} value={recurrence.every} onChange={(e) => setRecurrence((current) => ({ ...current, every: Math.max(1, Math.min(99, Number(e.target.value) || 1)) }))} className="w-16 rounded-xl border-2 border-[var(--border)] bg-transparent px-2 py-1.5 text-center font-semibold outline-none focus:border-brand-500" />
+                  <select aria-label="Unité" value={recurrence.unit} onChange={(e) => setRecurrence((current) => ({ ...current, unit: e.target.value as Recurrence["unit"] }))} className="rounded-xl border-2 border-[var(--border)] bg-[var(--card)] px-2 py-1.5 font-semibold outline-none focus:border-brand-500">
+                    {RECURRENCE_UNITS.map((unit) => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
+                  </select>
+                  <span>jusqu'au</span>
+                  <input aria-label="Fin de la récurrence" type="date" min={dates.start || today} value={recurrence.until} onChange={(e) => setRecurrence((current) => ({ ...current, until: e.target.value }))} className="rounded-xl border-2 border-[var(--border)] bg-transparent px-2 py-1.5 font-semibold outline-none focus:border-brand-500" />
+                </p>
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  {!recurrenceValid(dates) ? "Choisissez une date de fin après le premier jour réservé."
+                    : `Même jour et mêmes horaires que le créneau choisi : ${occurrenceCount} date${occurrenceCount > 1 ? "s" : ""}${occurrenceCount >= MAX_RECURRENCE_SLOTS ? ` (maximum ${MAX_RECURRENCE_SLOTS})` : ""}.`}
+                </p>
+              </div>}
+            </div>
             </div>}
           </div>
           <div className="flex shrink-0 items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-4 sm:px-8">
@@ -144,7 +186,7 @@ export function ReservationSearch({ onSearch, withUsage = true }: { onSearch: (v
               </Button>
             </> : <>
               <Button type="button" variant="ghost" onClick={openDates}><ChevronLeft className="h-4 w-4" />Retour</Button>
-              <Button type="button" className="rounded-full px-6" disabled={!usage} onClick={() => search()}><Search className="h-4 w-4" />Rechercher</Button>
+              <Button type="button" className="rounded-full px-6" disabled={!usage || (recurring && !recurrenceValid(dates))} onClick={() => search()}><Search className="h-4 w-4" />Rechercher</Button>
             </>}
           </div>
         </Dialog.Content>
