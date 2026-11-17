@@ -3390,7 +3390,10 @@ export const pickupOperations = query({
             requested: { at: transfer.createdAt, by: firstEvent?.actor as string | undefined },
             // Une étape est faite d'après le statut du transit ; la date vient du journal,
             // quel que soit le flux Meslogistic qui l'a écrit (ancien ou navettes v2).
-            assigned: transfer.shuttleId || transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => /^(Ajoutée|Affecté) à la navette/.test(message) || message.endsWith("· assign")) ?? { at: undefined, by: undefined } : undefined,
+            // Trajet d'un salarié : la navette n'est assignée qu'une fois le transfert accepté par le conducteur.
+            assigned: (transfer.shuttleId && transfer.driverDecision !== "a_confirmer" && transfer.driverDecision !== "proposee") || transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => /^(Ajoutée|Affecté) à la navette/.test(message) || /^Accepté par /.test(message) || message.endsWith("· assign")) ?? { at: undefined, by: undefined } : undefined,
+            /** Proposé au conducteur d'un trajet Mes Outils, qui n'a pas encore accepté. */
+            awaitingDriver: transfer.shuttleId && transfer.status === "a_preparer" && (transfer.driverDecision === "a_confirmer" || transfer.driverDecision === "proposee") ? shuttle?.driverName ?? "le conducteur" : undefined,
             transit: transfer.status === "en_transit" || transfer.status === "receptionnee" ? lastEvent(message => /^(En transit|Objets en transit)/.test(message) || message.endsWith("· depart")) ?? { at: shuttle?.departedAt, by: undefined } : undefined,
             arrived: transfer.status === "receptionnee" ? lastEvent(message => /^(Livrée|Objets réceptionnés)/.test(message) || message.includes("· receive")) ?? { at: transfer.receivedAt, by: undefined } : undefined,
             shuttleName: shuttle?.name,

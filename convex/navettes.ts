@@ -232,7 +232,8 @@ export const myTrips = query({
     return await Promise.all(trips.map(async (reservation) => {
       const vehicle = await ctx.db.get(reservation.vehicleId);
       const shuttle = await tripShuttle(ctx, reservation._id);
-      const transits = shuttle ? await liveTransits(ctx, shuttle._id) : [];
+      // Objets pas encore proposés (« à confirmer » côté logistique) : invisibles.
+      const transits = shuttle ? (await liveTransits(ctx, shuttle._id)).filter((row) => row.driverDecision !== "a_confirmer") : [];
       return {
         _id: reservation._id,
         vehicleName: vehicle?.name ?? "Véhicule",
@@ -377,6 +378,7 @@ export const respondToTransit = mutation({
     if (row.status !== "a_preparer" || shuttleStatus(shuttle, await liveTransits(ctx, shuttle._id)) !== "planifiee") {
       throw new ConvexError("Votre navette est déjà partie.");
     }
+    if (row.driverDecision === "a_confirmer") throw new ConvexError("Cet objet ne vous a pas encore été proposé.");
     const actor = reservation.userName;
     if (accept) {
       if (row.driverDecision === "acceptee") return;
@@ -419,7 +421,7 @@ async function departTripShuttle(ctx: MutationCtx, shuttle: Doc<"mlShuttles">, a
   if (shuttleStatus(shuttle, transits) !== "planifiee") return;
   const now = Date.now();
   for (const row of transits.filter((item) => item.status === "a_preparer")) {
-    if (row.driverDecision === "proposee") {
+    if (row.driverDecision === "proposee" || row.driverDecision === "a_confirmer") {
       await detachTransit(ctx, row, `Sans réponse de ${shuttle.driverName ?? "?"} au départ de son trajet : à replanifier`, actor);
       continue;
     }

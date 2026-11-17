@@ -8,9 +8,10 @@
  */
 import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { requireCrmPermission, requireUser } from "./lib";
+import { emailForClerkId, requireCrmPermission, requireUser } from "./lib";
 import { materialPhoto, materialSlot } from "./meslogistic";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
@@ -52,7 +53,9 @@ export const board = query({
       const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
       // Trajet d'un salarié : son créneau et le motif de sa réservation de véhicule.
       const reservation = shuttle.vehicleReservationId ? await ctx.db.get(shuttle.vehicleReservationId) : null;
-      const trip = reservation ? { start: reservation.start, end: reservation.end, purpose: reservation.purpose, destinationAt: reservation.destination ? [reservation.destination.longitude, reservation.destination.latitude] as [number, number] : null } : null;
+      const vehicle = reservation ? await ctx.db.get(reservation.vehicleId) : null;
+      const vehiclePhotoUrl = vehicle ? (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle.photoUrl ?? null) : null;
+      const trip = reservation ? { start: reservation.start, end: reservation.end, purpose: reservation.purpose, vehiclePhotoUrl, destinationAt: reservation.destination ? [reservation.destination.longitude, reservation.destination.latitude] as [number, number] : null } : null;
       return { trip, _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
@@ -77,30 +80,67 @@ export const addRequests = mutation({
     const { shuttle, status } = await loadShuttle(ctx, shuttleId);
     if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie : on ne peut plus y ajouter de demandes.");
     const now = Date.now();
-    // Trajet d'un salarié (réservation de véhicule Mes Outils) : les objets lui
-    // sont proposés, il les accepte ou les refuse depuis la page Navettes.
+    // Trajet d'un salarié (réservation de véhicule Mes Outils) : les objets
+    // attendent le bouton « Confirmer », qui les lui propose (notification +
+    // e-mail) ; il les accepte ou les refuse depuis la page Navettes.
     const proposal = Boolean(shuttle.vehicleReservationId);
-    let proposed = 0;
     for (const id of requestIds) {
       const row = await ctx.db.get(id);
       if (!row || row.status !== "a_preparer") throw new ConvexError("Une des demandes n’est plus disponible. Actualisez la page.");
       if (row.shuttleId && row.shuttleId !== shuttleId) throw new ConvexError(`La demande ${row.reference} est déjà dans une autre navette.`);
       if (row.shuttleId === shuttleId) continue;
-      await ctx.db.patch(id, { shuttleId, scheduledDate: shuttle.scheduledDate, prepared: true, driverDecision: proposal ? "proposee" : undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
-      await log(ctx, id, proposal ? `Proposée à ${shuttle.driverName ?? "?"} pour son trajet du ${shuttle.scheduledDate}` : `Ajoutée à la navette « ${shuttle.name} » du ${shuttle.scheduledDate}`, user.name ?? user.subject);
-      proposed += 1;
+      await ctx.db.patch(id, { shuttleId, scheduledDate: shuttle.scheduledDate, prepared: true, driverDecision: proposal ? "a_confirmer" : undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await log(ctx, id, proposal ? `Ajoutée au trajet de ${shuttle.driverName ?? "?"} du ${shuttle.scheduledDate} (proposition à confirmer)` : `Ajoutée à la navette « ${shuttle.name} » du ${shuttle.scheduledDate}`, user.name ?? user.subject);
     }
-    if (proposal && proposed > 0) {
-      await createMesoutilsNotification(ctx, {
-        recipientClerkId: shuttle.driverClerkId,
-        kind: "navette_proposal",
-        title: proposed > 1 ? `${proposed} objets à transporter vous sont proposés` : "Un objet à transporter vous est proposé",
-        body: [shuttle.destination, shuttle.vehicleName, shuttle.scheduledDate].filter(Boolean).join(" · "),
-        actorName: user.name ?? undefined,
-        actorClerkId: user.subject,
-        href: "/navettes",
+  },
+});
+
+/**
+ * Trajet d'un salarié : envoie la proposition des objets ajoutés (« à
+ * confirmer ») au conducteur, par notification Mes Outils et par e-mail.
+ */
+export const confirmProposals = mutation({
+  args: { shuttleId: v.id("mlShuttles") },
+  handler: async (ctx, { shuttleId }) => {
+    await requireCrmPermission(ctx, PAGE, "update");
+    const user = await requireUser(ctx);
+    const { shuttle, transits, status } = await loadShuttle(ctx, shuttleId);
+    if (!shuttle.vehicleReservationId) throw new ConvexError("Cette navette n'est pas le trajet d'un salarié.");
+    if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
+    const drafts = transits.filter(row => row.status === "a_preparer" && row.driverDecision === "a_confirmer");
+    if (!drafts.length) throw new ConvexError("Aucun objet à proposer.");
+    const now = Date.now();
+    const actor = user.name ?? user.subject;
+    for (const row of drafts) {
+      await ctx.db.patch(row._id, { driverDecision: "proposee", updatedAt: Math.max(now, row.updatedAt + 1) });
+      await log(ctx, row._id, `Proposée à ${shuttle.driverName ?? "?"} pour son trajet du ${shuttle.scheduledDate}`, actor);
+    }
+    const reservation = await ctx.db.get(shuttle.vehicleReservationId);
+    const recipientClerkId = shuttle.driverClerkId ?? reservation?.bookedForClerkId ?? reservation?.clerkId;
+    await createMesoutilsNotification(ctx, {
+      recipientClerkId,
+      kind: "navette_proposal",
+      title: drafts.length > 1 ? `${drafts.length} objets à transporter vous sont proposés` : "Un objet à transporter vous est proposé",
+      body: [shuttle.destination, shuttle.vehicleName, shuttle.scheduledDate].filter(Boolean).join(" · "),
+      actorName: user.name ?? undefined,
+      actorClerkId: user.subject,
+      href: "/navettes",
+    });
+    const email = recipientClerkId ? await emailForClerkId(ctx, recipientClerkId) : null;
+    if (email && reservation) {
+      await ctx.scheduler.runAfter(0, internal.mesoutilsEmails.sendNavetteProposalEmail, {
+        email,
+        name: shuttle.driverName ?? reservation.userName,
+        proposedBy: actor,
+        vehicleName: shuttle.vehicleName ?? undefined,
+        destination: shuttle.destination ?? undefined,
+        purpose: reservation.purpose,
+        start: reservation.start,
+        end: reservation.end,
+        items: drafts.map(row => ({ title: row.title, quantity: row.quantity, unit: row.unit ?? undefined, origin: row.origin ?? undefined, destination: row.destination ?? undefined })),
       });
     }
+    return { proposed: drafts.length, emailed: Boolean(email) };
   },
 });
 

@@ -556,10 +556,12 @@ export default defineSchema(
     loadedBy: v.optional(v.string()),
     /**
      * Objet proposé au conducteur d'un trajet Mes Outils (navette née d'une
-     * réservation de véhicule) : « proposee » tant qu'il n'a pas répondu,
-     * « acceptee » quand il accepte. Un refus le retire de la navette.
+     * réservation de véhicule) : « a_confirmer » tant que la logistique n'a
+     * pas envoyé sa proposition (bouton « Confirmer »), « proposee » tant
+     * qu'il n'a pas répondu, « acceptee » quand il accepte. Un refus le
+     * retire de la navette.
      */
-    driverDecision: v.optional(v.union(v.literal("proposee"), v.literal("acceptee"))),
+    driverDecision: v.optional(v.union(v.literal("a_confirmer"), v.literal("proposee"), v.literal("acceptee"))),
   }).index("by_orderId", ["orderId"]).index("by_status", ["status"]).index("by_shuttleId", ["shuttleId"]),
   mlEvents: defineTable({
     requestId: v.id("mlRequests"), actor: v.string(), message: v.string(), createdAt: v.number(),

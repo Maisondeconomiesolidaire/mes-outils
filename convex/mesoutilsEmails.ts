@@ -345,6 +345,59 @@ export const sendVehicleFeedbackRequestEmail = internalAction({
 });
 
 /** Demande de retour (remarques) après une réservation de salle terminée. */
+/** Meslogistic propose des objets à transporter sur le trajet d'un salarié. */
+export const sendNavetteProposalEmail = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    proposedBy: v.string(),
+    vehicleName: v.optional(v.string()),
+    destination: v.optional(v.string()),
+    purpose: v.string(),
+    start: v.number(),
+    end: v.number(),
+    items: v.array(v.object({
+      title: v.string(),
+      quantity: v.number(),
+      unit: v.optional(v.string()),
+      origin: v.optional(v.string()),
+      destination: v.optional(v.string()),
+    })),
+  },
+  handler: async (_ctx, args) => {
+    const count = args.items.length;
+    const rows: Array<[string, string]> = [["Trajet", formatRange(args.start, args.end)]];
+    if (args.destination) rows.push(["Destination", args.destination]);
+    if (args.vehicleName) rows.push(["Véhicule", args.vehicleName]);
+    rows.push(["Motif", args.purpose]);
+    const list = args.items
+      .map((item) => {
+        const route = [item.origin, item.destination].filter(Boolean).join(" → ");
+        return `<tr><td style="padding:10px 0;border-top:1px solid #ececec;font-family:Helvetica,Arial,sans-serif;">
+          <div style="font-size:14px;font-weight:700;color:#27272a;">${esc(item.title)} <span style="font-weight:400;color:#71717a;">· ${esc(`${item.quantity} ${item.unit ?? ""}`.trim())}</span></div>
+          ${route ? `<div style="margin-top:2px;font-size:13px;color:#71717a;">${esc(route)}</div>` : ""}
+        </td></tr>`;
+      })
+      .join("");
+    const html = shell({
+      preheader: `${count > 1 ? `${count} objets à transporter vous sont proposés` : "Un objet à transporter vous est proposé"} sur votre trajet.`,
+      heading: "Transport d'objets proposé",
+      intro: `Bonjour ${esc(args.name)}, ${esc(args.proposedBy)} (logistique) vous propose de transporter ${count > 1 ? `${count} objets` : "un objet"} pendant votre trajet. Acceptez ceux que vous pouvez emporter et refusez les autres depuis la page Navettes de Mes Outils.`,
+      contentHtml: `
+        ${detailCard(rows)}
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;">${list}</table>
+        ${button(appLink("/navettes"), "Répondre à la proposition")}
+      `,
+    });
+    await resendSend(
+      args.email,
+      count > 1 ? `${count} objets à transporter sur votre trajet` : "Un objet à transporter sur votre trajet",
+      html,
+      FROM,
+    );
+  },
+});
+
 export const sendRoomFeedbackRequestEmail = internalAction({
   args: {
     email: v.string(),
