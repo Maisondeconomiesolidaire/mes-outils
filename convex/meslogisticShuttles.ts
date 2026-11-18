@@ -7,11 +7,11 @@
  * Bâtire suivent automatiquement (leur transit passe par les mêmes statuts).
  */
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
-import { internal } from "./_generated/api";
-import type { MutationCtx } from "./_generated/server";
+import { action, env, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { api, internal } from "./_generated/api";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { emailForClerkId, requireCrmPermission, requireUser } from "./lib";
+import { accessAllows, emailForClerkId, fetchInternalClerkDirectory, hasCrmPermission, requireCrmPermission, requireUser } from "./lib";
 import { materialPhoto, materialSlot } from "./meslogistic";
 import { tourneeDriverName } from "./sorties";
 import { shortLocationName } from "./meslogisticRules";
@@ -144,7 +144,7 @@ export const board = query({
       const trip = reservation ? { start: reservation.start, end: reservation.end, purpose: reservation.purpose, vehiclePhotoUrl, destinationAt: reservation.destination ? [reservation.destination.longitude, reservation.destination.latitude] as [number, number] : null } : null;
       // Trajet d'un salarié : « départ → destination », même pour les navettes nommées avant.
       const name = reservation?.destination ? `${shortLocationName(shuttle.origin) || "Départ"} → ${reservation.destination.label}` : shuttle.name;
-      return { trip, _id: shuttle._id, name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
+      return { trip, _id: shuttle._id, name, finalizedAt: shuttle.finalizedAt ?? null, driverClerkId: shuttle.driverClerkId ?? null, driverEmail: shuttle.driverEmail ?? null, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
     return { shuttles: rows, unassigned: await Promise.all(unassigned.map(view)) };
@@ -377,5 +377,218 @@ export const deliverShuttle = mutation({
     }
     const remaining = transits.filter(row => row.status === "en_transit" && !targets.some(target => target._id === row._id));
     if (!remaining.length) await ctx.db.patch(shuttleId, { status: "terminee", completedAt: now });
+  },
+});
+
+/* ─── Conducteur, finalisation (QR code) et page de ramassage ──────────────
+ *
+ * La logistique assigne un conducteur (salarié @eco-solidaire.fr) à une
+ * navette, puis la « finalise » : le conducteur reçoit par e-mail un QR code
+ * qui ouvre /scan/<id> dans Meslogistic, où il coche les objets récupérés
+ * (même case « Chargé » que dans la fiche navette). Pour le trajet d'un
+ * salarié (réservation Mes Outils), le conducteur est celui qui a réservé.
+ */
+
+const INTERNAL_DOMAIN = "@eco-solidaire.fr";
+
+/** Annuaire des conducteurs possibles : comptes @eco-solidaire.fr de Clerk prod. */
+export const driverDirectory = action({
+  args: {},
+  handler: async (ctx): Promise<Array<{ clerkId: string; name: string; email: string; imageUrl: string | null }>> => {
+    const access = await ctx.runQuery(api.permissions.myAccess, {});
+    if (!accessAllows(access, PAGE, "update")) throw new ConvexError("Accès insuffisant.");
+    const secret = env.CLERK_SECRET_KEY;
+    if (!secret) throw new ConvexError("Annuaire indisponible : CLERK_SECRET_KEY manquante.");
+    return (await fetchInternalClerkDirectory(secret, ""))
+      .filter(entry => entry.email?.endsWith(INTERNAL_DOMAIN))
+      .map(entry => ({ clerkId: entry.clerkId, name: entry.name, email: entry.email ?? "", imageUrl: entry.imageUrl }));
+  },
+});
+
+/** Objets à récupérer : ceux de la navette, sauf les propositions pas encore acceptées. */
+function pickupItems(transits: Doc<"mlRequests">[]) {
+  return transits.filter(row => row.driverDecision !== "a_confirmer" && row.driverDecision !== "proposee");
+}
+
+/** Destinataire du QR code : le conducteur assigné, ou le salarié qui a réservé le véhicule. */
+async function shuttleRecipient(ctx: QueryCtx | MutationCtx, shuttle: Doc<"mlShuttles">, override?: { email: string; name: string }) {
+  if (override) return override;
+  if (shuttle.vehicleReservationId) {
+    const reservation = await ctx.db.get(shuttle.vehicleReservationId);
+    const clerkId = reservation?.bookedForClerkId ?? reservation?.clerkId ?? shuttle.driverClerkId;
+    const email = await emailForClerkId(ctx, clerkId);
+    return email ? { email, name: shuttle.driverName ?? reservation?.userName ?? "" } : null;
+  }
+  const email = shuttle.driverEmail ?? await emailForClerkId(ctx, shuttle.driverClerkId);
+  return email ? { email, name: shuttle.driverName ?? "" } : null;
+}
+
+async function sendQr(ctx: MutationCtx, shuttleId: Id<"mlShuttles">, recipient: { email: string; name: string }) {
+  await ctx.scheduler.runAfter(0, internal.meslogisticQr.sendShuttleQr, { shuttleId, email: recipient.email, name: recipient.name });
+}
+
+/** Assigne (ou retire) le conducteur d'une navette logistique. */
+export const assignDriver = mutation({
+  args: {
+    shuttleId: v.id("mlShuttles"),
+    driver: v.union(v.null(), v.object({ clerkId: v.string(), name: v.string(), email: v.string() })),
+  },
+  handler: async (ctx, { shuttleId, driver }) => {
+    await requireCrmPermission(ctx, PAGE, "update");
+    const { shuttle, status } = await loadShuttle(ctx, shuttleId);
+    if (shuttle.vehicleReservationId) throw new ConvexError("Le conducteur d'un trajet salarié est la personne qui a réservé le véhicule.");
+    if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
+    if (!driver) {
+      await ctx.db.patch(shuttleId, { driverClerkId: undefined, driverName: undefined, driverEmail: undefined });
+      return;
+    }
+    const email = driver.email.trim().toLowerCase();
+    const name = driver.name.trim().slice(0, 100);
+    if (!email.endsWith(INTERNAL_DOMAIN) || !driver.clerkId || !name) throw new ConvexError("Choisissez un salarié (adresse @eco-solidaire.fr).");
+    if (driver.clerkId === shuttle.driverClerkId) return;
+    await ctx.db.patch(shuttleId, { driverClerkId: driver.clerkId, driverName: name, driverEmail: email });
+    // Navette déjà finalisée : le nouveau conducteur reçoit lui aussi son QR code.
+    if (shuttle.finalizedAt) await sendQr(ctx, shuttleId, { email, name });
+  },
+});
+
+/**
+ * Finalise une navette : le conducteur reçoit par e-mail le QR code de sa
+ * page de ramassage. Relancer renvoie le QR code.
+ */
+export const finalizeShuttle = mutation({
+  args: { shuttleId: v.id("mlShuttles") },
+  handler: async (ctx, { shuttleId }) => {
+    await requireCrmPermission(ctx, PAGE, "update");
+    const user = await requireUser(ctx);
+    const { shuttle, transits, status } = await loadShuttle(ctx, shuttleId);
+    if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
+    if (!pickupItems(transits).length) throw new ConvexError(shuttle.vehicleReservationId ? "Aucun objet accepté par le salarié pour l'instant." : "Ajoutez au moins un objet à la navette.");
+    const recipient = await shuttleRecipient(ctx, shuttle);
+    if (!recipient) throw new ConvexError(shuttle.vehicleReservationId ? "Adresse e-mail du salarié introuvable." : "Assignez un conducteur avant de finaliser la navette.");
+    await ctx.db.patch(shuttleId, { finalizedAt: Date.now(), finalizedBy: user.name ?? user.subject });
+    await sendQr(ctx, shuttleId, recipient);
+    return { email: recipient.email, resent: Boolean(shuttle.finalizedAt) };
+  },
+});
+
+/** Données de l'e-mail du QR code (action Node). */
+export const qrEmailData = internalQuery({
+  args: { shuttleId: v.id("mlShuttles") },
+  handler: async (ctx, { shuttleId }) => {
+    const shuttle = await ctx.db.get(shuttleId);
+    if (!shuttle) return null;
+    const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttleId)).take(100)).filter(row => row.status !== "annulee");
+    const reservation = shuttle.vehicleReservationId ? await ctx.db.get(shuttle.vehicleReservationId) : null;
+    const name = reservation?.destination ? `${shortLocationName(shuttle.origin) || "Départ"} → ${reservation.destination.label}` : shuttle.name;
+    return {
+      shuttleName: name, scheduledDate: shuttle.scheduledDate,
+      origin: shortLocationName(shuttle.origin) || undefined,
+      destination: shuttle.destination ? shortLocationName(shuttle.destination) || shuttle.destination : reservation?.destination?.label,
+      vehicleName: shuttle.vehicleName ?? undefined,
+      items: pickupItems(transits).map(row => ({ title: row.title, quantity: row.quantity, unit: row.unit || undefined, origin: shortLocationName(row.origin) || undefined, destination: shortLocationName(row.destination) || undefined })),
+    };
+  },
+});
+
+/** Garde le dernier QR code généré (et supprime l'ancien). */
+export const saveShuttleQr = internalMutation({
+  args: { shuttleId: v.id("mlShuttles"), qrStorageId: v.id("_storage") },
+  handler: async (ctx, { shuttleId, qrStorageId }) => {
+    const shuttle = await ctx.db.get(shuttleId);
+    if (!shuttle) { await ctx.storage.delete(qrStorageId); return; }
+    if (shuttle.qrStorageId && shuttle.qrStorageId !== qrStorageId) await ctx.storage.delete(shuttle.qrStorageId);
+    await ctx.db.patch(shuttleId, { qrStorageId });
+  },
+});
+
+/** Qui peut ouvrir la page de ramassage : la logistique, ou le conducteur de la navette. */
+async function scanAccess(ctx: QueryCtx | MutationCtx, shuttle: Doc<"mlShuttles">) {
+  const user = await requireUser(ctx);
+  if (await hasCrmPermission(ctx, PAGE, "update")) return { user, canCheck: true };
+  const reservation = shuttle.vehicleReservationId ? await ctx.db.get(shuttle.vehicleReservationId) : null;
+  const driver = shuttle.driverClerkId === user.subject || reservation?.clerkId === user.subject || reservation?.bookedForClerkId === user.subject;
+  if (driver) return { user, canCheck: true };
+  if (await hasCrmPermission(ctx, PAGE, "read")) return { user, canCheck: false };
+  return null;
+}
+
+/** Page de ramassage (QR code) : la navette et les objets à récupérer. */
+export const scanShuttle = query({
+  args: { shuttleId: v.string() },
+  handler: async (ctx, args) => {
+    const shuttleId = ctx.db.normalizeId("mlShuttles", args.shuttleId);
+    const shuttle = shuttleId ? await ctx.db.get(shuttleId) : null;
+    if (!shuttle) return { state: "missing" as const };
+    const access = await scanAccess(ctx, shuttle);
+    if (!access) return { state: "denied" as const };
+    const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
+    const reservation = shuttle.vehicleReservationId ? await ctx.db.get(shuttle.vehicleReservationId) : null;
+    const slots = await ctx.db.query("btStorageSlots").collect();
+    const items = await Promise.all(pickupItems(transits).map(async row => ({
+      _id: row._id, reference: row.reference, title: row.title, quantity: row.quantity, unit: row.unit,
+      origin: row.origin, destination: row.destination, notes: row.notes ?? null, status: row.status,
+      loadedAt: row.loadedAt ?? null, loadedBy: row.loadedBy ?? null,
+      photoUrl: await materialPhoto(ctx, row.materialId), storageSlot: await materialSlot(ctx, row.materialId, slots),
+    })));
+    items.sort((a, b) => a.origin.localeCompare(b.origin, "fr") || a.title.localeCompare(b.title, "fr"));
+    return {
+      state: "ok" as const,
+      canCheck: access.canCheck,
+      shuttle: {
+        _id: shuttle._id,
+        name: reservation?.destination ? `${shortLocationName(shuttle.origin) || "Départ"} → ${reservation.destination.label}` : shuttle.name,
+        scheduledDate: shuttle.scheduledDate, origin: shuttle.origin ?? null, destination: shuttle.destination ?? reservation?.destination?.label ?? null,
+        driverName: shuttle.driverName ?? reservation?.userName ?? null, vehicleName: shuttle.vehicleName ?? null,
+        status: shuttleStatus(shuttle, transits), finalizedAt: shuttle.finalizedAt ?? null,
+      },
+      items,
+    };
+  },
+});
+
+/** Page de ramassage : coche (ou décoche) un objet récupéré, ou tous d'un coup. */
+export const scanCheck = mutation({
+  args: { shuttleId: v.id("mlShuttles"), requestId: v.optional(v.id("mlRequests")), loaded: v.boolean() },
+  handler: async (ctx, { shuttleId, requestId, loaded }) => {
+    const { shuttle, transits, status } = await loadShuttle(ctx, shuttleId);
+    const access = await scanAccess(ctx, shuttle);
+    if (!access?.canCheck) throw new ConvexError("Cette navette ne vous est pas attribuée.");
+    if (status !== "planifiee") throw new ConvexError("Cette navette est déjà partie.");
+    const targets = pickupItems(transits).filter(row => row.status === "a_preparer" && (!requestId || row._id === requestId));
+    if (requestId && !targets.length) throw new ConvexError("Cet objet n’est pas dans cette navette.");
+    const now = Date.now();
+    const actor = access.user.name ?? access.user.subject;
+    for (const row of targets) {
+      if (Boolean(row.loadedAt) === loaded) continue;
+      await ctx.db.patch(row._id, loaded ? { loadedAt: now, loadedBy: actor, updatedAt: Math.max(now, row.updatedAt + 1) } : { loadedAt: undefined, loadedBy: undefined, updatedAt: Math.max(now, row.updatedAt + 1) });
+      await log(ctx, row._id, loaded ? `Récupéré (scan du QR code, navette « ${shuttle.name} »)` : `Récupération annulée (navette « ${shuttle.name} »)`, actor);
+    }
+  },
+});
+
+/** Page /scan sans QR code : les navettes finalisées pas encore parties que je peux ouvrir. */
+export const myPickups = query({
+  args: {},
+  handler: async ctx => {
+    const user = await requireUser(ctx);
+    const staff = await hasCrmPermission(ctx, PAGE, "read");
+    const shuttles = (await ctx.db.query("mlShuttles").order("desc").take(200)).filter(row => row.finalizedAt && (row.status ?? "planifiee") === "planifiee");
+    const out = [];
+    for (const shuttle of shuttles) {
+      const reservation = shuttle.vehicleReservationId ? await ctx.db.get(shuttle.vehicleReservationId) : null;
+      const mine = shuttle.driverClerkId === user.subject || reservation?.clerkId === user.subject || reservation?.bookedForClerkId === user.subject;
+      if (!mine && !staff) continue;
+      const transits = (await ctx.db.query("mlRequests").withIndex("by_shuttleId", q => q.eq("shuttleId", shuttle._id)).take(100)).filter(row => row.status !== "annulee");
+      if (shuttleStatus(shuttle, transits) !== "planifiee") continue;
+      const items = pickupItems(transits);
+      out.push({
+        _id: shuttle._id, mine,
+        name: reservation?.destination ? `${shortLocationName(shuttle.origin) || "Départ"} → ${reservation.destination.label}` : shuttle.name,
+        scheduledDate: shuttle.scheduledDate, driverName: shuttle.driverName ?? reservation?.userName ?? null,
+        total: items.length, checked: items.filter(row => row.loadedAt).length,
+      });
+    }
+    return out.sort((a, b) => Number(b.mine) - Number(a.mine) || a.scheduledDate.localeCompare(b.scheduledDate));
   },
 });

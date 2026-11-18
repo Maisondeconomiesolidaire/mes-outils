@@ -398,6 +398,68 @@ export const sendNavetteProposalEmail = internalAction({
   },
 });
 
+/** Navette Meslogistic finalisée : QR code de la page de ramassage pour le conducteur. */
+export const sendShuttleQrEmail = internalAction({
+  args: {
+    email: v.string(),
+    name: v.string(),
+    url: v.string(),
+    qrStorageId: v.string(),
+    qrBase64: v.string(),
+    shuttleName: v.string(),
+    scheduledDate: v.string(),
+    origin: v.optional(v.string()),
+    destination: v.optional(v.string()),
+    vehicleName: v.optional(v.string()),
+    items: v.array(v.object({
+      title: v.string(),
+      quantity: v.number(),
+      unit: v.optional(v.string()),
+      origin: v.optional(v.string()),
+      destination: v.optional(v.string()),
+    })),
+  },
+  handler: async (_ctx, args) => {
+    const count = args.items.length;
+    const date = new Date(`${args.scheduledDate}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/Paris" });
+    const rows: Array<[string, string]> = [["Navette", args.shuttleName], ["Date", date]];
+    if (args.origin || args.destination) rows.push(["Trajet", [args.origin, args.destination].filter(Boolean).join(" → ")]);
+    if (args.vehicleName) rows.push(["Véhicule", args.vehicleName]);
+    rows.push(["Objets", `${count} à récupérer`]);
+    const list = args.items
+      .map((item) => {
+        const route = [item.origin, item.destination].filter(Boolean).join(" → ");
+        return `<tr><td style="padding:10px 0;border-top:1px solid #ececec;font-family:Helvetica,Arial,sans-serif;">
+          <div style="font-size:14px;font-weight:700;color:#27272a;">${esc(item.title)} <span style="font-weight:400;color:#71717a;">· ${esc(`${item.quantity} ${item.unit ?? ""}`.trim())}</span></div>
+          ${route ? `<div style="margin-top:2px;font-size:13px;color:#71717a;">${esc(route)}</div>` : ""}
+        </td></tr>`;
+      })
+      .join("");
+    const qr = `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;"><tr><td align="center" style="padding:18px;background:#f4faf6;border:1px solid #e2ede7;border-radius:14px;">
+      <img src="${storageImageUrl(args.qrStorageId)}" alt="QR code de la navette" width="220" height="220" style="display:block;width:220px;height:220px;border:0;" />
+      <p style="margin:10px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:13px;color:#71717a;">Scannez-le au moment du ramassage, ou ouvrez le lien ci-dessous.</p>
+    </td></tr></table>`;
+    const html = shell({
+      preheader: `Votre navette du ${date} : ${count} objet${count > 1 ? "s" : ""} à récupérer.`,
+      heading: "Votre navette est prête",
+      intro: `Bonjour ${esc(args.name)}, la logistique a finalisé votre navette. Au moment du ramassage, scannez ce QR code : il ouvre la liste des objets à récupérer, que vous cochez au fur et à mesure.`,
+      contentHtml: `
+        ${qr}
+        ${detailCard(rows)}
+        <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;">${list}</table>
+        ${button(args.url, "Ouvrir la liste de ramassage")}
+      `,
+    });
+    await resendSend(
+      args.email,
+      `Navette du ${date} : ${count} objet${count > 1 ? "s" : ""} à récupérer`,
+      html,
+      FROM,
+      [{ filename: "qr-navette.png", content: args.qrBase64 } satisfies EmailAttachment],
+    );
+  },
+});
+
 export const sendRoomFeedbackRequestEmail = internalAction({
   args: {
     email: v.string(),

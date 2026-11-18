@@ -537,6 +537,13 @@ export default defineSchema(
     driverName: v.optional(v.string()),
     driverClerkId: v.optional(v.string()),
     vehicleName: v.optional(v.string()),
+    /** Conducteur assigné par la logistique (salarié @eco-solidaire.fr). */
+    driverEmail: v.optional(v.string()),
+    /** Navette finalisée : le conducteur a reçu son QR code par e-mail. */
+    finalizedAt: v.optional(v.number()),
+    finalizedBy: v.optional(v.string()),
+    /** QR code (PNG) envoyé au conducteur : ouvre la page de ramassage /scan/<id>. */
+    qrStorageId: v.optional(v.id("_storage")),
   }).index("by_vehicleReservationId", ["vehicleReservationId"]),
   mlRequests: defineTable({
     shuttleId: v.optional(v.id("mlShuttles")),

@@ -62,6 +62,7 @@ import type * as lib_socialSyncSnapshot from "../lib/socialSyncSnapshot.js";
 import type * as livraison from "../livraison.js";
 import type * as meslogistic from "../meslogistic.js";
 import type * as meslogisticAi from "../meslogisticAi.js";
+import type * as meslogisticQr from "../meslogisticQr.js";
 import type * as meslogisticRules from "../meslogisticRules.js";
 import type * as meslogisticShuttles from "../meslogisticShuttles.js";
 import type * as mesoutilsEmails from "../mesoutilsEmails.js";
@@ -161,6 +162,7 @@ declare const fullApi: ApiFromModules<{
   livraison: typeof livraison;
   meslogistic: typeof meslogistic;
   meslogisticAi: typeof meslogisticAi;
+  meslogisticQr: typeof meslogisticQr;
   meslogisticRules: typeof meslogisticRules;
   meslogisticShuttles: typeof meslogisticShuttles;
   mesoutilsEmails: typeof mesoutilsEmails;
