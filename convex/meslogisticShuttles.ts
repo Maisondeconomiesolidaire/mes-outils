@@ -13,6 +13,7 @@ import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { emailForClerkId, requireCrmPermission, requireUser } from "./lib";
 import { materialPhoto, materialSlot } from "./meslogistic";
+import { tourneeDriverName } from "./sorties";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE = "meslogistic:demandes";
@@ -39,6 +40,38 @@ const transitView = (row: Doc<"mlRequests">, photoUrl: string | null, storageSlo
   loadedAt: row.loadedAt, loadedBy: row.loadedBy,
   /** Trajet d'un salarié : objet en attente de sa réponse, ou accepté. */
   driverDecision: row.driverDecision ?? null,
+});
+
+/**
+ * Tournées de collecte Recycapp à venir ou en cours, pour la carte Meslogistic
+ * (lecture seule). Sans la position GPS live : elle ferait ré-exécuter la
+ * requête à chaque mise à jour.
+ */
+export const collectes = query({
+  args: {},
+  handler: async ctx => {
+    await requireCrmPermission(ctx, PAGE, "read");
+    // `date` = jour de la tournée ; marge de 36 h pour garder celles d'aujourd'hui quel que soit le fuseau.
+    const rows = await ctx.db.query("tournees").withIndex("by_date", q => q.gte("date", Date.now() - 36 * 3600 * 1000)).order("asc").take(80);
+    const point = (latitude?: number, longitude?: number) => latitude !== undefined && longitude !== undefined ? [longitude, latitude] as [number, number] : null;
+    return await Promise.all(rows.filter(row => row.status === "planifiee" || row.status === "en_cours").map(async row => {
+      const vehicle = row.fleetVehicleId ? await ctx.db.get(row.fleetVehicleId) : null;
+      return {
+        _id: row._id, label: row.label, date: row.date, status: row.status,
+        driverName: await tourneeDriverName(ctx, row),
+        vehicleName: vehicle?.name ?? null,
+        depot: point(row.depotLatitude, row.depotLongitude),
+        depotAddress: row.depotAddress ?? null,
+        route: row.routeCoordinates?.filter(pair => pair.length >= 2).map(pair => [pair[0], pair[1]] as [number, number]) ?? null,
+        distanceMeters: row.estimatedDistanceMeters ?? null,
+        durationSeconds: row.estimatedDurationSeconds ?? null,
+        stops: [...row.stops].sort((a, b) => a.order - b.order).filter(stop => stop.status !== "annule").map(stop => ({
+          order: stop.order, address: stop.address, contactName: stop.contactName ?? null, status: stop.status,
+          at: point(stop.latitude, stop.longitude),
+        })),
+      };
+    }));
+  },
 });
 
 /** Tableau des navettes et des demandes encore sans navette. */

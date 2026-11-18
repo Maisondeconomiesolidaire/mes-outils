@@ -726,7 +726,7 @@ export const getPublicTrackingByToken = query({
 });
 
 /** Nom du chauffeur, quelle que soit l'équipe d'origine (nouvelle ou ancienne). */
-async function tourneeDriverName(
+export async function tourneeDriverName(
   ctx: QueryCtx,
   tournee: Pick<Doc<"tournees">, "driverWorkerId" | "driverId">,
 ): Promise<string | null> {
