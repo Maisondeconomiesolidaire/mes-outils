@@ -42,14 +42,17 @@ const transitView = (row: Doc<"mlRequests">, photoUrl: string | null, storageSlo
   driverDecision: row.driverDecision ?? null,
 });
 
-/** Départ de toutes les collectes Recycapp : le Solidarium, à Lachapelle-aux-Pots. */
-const COLLECTE_DEPOT = { at: [1.902428, 49.442296] as [number, number], address: "Solidarium · 4 rue de la Prairie, 60650 Lachapelle-aux-Pots" };
+/** Départ d'une collecte selon son site de traitement : Solidarium (60, par défaut) ou ESSpace 150 (76). */
+const COLLECTE_DEPOTS: Record<"60" | "76", { at: [number, number]; address: string }> = {
+  "60": { at: [1.902428, 49.442296], address: "Solidarium · 4 rue de la Prairie, 60650 Lachapelle-aux-Pots" },
+  "76": { at: [1.725067, 49.469388], address: "ESSpace 150 · 150 Rte de Paris, 76220 Gournay-en-Bray" },
+};
 const parisDay = (time: number) => new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
 
 /**
  * Collectes Recycapp à venir ou en cours, pour la carte Meslogistic (lecture
  * seule) : chaque demande « collecte » planifiée du calendrier Recycapp est un
- * trajet du Solidarium (Lachapelle-aux-Pots) à l'adresse du client ; plus les
+ * trajet de sa recyclerie de traitement (Solidarium à Lachapelle-aux-Pots, ou ESSpace 150 pour le 76) à l'adresse du client ; plus les
  * tournées GDR s'il y en a. Sans la position GPS live : elle ferait
  * ré-exécuter la requête à chaque mise à jour.
  */
@@ -103,8 +106,8 @@ export const collectes = query({
         roundTrip: false,
         driverName: names.length ? names.join(", ") : null,
         vehicleName: vehicle?.name ?? null,
-        depot: COLLECTE_DEPOT.at,
-        depotAddress: COLLECTE_DEPOT.address,
+        depot: COLLECTE_DEPOTS[request.site ?? "60"].at,
+        depotAddress: COLLECTE_DEPOTS[request.site ?? "60"].address,
         route: null as Array<[number, number]> | null,
         distanceMeters: null as number | null,
         durationSeconds: null as number | null,
