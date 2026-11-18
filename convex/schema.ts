@@ -3394,6 +3394,18 @@ export default defineSchema(
     promoCode: v.optional(v.string()),
     userId: v.optional(v.string()),
     createdAt: v.number(),
+    /** Facture Stripe émise au paiement (Checkout pour la carte, payée hors Stripe sinon). */
+    stripeInvoiceId: v.optional(v.string()),
+    stripeInvoiceProvider: v.optional(v.union(v.literal("recycapp"), v.literal("bennespro"))),
+    stripeInvoiceNumber: v.optional(v.string()),
+    stripeInvoiceStatus: v.optional(v.string()),
+    stripeInvoiceUrl: v.optional(v.string()),
+    stripeInvoicePdfUrl: v.optional(v.string()),
+    stripeInvoiceTotalCents: v.optional(v.number()),
+    stripeInvoicePendingAt: v.optional(v.number()),
+    stripeInvoiceError: v.optional(v.string()),
+    invoiceSentAt: v.optional(v.number()),
+    invoiceSentTo: v.optional(v.string()),
   })
     .index("by_status", ["status"])
     .index("by_reference", ["reference"])

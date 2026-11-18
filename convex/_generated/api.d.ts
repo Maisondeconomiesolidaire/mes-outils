@@ -16,6 +16,7 @@ import type * as ateliers from "../ateliers.js";
 import type * as batire from "../batire.js";
 import type * as batireDons from "../batireDons.js";
 import type * as batireEmails from "../batireEmails.js";
+import type * as batireStripeInvoices from "../batireStripeInvoices.js";
 import type * as bennespro from "../bennespro.js";
 import type * as bennesproClientVehicles from "../bennesproClientVehicles.js";
 import type * as bennesproGrouping from "../bennesproGrouping.js";
@@ -116,6 +117,7 @@ declare const fullApi: ApiFromModules<{
   batire: typeof batire;
   batireDons: typeof batireDons;
   batireEmails: typeof batireEmails;
+  batireStripeInvoices: typeof batireStripeInvoices;
   bennespro: typeof bennespro;
   bennesproClientVehicles: typeof bennesproClientVehicles;
   bennesproGrouping: typeof bennesproGrouping;

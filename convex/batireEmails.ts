@@ -486,6 +486,18 @@ export const sendPromoCode = internalAction({
  * Devis ou facture envoyé au client, PDF en pièce jointe. Fonction simple
  * (pas une action) : l'action qui l'appelle vérifie les droits et trace l'envoi.
  */
+/** Facture Stripe d'une demande réglée : PDF Stripe joint et lien vers la facture en ligne. */
+export async function sendStripeInvoiceMail(args: { to: string; name: string; number: string; issuerName: string; total: string; paidOn: string; method: string; url?: string; pdfBase64?: string }) {
+  const html = shell({
+    preheader: `Votre facture ${args.number} — ${args.total}`,
+    heading: "Votre facture",
+    intro: `Bonjour${args.name ? ` ${esc(args.name)}` : ""},<br/><br/>Merci pour votre achat. Veuillez trouver ${args.pdfBase64 ? "ci-joint" : "ci-dessous"} la facture <strong>${esc(args.number)}</strong> émise par <strong>${esc(args.issuerName)}</strong>, d’un montant de <strong>${esc(args.total)}</strong>.`,
+    contentHtml: note("Statut", `Payée le ${args.paidOn} · ${args.method}.`)
+      + (args.url ? button(args.url, "Voir la facture en ligne") : ""),
+  });
+  return await resendSend(args.to, `Facture ${args.number} — ${args.issuerName}`, html, FROM, args.pdfBase64 ? [{ filename: `Facture-${args.number}.pdf`, content: args.pdfBase64 }] : undefined);
+}
+
 export async function sendBillingDocMail(args: { to: string; name: string; type: "devis" | "facture"; number: string; issuerName: string; total: string; until?: string; message?: string; pdfBase64: string }) {
   const label = args.type === "devis" ? "devis" : "facture";
   const html = shell({

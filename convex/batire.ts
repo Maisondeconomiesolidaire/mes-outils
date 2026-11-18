@@ -27,7 +27,7 @@ import { sendBillingDocMail } from "./batireEmails";
 import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
-const PAGE_DEMANDES = "batire:demandes";
+export const PAGE_DEMANDES = "batire:demandes";
 /** Toute famille de mobilier est vendue par la Recyclerie. */
 function isRecyclerieFurniture(category: string) {
   return category.trim().toLocaleLowerCase("fr-FR").startsWith("mobilier");
@@ -46,7 +46,7 @@ function stripeKeyForCategory(category: string) {
   }
   return env.BENNESPRO_STRIPE_SECRET_KEY;
 }
-function stripeProviderForCategory(category: string): "recycapp" | "bennespro" {
+export function stripeProviderForCategory(category: string): "recycapp" | "bennespro" {
   return isRecyclerieFurniture(category) ? "recycapp" : "bennespro";
 }
 
@@ -1020,9 +1020,9 @@ export const markOrderPaid = internalMutation({
       stripePaymentIntentId,
       paidAt: Date.now(),
     });
-    // Commande réglée : sa facture est émise d'office (étape « Payé »).
-    // Une erreur de facturation ne doit jamais bloquer l'encaissement : la facture reste générable à la main.
-    try { await ensureOrderInvoice(ctx, orderId); } catch (error) { console.error("Facture automatique impossible", orderId, error); }
+    // Commande réglée : Stripe émet sa facture (payée) et le client la reçoit par e-mail.
+    // Hors transaction : une erreur Stripe ne bloque jamais l'encaissement (renvoi possible depuis le CRM).
+    await ctx.scheduler.runAfter(0, internal.batireStripeInvoices.issueOrderInvoice, { orderId });
 
     const material = await ctx.db.get(order.materialId);
     // Le reçu part de la mutation qui encaisse : c'est le seul endroit par
@@ -1117,6 +1117,9 @@ export const startCheckout = action({
         "metadata[source]": "batire-boutique",
         "payment_intent_data[metadata][orderId]": order.orderId,
         "payment_intent_data[metadata][source]": "batire-boutique",
+        "invoice_creation[enabled]": "true",
+        "invoice_creation[invoice_data][metadata][orderId]": order.orderId,
+        "invoice_creation[invoice_data][metadata][source]": "batire-boutique",
       },
     );
 
@@ -1241,7 +1244,7 @@ export const startCartCheckout = action({
       }
       const returnUrl = new URL(args.returnUrl);
       returnUrl.searchParams.set("provider", provider);
-      const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer_email: email, "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(",") };
+      const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer_email: email, "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(","), "invoice_creation[enabled]": "true", "invoice_creation[invoice_data][metadata][source]": "batire-cart" };
       orders.filter(order => order.amountCents - order.pickupFeeCents > 0).forEach((order, index) => {
         body[`line_items[${index}][quantity]`] = "1";
         body[`line_items[${index}][price_data][currency]`] = "eur";
@@ -3619,7 +3622,7 @@ export const refundOrder = action({
 
 const quoteLine = v.object({ label: v.string(), quantity: v.number(), unitAmountCents: v.number() });
 
-function stripeKeyForProvider(provider: "recycapp" | "bennespro") {
+export function stripeKeyForProvider(provider: "recycapp" | "bennespro") {
   const key = provider === "recycapp" ? env.RECYCAPP_STRIPE_SECRET_KEY : env.BENNESPRO_STRIPE_SECRET_KEY;
   if (!key) throw new ConvexError("La clé Stripe de ce compte n'est pas configurée côté Convex.");
   return key;
@@ -4187,7 +4190,7 @@ const CLIENT_KEYS = ["company", "firstName", "lastName", "email", "phone", "addr
  * de facturation, puis son compte boutique (adresse, SIRET…). Une demande ne
  * porte que nom, email et téléphone.
  */
-async function completeClient(ctx: QueryCtx | MutationCtx, client: BillingClientData, refs: { clientId?: Id<"btBillingClients">; userId?: string } = {}): Promise<BillingClientData> {
+export async function completeClient(ctx: QueryCtx | MutationCtx, client: BillingClientData, refs: { clientId?: Id<"btBillingClients">; userId?: string } = {}): Promise<BillingClientData> {
   const billing = (refs.clientId ? await ctx.db.get(refs.clientId) : null)
     ?? (client.email ? await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", client.email!.toLowerCase())).first() : null);
   const profile = refs.userId ? await ctx.db.query("btDonorProfiles").withIndex("by_clerkId", q => q.eq("clerkId", refs.userId!)).unique() : null;
@@ -4237,6 +4240,7 @@ async function nextBillingNumber(ctx: MutationCtx, issuer: Issuer, type: "devis"
  * Émet un devis ou une facture. L'émetteur découle des articles : mobilier →
  * Recyclerie, le reste → MATERIOSOL. Un document ne mélange pas les deux.
  */
+const STRIPE_ONLY = "Les factures sont émises uniquement par Stripe : elles sont créées automatiquement quand la demande passe en « Payé ».";
 export const createBillingDoc = mutation({
   args: {
     type: v.union(v.literal("devis"), v.literal("facture")),
@@ -4252,6 +4256,7 @@ export const createBillingDoc = mutation({
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
+    if (args.type === "facture") throw new ConvexError(STRIPE_ONLY);
     const actor = await requireUser(ctx);
     const sourceOrder = args.orderId ? await ctx.db.get(args.orderId) : null;
     if (args.orderId && !sourceOrder) throw new ConvexError("Demande introuvable.");
@@ -4306,26 +4311,12 @@ export const setQuoteStatus = mutation({
   },
 });
 
-/** Devis accepté → facture (mêmes lignes, client et émetteur), numérotée à part. */
+/** Ancien passage devis → facture maison : les factures sont désormais émises par Stripe. */
 export const convertQuoteToInvoice = mutation({
   args: { id: v.id("btBillingDocs"), dueDays: v.optional(v.number()) },
-  handler: async (ctx, { id, dueDays }) => {
+  handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
-    const actor = await requireUser(ctx);
-    const quote = await ctx.db.get(id);
-    if (!quote || quote.type !== "devis") throw new ConvexError("Devis introuvable.");
-    if (quote.invoiceId) throw new ConvexError("Ce devis a déjà été facturé.");
-    if (quote.status === "refuse" || quote.status === "annule") throw new ConvexError("Un devis refusé ou annulé ne peut pas être facturé.");
-    const now = Date.now();
-    const issueDate = isoDay(now);
-    const { year, seq, number } = await nextBillingNumber(ctx, quote.issuer, "facture", issueDate);
-    const invoiceId = await ctx.db.insert("btBillingDocs", {
-      type: "facture", issuer: quote.issuer, number, year, seq, status: "a_regler", clientId: quote.clientId, client: quote.client, lines: quote.lines,
-      vatRate: quote.vatRate, totalCents: quote.totalCents, issueDate, dueDate: addDays(issueDate, Math.min(365, Math.max(0, Math.round(dueDays ?? 30)))),
-      notes: quote.notes, sourceQuoteId: quote._id, orderId: quote.orderId, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
-    });
-    await ctx.db.patch(quote._id, { status: "accepte", invoiceId, statusAt: now });
-    return { id: invoiceId, number };
+    throw new ConvexError(STRIPE_ONLY);
   },
 });
 
@@ -4341,57 +4332,13 @@ export const setInvoicePaid = mutation({
 });
 
 
-const PAYMENT_LABELS: Record<string, string> = { card: "Carte bancaire", cash: "Espèces", bank_transfer: "Virement" };
+export const PAYMENT_LABELS: Record<string, string> = { card: "Carte bancaire", cash: "Espèces", bank_transfer: "Virement" };
 
-/**
- * Facture d'une demande payée : lot, transfert, remise du code promo, au
- * montant réellement encaissé. Ne fait rien si la demande a déjà la sienne.
- */
-async function ensureOrderInvoice(ctx: MutationCtx, orderId: Id<"btOrders">, createdBy = "Automatique (paiement)") {
-  const order = await ctx.db.get(orderId);
-  if (!order || order.status !== "payee") return null;
-  const existing = (await ctx.db.query("btBillingDocs").withIndex("by_orderId", q => q.eq("orderId", orderId)).collect()).find(doc => doc.type === "facture");
-  if (existing) return existing._id;
-  const material = await ctx.db.get(order.materialId);
-  const issuer = issuerOfCategory(material?.category ?? "");
-  const fee = order.pickupFeeCents ?? 0;
-  const discount = order.discountCents ?? 0;
-  const goods = order.amountCents - fee + discount;
-  const unitCents = Math.round(order.unitPrice * 100);
-  // Quantité fractionnaire dont l'arrondi diffère de l'encaissé : une seule ligne au montant exact.
-  const lot = Math.round(order.quantity * unitCents) === goods
-    ? { materialId: order.materialId, label: order.materialTitle, quantity: order.quantity, unit: order.unit, unitPriceCents: unitCents }
-    : { materialId: order.materialId, label: `${order.materialTitle} — ${order.quantity} ${order.unit}`, quantity: 1, unit: undefined, unitPriceCents: goods };
-  const lines = [lot,
-    ...(fee ? [{ materialId: undefined, label: "Transfert vers le lieu de retrait", quantity: 1, unit: undefined, unitPriceCents: fee }] : []),
-    ...(discount ? [{ materialId: undefined, label: `Remise${order.promoCode ? ` · code ${order.promoCode}` : ""}`, quantity: 1, unit: undefined, unitPriceCents: -discount }] : []),
-  ];
-  const now = Date.now();
-  const issueDate = isoDay(now);
-  const { year, seq, number } = await nextBillingNumber(ctx, issuer, "facture", issueDate);
-  const customer = order.customer;
-  const client = await completeClient(ctx, { company: customer.company, firstName: customer.firstName, lastName: customer.lastName, email: customer.email, phone: customer.phone }, { userId: order.userId });
-  const clientId = (await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", customer.email)).first())?._id
-    ?? await ctx.db.insert("btBillingClients", { ...client, createdAt: now, updatedAt: now });
-  return await ctx.db.insert("btBillingDocs", {
-    type: "facture", issuer, number, year, seq, status: "payee", clientId, client, lines, vatRate: 20,
-    totalCents: lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPriceCents), 0),
-    issueDate, dueDate: issueDate, notes: `Demande Bâtire #${order.pickupReference ?? order.purchaseReference ?? order.reference}`,
-    orderId, paidAt: order.paidAt ?? now, paymentMethod: PAYMENT_LABELS[order.paymentMethod ?? "card"],
-    createdBy, createdAt: now, statusAt: now,
-  });
-}
-
-/** Pour une demande payée avant la facturation automatique : émet sa facture. */
+/** Ancienne génération de facture maison : remplacée par `batireStripeInvoices.sendOrderInvoice`. */
 export const generateOrderInvoice = mutation({
   args: { orderId: v.id("btOrders") },
-  handler: async (ctx, { orderId }) => {
+  handler: async (ctx) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
-    const actor = await requireUser(ctx);
-    const order = await ctx.db.get(orderId);
-    if (!order || order.status !== "payee") throw new ConvexError("La demande n’est pas payée.");
-    const id = await ensureOrderInvoice(ctx, orderId, actor.name ?? actor.email ?? actor.subject);
-    if (!id) throw new ConvexError("Facture impossible à générer.");
-    return id;
+    throw new ConvexError(STRIPE_ONLY);
   },
 });
