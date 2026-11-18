@@ -14,6 +14,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { emailForClerkId, requireCrmPermission, requireUser } from "./lib";
 import { materialPhoto, materialSlot } from "./meslogistic";
 import { tourneeDriverName } from "./sorties";
+import { shortLocationName } from "./meslogisticRules";
 import { createMesoutilsNotification } from "./mesoutilsNotifications";
 
 const PAGE = "meslogistic:demandes";
@@ -43,9 +44,9 @@ const transitView = (row: Doc<"mlRequests">, photoUrl: string | null, storageSlo
 });
 
 /** Départ d'une collecte selon son site de traitement : Solidarium (60, par défaut) ou ESSpace 150 (76). */
-const COLLECTE_DEPOTS: Record<"60" | "76", { at: [number, number]; address: string }> = {
-  "60": { at: [1.902428, 49.442296], address: "Solidarium · 4 rue de la Prairie, 60650 Lachapelle-aux-Pots" },
-  "76": { at: [1.725067, 49.469388], address: "ESSpace 150 · 150 Rte de Paris, 76220 Gournay-en-Bray" },
+const COLLECTE_DEPOTS: Record<"60" | "76", { at: [number, number]; address: string; name: string }> = {
+  "60": { at: [1.902428, 49.442296], name: "Solidarium", address: "Solidarium · 4 rue de la Prairie, 60650 Lachapelle-aux-Pots" },
+  "76": { at: [1.725067, 49.469388], name: "ESSpace 150", address: "ESSpace 150 · 150 Rte de Paris, 76220 Gournay-en-Bray" },
 };
 const parisDay = (time: number) => new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
 
@@ -67,6 +68,7 @@ export const collectes = query({
       const vehicle = row.fleetVehicleId ? await ctx.db.get(row.fleetVehicleId) : null;
       return {
         _id: row._id as string, label: row.label, date: row.date, status: row.status, roundTrip: true,
+        depotName: row.depotAddress ?? "Dépôt", photos: [] as string[],
         driverName: await tourneeDriverName(ctx, row),
         vehicleName: vehicle?.name ?? null,
         depot: point(row.depotLatitude, row.depotLongitude),
@@ -108,6 +110,9 @@ export const collectes = query({
         vehicleName: vehicle?.name ?? null,
         depot: COLLECTE_DEPOTS[request.site ?? "60"].at,
         depotAddress: COLLECTE_DEPOTS[request.site ?? "60"].address,
+        depotName: COLLECTE_DEPOTS[request.site ?? "60"].name,
+        // Photos envoyées par le client (demande + photos par catégorie d'objets).
+        photos: (await Promise.all([...new Set([...request.photos, ...(request.collecte?.categoryPhotos ?? []).flatMap(group => group.photos)])].slice(0, 30).map(id => ctx.storage.getUrl(id)))).filter((url): url is string => Boolean(url)),
         route: null as Array<[number, number]> | null,
         distanceMeters: null as number | null,
         durationSeconds: null as number | null,
@@ -137,7 +142,9 @@ export const board = query({
       const vehicle = reservation ? await ctx.db.get(reservation.vehicleId) : null;
       const vehiclePhotoUrl = vehicle ? (vehicle.photo ? await ctx.storage.getUrl(vehicle.photo) : vehicle.photoUrl ?? null) : null;
       const trip = reservation ? { start: reservation.start, end: reservation.end, purpose: reservation.purpose, vehiclePhotoUrl, destinationAt: reservation.destination ? [reservation.destination.longitude, reservation.destination.latitude] as [number, number] : null } : null;
-      return { trip, _id: shuttle._id, name: shuttle.name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
+      // Trajet d'un salarié : « départ → destination », même pour les navettes nommées avant.
+      const name = reservation?.destination ? `${shortLocationName(shuttle.origin) || "Départ"} → ${reservation.destination.label}` : shuttle.name;
+      return { trip, _id: shuttle._id, name, scheduledDate: shuttle.scheduledDate, origin: shuttle.origin, destination: shuttle.destination, status: shuttleStatus(shuttle, transits), departedAt: shuttle.departedAt, completedAt: shuttle.completedAt, driverName: shuttle.driverName, vehicleName: shuttle.vehicleName, fromReservation: Boolean(shuttle.vehicleReservationId), transits: await Promise.all(transits.map(view)) };
     }));
     const unassigned = (await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", "a_preparer")).take(300)).filter(row => !row.shuttleId);
     return { shuttles: rows, unassigned: await Promise.all(unassigned.map(view)) };

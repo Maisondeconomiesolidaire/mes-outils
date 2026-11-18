@@ -4,6 +4,16 @@ export const LOCATIONS = {
   comptoir_c: "Comptoir C",
   esspace_150: "Esspace 150 / Recyclerie de Gournay",
 } as const;
+/** Nom court d'un lieu pour les libellés (« Solidarium → Rouen »). */
+export const SHORT_LOCATION_NAMES: Record<keyof typeof LOCATIONS, string> = {
+  recyclerie_pays_de_bray: "Solidarium",
+  comptoir_c: "Comptoir C",
+  esspace_150: "ESSpace 150",
+};
+export function shortLocationName(value?: string) {
+  const key = canonicalLocation(value);
+  return key ? SHORT_LOCATION_NAMES[key as keyof typeof LOCATIONS] : value ?? "";
+}
 export function canonicalLocation(value?: string) {
   const name = value?.trim().toLocaleLowerCase("fr-FR") ?? "";
   if (name.includes("comptoir")) return "comptoir_c";

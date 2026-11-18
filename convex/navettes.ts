@@ -14,7 +14,7 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requireCrmPermission, requireUser } from "./lib";
 import { materialPhoto } from "./meslogistic";
-import { canonicalLocation, LOCATIONS } from "./meslogisticRules";
+import { canonicalLocation, LOCATIONS, SHORT_LOCATION_NAMES } from "./meslogisticRules";
 import { shuttleStatus } from "./meslogisticShuttles";
 import {
   HOME_SITE,
@@ -292,7 +292,8 @@ export async function syncTripShuttle(ctx: MutationCtx, reservationId: Id<"vehic
   if (!reservation?.destination || !isActive(reservation, Date.now())) return null;
   const vehicle = await ctx.db.get(reservation.vehicleId);
   const fields = {
-    name: `${reservation.userName} → ${reservation.destination.label}`.slice(0, 100),
+    // Départ → destination (le conducteur est affiché à part).
+    name: `${SHORT_LOCATION_NAMES[HOME_SITE as keyof typeof SHORT_LOCATION_NAMES] ?? "Départ"} → ${reservation.destination.label}`.slice(0, 100),
     scheduledDate: parisDay(reservation.start),
     origin: LOCATIONS[HOME_SITE],
     destination: reservation.destination.label.slice(0, 300),
