@@ -42,10 +42,16 @@ const transitView = (row: Doc<"mlRequests">, photoUrl: string | null, storageSlo
   driverDecision: row.driverDecision ?? null,
 });
 
+/** Départ de toutes les collectes Recycapp : le Solidarium, à Lachapelle-aux-Pots. */
+const COLLECTE_DEPOT = { at: [1.902428, 49.442296] as [number, number], address: "Solidarium · 4 rue de la Prairie, 60650 Lachapelle-aux-Pots" };
+const parisDay = (time: number) => new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(time));
+
 /**
- * Tournées de collecte Recycapp à venir ou en cours, pour la carte Meslogistic
- * (lecture seule). Sans la position GPS live : elle ferait ré-exécuter la
- * requête à chaque mise à jour.
+ * Collectes Recycapp à venir ou en cours, pour la carte Meslogistic (lecture
+ * seule) : chaque demande « collecte » planifiée du calendrier Recycapp est un
+ * trajet du Solidarium (Lachapelle-aux-Pots) à l'adresse du client ; plus les
+ * tournées GDR s'il y en a. Sans la position GPS live : elle ferait
+ * ré-exécuter la requête à chaque mise à jour.
  */
 export const collectes = query({
   args: {},
@@ -54,10 +60,10 @@ export const collectes = query({
     // `date` = jour de la tournée ; marge de 36 h pour garder celles d'aujourd'hui quel que soit le fuseau.
     const rows = await ctx.db.query("tournees").withIndex("by_date", q => q.gte("date", Date.now() - 36 * 3600 * 1000)).order("asc").take(80);
     const point = (latitude?: number, longitude?: number) => latitude !== undefined && longitude !== undefined ? [longitude, latitude] as [number, number] : null;
-    return await Promise.all(rows.filter(row => row.status === "planifiee" || row.status === "en_cours").map(async row => {
+    const tournees = await Promise.all(rows.filter(row => row.status === "planifiee" || row.status === "en_cours").map(async row => {
       const vehicle = row.fleetVehicleId ? await ctx.db.get(row.fleetVehicleId) : null;
       return {
-        _id: row._id, label: row.label, date: row.date, status: row.status,
+        _id: row._id as string, label: row.label, date: row.date, status: row.status, roundTrip: true,
         driverName: await tourneeDriverName(ctx, row),
         vehicleName: vehicle?.name ?? null,
         depot: point(row.depotLatitude, row.depotLongitude),
@@ -67,10 +73,49 @@ export const collectes = query({
         durationSeconds: row.estimatedDurationSeconds ?? null,
         stops: [...row.stops].sort((a, b) => a.order - b.order).filter(stop => stop.status !== "annule").map(stop => ({
           order: stop.order, address: stop.address, contactName: stop.contactName ?? null, status: stop.status,
-          at: point(stop.latitude, stop.longitude),
+          at: point(stop.latitude, stop.longitude), time: null as number | null, reference: null as string | null,
         })),
       };
     }));
+
+    // Demandes de collecte planifiées (calendrier Recycapp).
+    const now = Date.now();
+    const today = parisDay(now);
+    const requests = (await ctx.db.query("requests").withIndex("by_scheduledDate", q => q.gte("scheduledDate", now - 36 * 3600 * 1000)).take(400))
+      .filter(request => request.type === "collecte" && request.outcome !== "perdue" && request.scheduledDate !== undefined && parisDay(request.scheduledDate) >= today);
+    const workerNames = new Map<string, string>();
+    const workerName = async (id: Id<"polyvalentWorkers">) => {
+      if (!workerNames.has(id)) { const worker = await ctx.db.get(id); workerNames.set(id, worker ? `${worker.firstName} ${worker.lastName}`.trim() : ""); }
+      return workerNames.get(id)!;
+    };
+    const fromRequests = await Promise.all(requests.map(async request => {
+      const items = [request];
+      const vehicle = request.assignedVehicle ? await ctx.db.get(request.assignedVehicle) : null;
+      const workerIds = request.assignedWorkerIds ?? (request.assignedWorkerId ? [request.assignedWorkerId] : []);
+      const names = (await Promise.all(workerIds.map(workerName))).filter(Boolean);
+      const customerName = (item: (typeof items)[number]) => `${item.customer.firstName} ${item.customer.lastName}`.trim();
+      const started = parisDay(request.scheduledDate!) === today && request.scheduledDate! <= now;
+      return {
+        _id: `collecte:${request._id}`,
+        label: `Collecte ${customerName(request)}`.trim(),
+        date: request.scheduledDate!,
+        status: (started ? "en_cours" : "planifiee") as "en_cours" | "planifiee",
+        roundTrip: false,
+        driverName: names.length ? names.join(", ") : null,
+        vehicleName: vehicle?.name ?? null,
+        depot: COLLECTE_DEPOT.at,
+        depotAddress: COLLECTE_DEPOT.address,
+        route: null as Array<[number, number]> | null,
+        distanceMeters: null as number | null,
+        durationSeconds: null as number | null,
+        stops: items.map((item, index) => {
+          const place = item.collecte?.collectAddress?.address ? item.collecte.collectAddress : item.customer;
+          const address = [place.address, [place.postalCode, place.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+          return { order: index, address, contactName: customerName(item) || null, status: "prevu" as const, at: null as [number, number] | null, time: item.scheduledDate!, reference: item.reference ?? null };
+        }).filter(stop => stop.address),
+      };
+    }));
+    return [...tournees, ...fromRequests.filter(item => item.stops.length > 0)].sort((a, b) => a.date - b.date);
   },
 });
 
