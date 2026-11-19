@@ -123,11 +123,30 @@ export const markInvoiceEmail = internalMutation({
   },
 });
 
-async function findOrCreateCustomer(key: string, client: Awaited<ReturnType<typeof completeClient>>, email: string) {
+/** Coordonnées complètes d'un acheteur (compte boutique) pour sa fiche client Stripe. */
+export const checkoutClient = internalQuery({
+  args: { userId: v.optional(v.string()), customer: v.object({ company: v.optional(v.string()), firstName: v.string(), lastName: v.string(), email: v.string(), phone: v.optional(v.string()) }) },
+  handler: async (ctx, { userId, customer }) => {
+    const { company, firstName, lastName, email, phone } = customer;
+    return await completeClient(ctx, { company, firstName, lastName, email, phone }, { userId });
+  },
+});
+
+/**
+ * Client Stripe RÉEL pour un paiement (jamais un « invité ») : celui qui
+ * existe déjà avec cet e-mail sur ce compte Stripe, sinon une fiche créée.
+ */
+export async function checkoutCustomer(ctx: ActionCtx, key: string, userId: string | undefined, customer: { company?: string; firstName: string; lastName: string; email: string; phone?: string }) {
+  const client = await ctx.runQuery(internal.batireStripeInvoices.checkoutClient, { userId, customer });
+  return await findOrCreateCustomer(key, client, customer.email.trim().toLowerCase(), userId);
+}
+
+async function findOrCreateCustomer(key: string, client: Awaited<ReturnType<typeof completeClient>>, email: string, userId?: string) {
   const found = await stripeRequest<{ data: { id: string }[] }>(`customers?limit=1&email=${encodeURIComponent(email)}`, key);
   if (found.data[0]) return found.data[0].id;
   const name = client.company || [client.firstName, client.lastName].filter(Boolean).join(" ").trim() || email;
   const body: Record<string, string> = { email, name, "preferred_locales[0]": "fr", "metadata[source]": "batire" };
+  if (userId) body["metadata[clerkId]"] = userId;
   if (client.phone) body.phone = client.phone;
   if (client.address) {
     body["address[line1]"] = client.address;
@@ -161,6 +180,59 @@ async function createPaidInvoice(key: string, context: NonNullable<Awaited<Retur
   }
   let invoice = await stripeRequest<StripeInvoice>(`invoices/${draft.id}/finalize`, key, { auto_advance: "false" });
   if (invoice.status !== "paid") invoice = await stripeRequest<StripeInvoice>(`invoices/${draft.id}/pay`, key, { paid_out_of_band: "true" });
+  return invoice;
+}
+
+/** Appel Stripe avec une version d'API explicite (paiements de facture, API « basil »). */
+async function stripeVersioned<T>(path: string, key: string, body: Record<string, string>, version = "2025-03-31.basil"): Promise<T> {
+  const response = await fetch(`https://api.stripe.com/v1/${path}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/x-www-form-urlencoded", "Stripe-Version": version },
+    body: new URLSearchParams(body),
+  });
+  const payload = (await response.json()) as T & { error?: { message?: string } };
+  if (!response.ok) throw new Error(payload.error?.message || "Erreur Stripe.");
+  return payload;
+}
+
+/** Facture déjà émise chez Stripe pour cette demande (créée par Bâtire, métadonnée orderId). */
+async function findExistingInvoice(key: string, orderId: string) {
+  try {
+    const found = await stripeRequest<{ data: StripeInvoice[] }>(`invoices/search?limit=1&query=${encodeURIComponent(`metadata['orderId']:'${orderId}'`)}`, key);
+    return found.data.find(invoice => invoice.status !== "void" && invoice.status !== "draft") ?? null;
+  } catch { return null; }
+}
+
+/**
+ * Paiement carte encaissé avant la facturation Checkout : la facture est
+ * créée puis le paiement carte EXISTANT lui est rattaché (`attach_payment`).
+ * Aucun nouvel encaissement, donc aucun doublon comptable. Si Stripe refuse
+ * le rattachement, la facture est annulée (void) et rien n'est compté.
+ */
+async function createCardInvoice(key: string, context: NonNullable<Awaited<ReturnType<typeof loadContext>>>, paymentIntentId: string, paymentCustomer: string | null) {
+  const { order, client } = context;
+  const customer = paymentCustomer ?? await findOrCreateCustomer(key, client, (client.email ?? order.customer.email).toLowerCase(), order.userId);
+  const draft = await stripeRequest<StripeInvoice>("invoices", key, {
+    customer, currency: "eur", collection_method: "charge_automatically", auto_advance: "false", pending_invoice_items_behavior: "exclude",
+    description: `Demande Bâtire #${reference(order)}`,
+    footer: `Facture réglée le ${frDate(order.paidAt ?? Date.now())} · Carte bancaire.`,
+    "metadata[orderId]": String(order._id), "metadata[source]": "batire-paiement", "metadata[paymentMethod]": "card", "metadata[paymentIntent]": paymentIntentId,
+  });
+  for (const line of invoiceLines(order)) {
+    await stripeRequest("invoiceitems", key, { customer, invoice: draft.id, currency: "eur", amount: String(line.amount), description: line.description.slice(0, 250) });
+  }
+  await stripeRequest<StripeInvoice>(`invoices/${draft.id}/finalize`, key, { auto_advance: "false" });
+  try {
+    await stripeVersioned(`invoices/${draft.id}/attach_payment`, key, { payment_intent: paymentIntentId });
+  } catch (error) {
+    try { await stripeRequest(`invoices/${draft.id}/void`, key, {}); } catch { /* déjà annulée */ }
+    throw new ConvexError(`Stripe n'a pas pu rattacher le paiement carte existant à la facture (${error instanceof Error ? error.message : String(error)}). Aucune facture ni aucun encaissement n'a été créé.`);
+  }
+  const invoice = await stripeRequest<StripeInvoice>(`invoices/${draft.id}`, key);
+  if (invoice.status !== "paid") {
+    try { await stripeRequest(`invoices/${draft.id}/void`, key, {}); } catch { /* rien à annuler */ }
+    throw new ConvexError("Le paiement carte n'a pas soldé la facture (montant différent ?). Facture annulée, aucun encaissement créé.");
+  }
   return invoice;
 }
 
@@ -216,10 +288,32 @@ async function ensureInvoice(ctx: ActionCtx, orderId: Id<"btOrders">, attempt: n
       await ctx.scheduler.runAfter(60_000, internal.batireStripeInvoices.issueOrderInvoice, { orderId, attempt: attempt + 1 });
       return null;
     }
+    if (!session) throw new ConvexError("Paiement carte introuvable sur les comptes Stripe : impossible d'émettre la facture sans créer de doublon.");
+  }
+  // Facture déjà émise chez Stripe pour cette demande : on la reprend telle quelle.
+  const existing = await findExistingInvoice(key, String(orderId));
+  if (existing) {
+    await ctx.runMutation(internal.batireStripeInvoices.saveInvoice, { orderIds: [orderId], provider, invoice: savedShape(existing) });
+    return { invoice: existing, provider, context, orderIds: [orderId] };
+  }
+  const card = (order.paymentMethod ?? "card") === "card";
+  let paymentIntent: { id: string; status?: string; customer?: string | { id: string } | null; invoice?: string | null } | null = null;
+  if (card) {
+    if (!order.stripePaymentIntentId) throw new ConvexError("Paiement carte sans référence Stripe : impossible d'émettre la facture sans créer de doublon.");
+    paymentIntent = await stripeRequest(`payment_intents/${order.stripePaymentIntentId}`, key);
+    // Paiement déjà rattaché à une facture Stripe : on la récupère.
+    if (paymentIntent?.invoice) {
+      const invoice = await stripeRequest<StripeInvoice>(`invoices/${paymentIntent.invoice}`, key);
+      await ctx.runMutation(internal.batireStripeInvoices.saveInvoice, { orderIds: [orderId], provider, invoice: savedShape(invoice) });
+      return { invoice, provider, context, orderIds: [orderId] };
+    }
+    if (paymentIntent?.status !== "succeeded") throw new ConvexError("Le paiement carte n'est pas encaissé chez Stripe.");
   }
   if (!(await ctx.runMutation(internal.batireStripeInvoices.claimInvoiceCreation, { orderId }))) return null;
   try {
-    const invoice = await createPaidInvoice(key, context);
+    const paymentCustomer = typeof paymentIntent?.customer === "string" ? paymentIntent.customer : paymentIntent?.customer?.id ?? null;
+    // Carte : facture rattachée au paiement existant. Espèces / virement : payée hors Stripe.
+    const invoice = card ? await createCardInvoice(key, context, paymentIntent!.id, paymentCustomer) : await createPaidInvoice(key, context);
     await ctx.runMutation(internal.batireStripeInvoices.saveInvoice, { orderIds: [orderId], provider, invoice: savedShape(invoice) });
     // ⚠ `provider` peut différer de la catégorie : c'est le compte qui a encaissé.
     return { invoice, provider, context, orderIds: [orderId] };

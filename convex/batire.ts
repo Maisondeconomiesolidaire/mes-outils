@@ -24,6 +24,7 @@ import {
 } from "./lib";
 import { recycappSecretKey, stripeRequest } from "./stripe";
 import { sendBillingDocMail } from "./batireEmails";
+import { checkoutCustomer } from "./batireStripeInvoices";
 import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
@@ -1093,6 +1094,8 @@ export const startCheckout = action({
     }
 
     const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Connectez-vous pour finaliser votre commande.");
+    const stripeCustomer = await checkoutCustomer(ctx, secretKey, identity.subject, { ...args.customer, email });
     const order: {
       orderId: Id<"btOrders">;
       amountCents: number;
@@ -1104,7 +1107,7 @@ export const startCheckout = action({
       customer: { ...args.customer, email },
       channel: "boutique",
       pickupLocation: args.pickupLocation,
-      userId: identity?.subject,
+      userId: identity.subject,
     });
 
     const returnUrl = new URL(args.returnUrl);
@@ -1117,7 +1120,7 @@ export const startCheckout = action({
         success_url: `${returnUrl.toString()}&status=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${returnUrl.toString()}&status=cancelled`,
         locale: "fr",
-        customer_email: email,
+        customer: stripeCustomer,
         "line_items[0][quantity]": "1",
         "line_items[0][price_data][currency]": "eur",
         "line_items[0][price_data][unit_amount]": String(order.amountCents),
@@ -1254,7 +1257,7 @@ export const startCartCheckout = action({
       }
       const returnUrl = new URL(args.returnUrl);
       returnUrl.searchParams.set("provider", provider);
-      const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer_email: email, "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(","), "invoice_creation[enabled]": "true", "invoice_creation[invoice_data][metadata][source]": "batire-cart" };
+      const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer: await checkoutCustomer(ctx, stripeKeyForCategory(items[0]!.category), identity.subject, { ...args.customer, email }), "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(","), "invoice_creation[enabled]": "true", "invoice_creation[invoice_data][metadata][source]": "batire-cart" };
       orders.filter(order => order.amountCents - order.pickupFeeCents > 0).forEach((order, index) => {
         body[`line_items[${index}][quantity]`] = "1";
         body[`line_items[${index}][price_data][currency]`] = "eur";
