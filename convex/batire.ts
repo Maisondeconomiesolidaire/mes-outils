@@ -445,6 +445,16 @@ export const removeMaterial = mutation({
   args: { id: v.id("btMaterials") },
   handler: async (ctx, { id }) => {
     await requireCrmPermission(ctx, PAGE_MATERIAUX, "delete");
+    const material = await ctx.db.get(id);
+    if (!material) return;
+    // Garde-fou : un matériau engagé dans une demande ou un transit en cours ne disparaît pas.
+    const orders = await ctx.db.query("btOrders").withIndex("by_material", q => q.eq("materialId", id)).collect();
+    const active = orders.filter(order => order.status === "en_attente" || order.status === "reservee" || (order.status === "payee" && !order.collectedAt && !order.lostAt && !order.refundedAt));
+    if (active.length) throw new ConvexError(`Impossible de supprimer « ${material.title} » : ${active.length > 1 ? `${active.length} demandes en cours le concernent` : "une demande en cours le concerne"} (${active.slice(0, 3).map(order => `#${order.pickupReference ?? order.purchaseReference ?? order.reference}`).join(", ")}). Clôturez-les ou mettez-le hors ligne.`);
+    for (const status of ["a_preparer", "en_transit"] as const) {
+      const transits = await ctx.db.query("mlRequests").withIndex("by_status", q => q.eq("status", status)).take(1000);
+      if (transits.some(row => row.materialId === id)) throw new ConvexError(`Impossible de supprimer « ${material.title} » : un transit Meslogistic est en cours pour ce matériau.`);
+    }
     // Le QR code collé sur le matériau redevient libre pour un autre lot.
     const codes = await ctx.db
       .query("btQrCodes")
