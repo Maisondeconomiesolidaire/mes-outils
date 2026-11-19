@@ -3586,12 +3586,18 @@ export const orderForRefund = internalQuery({
  * stock et un enlèvement Meslogistic pas encore parti est annulé.
  */
 export const markOrderRefunded = internalMutation({
-  args: { orderId: v.id("btOrders"), stripeRefundId: v.string(), refundedAmountCents: v.number(), refundedBy: v.optional(v.string()) },
+  args: {
+    orderId: v.id("btOrders"), stripeRefundId: v.optional(v.string()), refundedAmountCents: v.number(), refundedBy: v.optional(v.string()),
+    refundMethod: v.optional(v.union(v.literal("card"), v.literal("cash"), v.literal("bank_transfer"))), refundReason: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
     const order = await ctx.db.get(args.orderId);
     if (!order) throw new ConvexError("Demande introuvable.");
+    if (order.refundedAt) throw new ConvexError("Cette demande a déjà été remboursée.");
     const now = Date.now();
-    await ctx.db.patch(order._id, { stripeRefundId: args.stripeRefundId, refundedAt: now, refundedAmountCents: args.refundedAmountCents, refundedBy: args.refundedBy, ...(order.lostAt || order.collectedAt ? {} : { lostAt: now, lostReason: "Remboursée" }) });
+    await ctx.db.patch(order._id, { stripeRefundId: args.stripeRefundId, refundedAt: now, refundedAmountCents: args.refundedAmountCents, refundedBy: args.refundedBy, refundMethod: args.refundMethod, refundReason: args.refundReason, ...(order.lostAt || order.collectedAt ? {} : { lostAt: now, lostReason: "Remboursée" }) });
+    // Avoir Stripe sur la facture de la demande (la facture reste juste comptablement).
+    await ctx.scheduler.runAfter(0, internal.batireStripeInvoices.creditOrderInvoice, { orderId: order._id });
     if (order.collectedAt) return;
     if (!order.lostAt) {
       const material = await ctx.db.get(order.materialId);
@@ -3606,22 +3612,33 @@ export const markOrderRefunded = internalMutation({
 });
 
 /**
- * Rembourse par Stripe le montant de cette demande (paiement carte). Une
- * commande panier partage un seul paiement : on ne rend que la part de la
- * demande. On essaie la clé du compte qui a vendu le matériau, puis l'autre
- * compte si Stripe ne connaît pas ce paiement.
+ * Rembourse le montant de cette demande depuis le CRM.
+ *  - carte : remboursement Stripe sur la carte du client. Une commande panier
+ *    partage un seul paiement : on ne rend que la part de la demande. On
+ *    essaie la clé du compte vendeur, puis l'autre compte.
+ *  - espèces / virement : l'argent est rendu hors Stripe ; on l'enregistre.
+ * Dans tous les cas un avoir Stripe est émis sur la facture de la demande.
+ * Lot pas encore remis : il revient en stock. Lot déjà remis : retour client,
+ * le stock n'est pas touché.
  */
 export const refundOrder = action({
-  args: { orderId: v.id("btOrders") },
-  handler: async (ctx, { orderId }): Promise<{ refundId: string; amountCents: number }> => {
+  args: { orderId: v.id("btOrders"), reason: v.optional(v.string()) },
+  handler: async (ctx, { orderId, reason }): Promise<{ refundId: string | null; amountCents: number }> => {
     const access = await ctx.runQuery(api.permissions.myAccess, {});
     if (!accessAllows(access, PAGE_DEMANDES, "update")) throw new ConvexError("Accès CRM insuffisant.");
     const details = await ctx.runQuery(internal.batire.orderForRefund, { orderId });
     if (!details) throw new ConvexError("Demande introuvable.");
     const { order, category } = details;
-    if (order.stripeRefundId) throw new ConvexError("Cette demande a déjà été remboursée.");
-    if (order.status !== "payee" || !order.stripePaymentIntentId || (order.paymentMethod && order.paymentMethod !== "card")) throw new ConvexError("Aucun paiement par carte encaissé : il n'y a rien à rembourser.");
-    if (order.collectedAt) throw new ConvexError("Le lot a déjà été remis au client.");
+    if (order.stripeRefundId || order.refundedAt) throw new ConvexError("Cette demande a déjà été remboursée.");
+    if (order.status !== "payee") throw new ConvexError("Demande non réglée : il n'y a rien à rembourser.");
+    if (order.amountCents <= 0) throw new ConvexError("Demande gratuite (code promo) : il n'y a rien à rembourser.");
+    const refundReason = reason?.trim().slice(0, 300) || undefined;
+    const method = order.paymentMethod ?? "card";
+    if (method !== "card") {
+      await ctx.runMutation(internal.batire.markOrderRefunded, { orderId, refundedAmountCents: order.amountCents, refundedBy: access.email ?? undefined, refundMethod: method, refundReason });
+      return { refundId: null, amountCents: order.amountCents };
+    }
+    if (!order.stripePaymentIntentId) throw new ConvexError("Paiement carte sans référence Stripe : remboursement impossible depuis le CRM.");
     const keys: string[] = [];
     try { keys.push(stripeKeyForCategory(category)); } catch { /* clé absente : on tente l'autre compte */ }
     for (const key of [env.RECYCAPP_STRIPE_SECRET_KEY, env.BENNESPRO_STRIPE_SECRET_KEY]) if (key && !keys.includes(key)) keys.push(key);
@@ -3634,6 +3651,7 @@ export const refundOrder = action({
           amount: String(order.amountCents),
           "metadata[orderId]": String(order._id),
           "metadata[source]": "batire-crm-remboursement",
+          ...(refundReason ? { "metadata[motif]": refundReason } : {}),
         });
         break;
       } catch (error) {
@@ -3642,7 +3660,7 @@ export const refundOrder = action({
       }
     }
     if (!refund) throw new ConvexError(lastError || "Stripe a refusé le remboursement.");
-    await ctx.runMutation(internal.batire.markOrderRefunded, { orderId, stripeRefundId: refund.id, refundedAmountCents: refund.amount, refundedBy: access.email ?? undefined });
+    await ctx.runMutation(internal.batire.markOrderRefunded, { orderId, stripeRefundId: refund.id, refundedAmountCents: refund.amount, refundedBy: access.email ?? undefined, refundMethod: "card", refundReason });
     return { refundId: refund.id, amountCents: refund.amount };
   },
 });

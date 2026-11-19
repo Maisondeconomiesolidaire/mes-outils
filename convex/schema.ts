@@ -3389,6 +3389,14 @@ export default defineSchema(
     refundedAt: v.optional(v.number()),
     refundedAmountCents: v.optional(v.number()),
     refundedBy: v.optional(v.string()),
+    /** Moyen du remboursement (carte = via Stripe ; espèces / virement = rendu hors Stripe et enregistré). */
+    refundMethod: v.optional(v.union(v.literal("card"), v.literal("cash"), v.literal("bank_transfer"))),
+    refundReason: v.optional(v.string()),
+    /** Avoir Stripe émis sur la facture de la demande après remboursement. */
+    stripeCreditNoteId: v.optional(v.string()),
+    stripeCreditNoteNumber: v.optional(v.string()),
+    stripeCreditNotePdfUrl: v.optional(v.string()),
+    stripeCreditNoteError: v.optional(v.string()),
     /** Remise d'un code promo Bâtire, déjà déduite de `amountCents`. */
     discountCents: v.optional(v.number()),
     promoCode: v.optional(v.string()),

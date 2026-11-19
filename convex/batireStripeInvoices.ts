@@ -398,6 +398,55 @@ export const sendOrderInvoice = action({
   },
 });
 
+export const saveCreditNote = internalMutation({
+  args: { orderId: v.id("btOrders"), id: v.optional(v.string()), number: v.optional(v.string()), pdfUrl: v.optional(v.string()), error: v.optional(v.string()) },
+  handler: async (ctx, { orderId, id, number, pdfUrl, error }) => {
+    await ctx.db.patch(orderId, id ? { stripeCreditNoteId: id, stripeCreditNoteNumber: number, stripeCreditNotePdfUrl: pdfUrl, stripeCreditNoteError: undefined } : { stripeCreditNoteError: error });
+  },
+});
+
+/**
+ * Avoir Stripe après remboursement d'une demande : il annule comptablement la
+ * part remboursée de la facture. Remboursement carte : l'avoir est rattaché au
+ * remboursement Stripe quand la facture porte ce paiement ; sinon (espèces,
+ * virement, ancienne facture) il est déclaré « rendu hors Stripe ».
+ */
+export const creditOrderInvoice = internalAction({
+  args: { orderId: v.id("btOrders") },
+  handler: async (ctx, { orderId }) => {
+    const context = await ctx.runQuery(internal.batireStripeInvoices.invoiceContext, { orderId });
+    const order = context?.order;
+    if (!order?.refundedAt || order.stripeCreditNoteId) return;
+    if (!order.stripeInvoiceId || !order.stripeInvoiceProvider) return; // pas de facture Stripe : rien à créditer
+    const key = stripeKeyForProvider(order.stripeInvoiceProvider);
+    const amount = order.refundedAmountCents ?? order.amountCents;
+    try {
+      const invoice = await stripeRequest<StripeInvoice>(`invoices/${order.stripeInvoiceId}`, key);
+      if (invoice.status !== "paid") throw new Error(`facture ${invoice.number ?? invoice.id} au statut « ${invoice.status} »`);
+      const base: Record<string, string> = {
+        invoice: invoice.id,
+        "lines[0][type]": "custom_line_item", "lines[0][quantity]": "1", "lines[0][unit_amount]": String(amount),
+        "lines[0][description]": `Remboursement de la demande Bâtire #${reference(order)}`.slice(0, 250),
+        memo: `Remboursement du ${frDate(order.refundedAt)}${order.refundReason ? ` · ${order.refundReason}` : ""}`.slice(0, 500),
+        "metadata[orderId]": String(order._id), "metadata[source]": "batire-remboursement",
+      };
+      type CreditNote = { id: string; number?: string; pdf?: string };
+      let note: CreditNote | null = null;
+      if (order.stripeRefundId) {
+        try {
+          note = await stripeVersioned<CreditNote>("credit_notes", key, { ...base, "refunds[0][refund]": order.stripeRefundId, "refunds[0][amount_refunded]": String(amount) });
+        } catch { /* remboursement non lié à cette facture : avoir hors Stripe */ }
+      }
+      note ??= await stripeVersioned<CreditNote>("credit_notes", key, { ...base, out_of_band_amount: String(amount) });
+      await ctx.runMutation(internal.batireStripeInvoices.saveCreditNote, { orderId, id: note.id, number: note.number, pdfUrl: note.pdf });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Avoir Stripe impossible pour la demande ${orderId} : ${message}`);
+      await ctx.runMutation(internal.batireStripeInvoices.saveCreditNote, { orderId, error: message.slice(0, 500) });
+    }
+  },
+});
+
 /** Facture Stripe d'une demande (étape « Payé » et onglet Facturation). */
 export const orderInvoice = query({
   args: { orderId: v.id("btOrders") },
@@ -412,6 +461,8 @@ export const orderInvoice = query({
       sentAt: order.invoiceSentAt ?? null, sentTo: order.invoiceSentTo ?? null,
       pending: Boolean(order.stripeInvoicePendingAt && Date.now() - order.stripeInvoicePendingAt < 5 * 60_000),
       error: order.stripeInvoiceError ?? null,
+      creditNote: order.stripeCreditNoteId ? { number: order.stripeCreditNoteNumber ?? null, pdfUrl: order.stripeCreditNotePdfUrl ?? null } : null,
+      creditNoteError: order.stripeCreditNoteError ?? null,
     };
   },
 });
