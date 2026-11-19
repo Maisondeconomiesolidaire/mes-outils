@@ -162,7 +162,7 @@ async function createPaidInvoice(key: string, context: NonNullable<Awaited<Retur
   const { order, client } = context;
   const email = (client.email ?? order.customer.email).toLowerCase();
   const customer = await findOrCreateCustomer(key, client, email);
-  const method = PAYMENT_LABELS[order.paymentMethod ?? "card"] ?? "Carte bancaire";
+  const method = order.amountCents <= 0 && !order.stripePaymentIntentId ? `Code promo${order.promoCode ? ` ${order.promoCode}` : ""} (rien à régler)` : PAYMENT_LABELS[order.paymentMethod ?? "card"] ?? "Carte bancaire";
   const draft = await stripeRequest<StripeInvoice>("invoices", key, {
     customer,
     currency: "eur",
@@ -307,7 +307,9 @@ async function ensureInvoice(ctx: ActionCtx, orderId: Id<"btOrders">, attempt: n
     await ctx.runMutation(internal.batireStripeInvoices.saveInvoice, { orderIds: [orderId], provider, invoice: savedShape(existing) });
     return { invoice: existing, provider, context, orderIds: [orderId] };
   }
-  const card = (order.paymentMethod ?? "card") === "card";
+  // Panier offert par un code promo (0 €) : aucun paiement carte, facture à 0 € soldée d'office.
+  const free = order.amountCents <= 0 && !order.stripePaymentIntentId;
+  const card = !free && (order.paymentMethod ?? "card") === "card";
   let paymentIntent: { id: string; status?: string; customer?: string | { id: string } | null; invoice?: string | null } | null = null;
   if (card) {
     if (!order.stripePaymentIntentId) throw new ConvexError("Paiement carte sans référence Stripe : impossible d'émettre la facture sans créer de doublon.");
