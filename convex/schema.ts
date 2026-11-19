@@ -3175,6 +3175,8 @@ export default defineSchema(
     quantity: v.number(),
     /** Prix pour UNE unité de vente (un m³, une tonne, une palette…). */
     price: v.number(),
+    /** Prix HT d'une unité de vente (TVA 20 %). `price` reste le prix TTC payé par le client. */
+    priceHt: v.optional(v.number()),
     /** Prix barré : le neuf équivalent, pour situer l'économie du réemploi. */
     originalPrice: v.optional(v.number()),
     /** Conditionnement : « palette de 60 sacs », « botte de 10 ». */

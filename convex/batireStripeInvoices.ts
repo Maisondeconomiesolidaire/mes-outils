@@ -33,6 +33,44 @@ const euros = (cents: number) => (cents / 100).toLocaleString("fr-FR", { style: 
 const frDate = (at: number) => new Date(at).toLocaleDateString("fr-FR", { timeZone: "Europe/Paris" });
 const reference = (order: Doc<"btOrders">) => order.pickupReference ?? order.purchaseReference ?? order.reference;
 
+/**
+ * Taux de TVA Stripe « TVA 20 % » INCLUSE, propre à chaque compte (créé au
+ * premier besoin). Les montants restent TTC ; Stripe affiche le total HT, la
+ * TVA et le TTC sur la facture. En cas d'échec Stripe, on n'empêche pas la
+ * vente (null : lignes sans taux).
+ */
+const vatRateCache = new Map<string, string>();
+export async function vatTaxRate(key: string): Promise<string | null> {
+  const cached = vatRateCache.get(key);
+  if (cached) return cached;
+  try {
+    const list = await stripeRequest<{ data: { id: string; percentage: number; inclusive: boolean; active: boolean; metadata?: Record<string, string> }[] }>("tax_rates?active=true&inclusive=true&limit=100", key);
+    let id = list.data.find(rate => rate.active && rate.inclusive && rate.percentage === 20 && rate.metadata?.source === "batire")?.id;
+    if (!id) {
+      const created = await stripeRequest<{ id: string }>("tax_rates", key, {
+        display_name: "TVA", percentage: "20", inclusive: "true", country: "FR", jurisdiction: "FR",
+        description: "TVA 20 % incluse (Bâtire)", "metadata[source]": "batire",
+      });
+      id = created.id;
+    }
+    vatRateCache.set(key, id);
+    return id;
+  } catch (error) {
+    console.error(`Taux de TVA Stripe indisponible : ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+/** Ajoute la TVA 20 % incluse à chaque ligne `line_items[i]` d'un corps Checkout / devis. */
+export function withVat(body: Record<string, string>, rateId: string | null) {
+  if (!rateId) return body;
+  for (const key of Object.keys(body)) {
+    const match = /^line_items\[(\d+)\]\[quantity\]$/.exec(key);
+    if (match) body[`line_items[${match[1]}][tax_rates][0]`] = rateId;
+  }
+  return body;
+}
+
 /** Lignes de la facture : lot, transfert, remise du code promo, au montant réellement encaissé. */
 function invoiceLines(order: Doc<"btOrders">) {
   const fee = order.pickupFeeCents ?? 0;
@@ -175,8 +213,9 @@ async function createPaidInvoice(key: string, context: NonNullable<Awaited<Retur
     "metadata[source]": "batire-paiement",
     "metadata[paymentMethod]": order.paymentMethod ?? "card",
   });
+  const vat = await vatTaxRate(key);
   for (const line of invoiceLines(order)) {
-    await stripeRequest("invoiceitems", key, { customer, invoice: draft.id, currency: "eur", amount: String(line.amount), description: line.description.slice(0, 250) });
+    await stripeRequest("invoiceitems", key, { customer, invoice: draft.id, currency: "eur", amount: String(line.amount), description: line.description.slice(0, 250), ...(vat ? { "tax_rates[0]": vat } : {}) });
   }
   let invoice = await stripeRequest<StripeInvoice>(`invoices/${draft.id}/finalize`, key, { auto_advance: "false" });
   if (invoice.status !== "paid") invoice = await stripeRequest<StripeInvoice>(`invoices/${draft.id}/pay`, key, { paid_out_of_band: "true" });
@@ -229,8 +268,9 @@ async function createCardInvoice(key: string, context: NonNullable<Awaited<Retur
     footer: `Facture réglée le ${frDate(order.paidAt ?? Date.now())} · Carte bancaire.`,
     "metadata[orderId]": String(order._id), "metadata[source]": "batire-paiement", "metadata[paymentMethod]": "card", "metadata[paymentIntent]": paymentIntentId,
   });
+  const vat = await vatTaxRate(key);
   for (const line of invoiceLines(order)) {
-    await stripeRequest("invoiceitems", key, { customer, invoice: draft.id, currency: "eur", amount: String(line.amount), description: line.description.slice(0, 250) });
+    await stripeRequest("invoiceitems", key, { customer, invoice: draft.id, currency: "eur", amount: String(line.amount), description: line.description.slice(0, 250), ...(vat ? { "tax_rates[0]": vat } : {}) });
   }
   await stripeRequest<StripeInvoice>(`invoices/${draft.id}/finalize`, key, { auto_advance: "false" });
   try {
@@ -430,6 +470,8 @@ export const creditOrderInvoice = internalAction({
         memo: `Remboursement du ${frDate(order.refundedAt)}${order.refundReason ? ` · ${order.refundReason}` : ""}`.slice(0, 500),
         "metadata[orderId]": String(order._id), "metadata[source]": "batire-remboursement",
       };
+      const vat = await vatTaxRate(key);
+      if (vat) base["lines[0][tax_rates][0]"] = vat;
       type CreditNote = { id: string; number?: string; pdf?: string };
       let note: CreditNote | null = null;
       if (order.stripeRefundId) {

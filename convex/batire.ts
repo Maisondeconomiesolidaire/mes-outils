@@ -24,7 +24,7 @@ import {
 } from "./lib";
 import { recycappSecretKey, stripeRequest } from "./stripe";
 import { sendBillingDocMail } from "./batireEmails";
-import { checkoutCustomer } from "./batireStripeInvoices";
+import { checkoutCustomer, vatTaxRate, withVat } from "./batireStripeInvoices";
 import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
@@ -122,6 +122,7 @@ const materialFields = {
   unit: btUnit,
   quantity: v.number(),
   price: v.number(),
+  priceHt: v.optional(v.number()),
   originalPrice: v.optional(v.number()),
   packaging: v.optional(v.string()),
   lengthCm: v.optional(v.number()),
@@ -192,9 +193,25 @@ function assertPublishable(published: boolean, price: number) {
   }
 }
 
+/** TVA appliquée aux ventes Bâtire : les prix catalogue sont TTC. */
+export const BATIRE_VAT_RATE = 0.2;
+const round2 = (value: number) => Math.round(value * 100) / 100;
+/** Prix HT d'un prix TTC (TVA 20 %), au centime. */
+export const priceHtOf = (ttc: number) => round2(ttc / (1 + BATIRE_VAT_RATE));
+
+/**
+ * Prix HT cohérent avec le TTC : celui saisi s'il redonne bien le TTC
+ * (saisie côté HT), sinon recalculé depuis le TTC.
+ */
+function consistentPriceHt(price: number, priceHt: unknown) {
+  const ht = Number(priceHt);
+  return Number.isFinite(ht) && ht >= 0 && Math.abs(round2(ht * (1 + BATIRE_VAT_RATE)) - price) < 0.005 ? round2(ht) : priceHtOf(price);
+}
+
 /** Champs normalisés : un prix ou un stock négatif n'a pas de sens. */
 function normalizeMaterial(args: Record<string, unknown>) {
   const price = Math.max(0, Number(args.price) || 0);
+  const priceHt = consistentPriceHt(price, args.priceHt);
   const quantity = Math.max(0, Number(args.quantity) || 0);
   // Un prix barré inférieur ou égal au prix de vente n'affiche aucune remise :
   // on le laisse tomber plutôt que de barrer un chiffre plus bas.
@@ -210,6 +227,7 @@ function normalizeMaterial(args: Record<string, unknown>) {
   return {
     ...args,
     price,
+    priceHt,
     originalPrice,
     quantity,
     materials: list,
@@ -1112,10 +1130,12 @@ export const startCheckout = action({
 
     const returnUrl = new URL(args.returnUrl);
     returnUrl.searchParams.set("order_id", order.orderId);
+    const vatRate = await vatTaxRate(secretKey);
     const session = await stripeRequest<{ id: string; url: string }>(
       "checkout/sessions",
       secretKey,
       {
+        ...(vatRate ? { "line_items[0][tax_rates][0]": vatRate } : {}),
         mode: "payment",
         success_url: `${returnUrl.toString()}&status=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${returnUrl.toString()}&status=cancelled`,
@@ -1273,6 +1293,7 @@ export const startCartCheckout = action({
         body[`line_items[${index}][price_data][unit_amount]`] = String(pickupFee);
         body[`line_items[${index}][price_data][product_data][name]`] = "Transfert vers le lieu de retrait";
       }
+      withVat(body, await vatTaxRate(stripeKeyForCategory(items[0]!.category)));
       const session = await stripeRequest<{ id: string; url: string }>("checkout/sessions", stripeKeyForCategory(items[0]!.category), body);
       for (const order of orders) await ctx.runMutation(internal.batire.attachStripeSession, { orderId: order.orderId, stripeSessionId: session.id });
       checkouts.push({ provider, checkoutUrl: session.url });
@@ -3326,6 +3347,7 @@ export const importMaterials = mutation({
         unit: unit as never,
         quantity: Math.max(0, Number(row.quantity) || 0),
         price: Math.max(0, Number(row.price) || 0),
+        priceHt: priceHtOf(Math.max(0, Number(row.price) || 0)),
         brand: row.brand?.trim() || undefined,
         material: row.material?.trim() || undefined,
         depot: row.depot?.trim() || undefined,
@@ -3808,6 +3830,7 @@ export const createQuote = action({
       body[`line_items[${index}][price_data][product]`] = product.id;
       body[`line_items[${index}][price_data][unit_amount]`] = String(line.unitAmountCents);
     }
+    withVat(body, await vatTaxRate(secretKey));
     const draft = await stripeRequest<StripeQuote>("quotes", secretKey, body);
     const quote = await stripeRequest<StripeQuote>(`quotes/${draft.id}/finalize`, secretKey, {});
 
