@@ -211,7 +211,18 @@ async function findExistingInvoice(key: string, orderId: string) {
  */
 async function createCardInvoice(key: string, context: NonNullable<Awaited<ReturnType<typeof loadContext>>>, paymentIntentId: string, paymentCustomer: string | null) {
   const { order, client } = context;
-  const customer = paymentCustomer ?? await findOrCreateCustomer(key, client, (client.email ?? order.customer.email).toLowerCase(), order.userId);
+  let customer = paymentCustomer;
+  if (!customer) {
+    // Paiement « invité » (sans client Stripe) : Stripe n'accepte de le rattacher
+    // qu'à une facture du MÊME client. On rattache donc d'abord le paiement à
+    // une vraie fiche client, AVANT de créer quoi que ce soit.
+    customer = await findOrCreateCustomer(key, client, (client.email ?? order.customer.email).toLowerCase(), order.userId);
+    try {
+      await stripeRequest(`payment_intents/${paymentIntentId}`, key, { customer });
+    } catch (error) {
+      throw new ConvexError(`Stripe refuse de rattacher le paiement carte au client (${error instanceof Error ? error.message : String(error)}). Aucune facture n'a été créée.`);
+    }
+  }
   const draft = await stripeRequest<StripeInvoice>("invoices", key, {
     customer, currency: "eur", collection_method: "charge_automatically", auto_advance: "false", pending_invoice_items_behavior: "exclude",
     description: `Demande Bâtire #${reference(order)}`,
