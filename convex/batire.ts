@@ -1049,8 +1049,10 @@ export const markOrderPaid = internalMutation({
       stripePaymentIntentId,
       paidAt: Date.now(),
     });
-    // Commande réglée : Stripe émet sa facture (payée) et le client la reçoit par e-mail.
-    // Hors transaction : une erreur Stripe ne bloque jamais l'encaissement (renvoi possible depuis le CRM).
+    // Commande réglée : notre facture (HT / TTC) est émise d'office (étape « Payé »).
+    // Une erreur de facturation ne doit jamais bloquer l'encaissement : la facture reste générable à la main.
+    try { await ensureOrderInvoice(ctx, orderId); } catch (error) { console.error("Facture automatique impossible", orderId, error); }
+    // En parallèle, Stripe garde sa propre facture (comptabilité Stripe), sans l'envoyer au client.
     await ctx.scheduler.runAfter(0, internal.batireStripeInvoices.issueOrderInvoice, { orderId });
 
     const material = await ctx.db.get(order.materialId);
@@ -4313,7 +4315,6 @@ async function nextBillingNumber(ctx: MutationCtx, issuer: Issuer, type: "devis"
  * Émet un devis ou une facture. L'émetteur découle des articles : mobilier →
  * Recyclerie, le reste → MATERIOSOL. Un document ne mélange pas les deux.
  */
-const STRIPE_ONLY = "Les factures sont émises uniquement par Stripe : elles sont créées automatiquement quand la demande passe en « Payé ».";
 export const createBillingDoc = mutation({
   args: {
     type: v.union(v.literal("devis"), v.literal("facture")),
@@ -4329,7 +4330,6 @@ export const createBillingDoc = mutation({
   },
   handler: async (ctx, args) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
-    if (args.type === "facture") throw new ConvexError(STRIPE_ONLY);
     const actor = await requireUser(ctx);
     const sourceOrder = args.orderId ? await ctx.db.get(args.orderId) : null;
     if (args.orderId && !sourceOrder) throw new ConvexError("Demande introuvable.");
@@ -4384,12 +4384,26 @@ export const setQuoteStatus = mutation({
   },
 });
 
-/** Ancien passage devis → facture maison : les factures sont désormais émises par Stripe. */
+/** Devis accepté → facture (mêmes lignes, client et émetteur), numérotée à part. */
 export const convertQuoteToInvoice = mutation({
   args: { id: v.id("btBillingDocs"), dueDays: v.optional(v.number()) },
-  handler: async (ctx) => {
+  handler: async (ctx, { id, dueDays }) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
-    throw new ConvexError(STRIPE_ONLY);
+    const actor = await requireUser(ctx);
+    const quote = await ctx.db.get(id);
+    if (!quote || quote.type !== "devis") throw new ConvexError("Devis introuvable.");
+    if (quote.invoiceId) throw new ConvexError("Ce devis a déjà été facturé.");
+    if (quote.status === "refuse" || quote.status === "annule") throw new ConvexError("Un devis refusé ou annulé ne peut pas être facturé.");
+    const now = Date.now();
+    const issueDate = isoDay(now);
+    const { year, seq, number } = await nextBillingNumber(ctx, quote.issuer, "facture", issueDate);
+    const invoiceId = await ctx.db.insert("btBillingDocs", {
+      type: "facture", issuer: quote.issuer, number, year, seq, status: "a_regler", clientId: quote.clientId, client: quote.client, lines: quote.lines,
+      vatRate: quote.vatRate, totalCents: quote.totalCents, issueDate, dueDate: addDays(issueDate, Math.min(365, Math.max(0, Math.round(dueDays ?? 30)))),
+      notes: quote.notes, sourceQuoteId: quote._id, orderId: quote.orderId, createdBy: actor.name ?? actor.email ?? actor.subject, createdAt: now, statusAt: now,
+    });
+    await ctx.db.patch(quote._id, { status: "accepte", invoiceId, statusAt: now });
+    return { id: invoiceId, number };
   },
 });
 
@@ -4407,11 +4421,56 @@ export const setInvoicePaid = mutation({
 
 export const PAYMENT_LABELS: Record<string, string> = { card: "Carte bancaire", cash: "Espèces", bank_transfer: "Virement" };
 
-/** Ancienne génération de facture maison : remplacée par `batireStripeInvoices.sendOrderInvoice`. */
+/**
+ * Facture d'une demande payée : lot, transfert, remise du code promo, au
+ * montant réellement encaissé (TTC, TVA 20 %). Ne fait rien si la demande a
+ * déjà la sienne.
+ */
+async function ensureOrderInvoice(ctx: MutationCtx, orderId: Id<"btOrders">, createdBy = "Automatique (paiement)") {
+  const order = await ctx.db.get(orderId);
+  if (!order || order.status !== "payee") return null;
+  const existing = (await ctx.db.query("btBillingDocs").withIndex("by_orderId", q => q.eq("orderId", orderId)).collect()).find(doc => doc.type === "facture");
+  if (existing) return existing._id;
+  const material = await ctx.db.get(order.materialId);
+  const issuer = issuerOfCategory(material?.category ?? "");
+  const fee = order.pickupFeeCents ?? 0;
+  const discount = order.discountCents ?? 0;
+  const goods = order.amountCents - fee + discount;
+  const unitCents = Math.round(order.unitPrice * 100);
+  // Quantité fractionnaire dont l'arrondi diffère de l'encaissé : une seule ligne au montant exact.
+  const lot = Math.round(order.quantity * unitCents) === goods
+    ? { materialId: order.materialId, label: order.materialTitle, quantity: order.quantity, unit: order.unit, unitPriceCents: unitCents }
+    : { materialId: order.materialId, label: `${order.materialTitle} — ${order.quantity} ${order.unit}`, quantity: 1, unit: undefined, unitPriceCents: goods };
+  const lines = [lot,
+    ...(fee ? [{ materialId: undefined, label: "Transfert vers le lieu de retrait", quantity: 1, unit: undefined, unitPriceCents: fee }] : []),
+    ...(discount ? [{ materialId: undefined, label: `Remise${order.promoCode ? ` · code ${order.promoCode}` : ""}`, quantity: 1, unit: undefined, unitPriceCents: -discount }] : []),
+  ];
+  const now = Date.now();
+  const issueDate = isoDay(now);
+  const { year, seq, number } = await nextBillingNumber(ctx, issuer, "facture", issueDate);
+  const customer = order.customer;
+  const client = await completeClient(ctx, { company: customer.company, firstName: customer.firstName, lastName: customer.lastName, email: customer.email, phone: customer.phone }, { userId: order.userId });
+  const clientId = (await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", customer.email)).first())?._id
+    ?? await ctx.db.insert("btBillingClients", { ...client, createdAt: now, updatedAt: now });
+  return await ctx.db.insert("btBillingDocs", {
+    type: "facture", issuer, number, year, seq, status: "payee", clientId, client, lines, vatRate: 20,
+    totalCents: lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPriceCents), 0),
+    issueDate, dueDate: issueDate, notes: `Demande Bâtire #${order.pickupReference ?? order.purchaseReference ?? order.reference}`,
+    orderId, paidAt: order.paidAt ?? now, paymentMethod: PAYMENT_LABELS[order.paymentMethod ?? "card"],
+    createdBy, createdAt: now, statusAt: now,
+  });
+}
+
+/** Pour une demande payée sans facture (ancienne, ou génération échouée) : émet sa facture. */
 export const generateOrderInvoice = mutation({
   args: { orderId: v.id("btOrders") },
-  handler: async (ctx) => {
+  handler: async (ctx, { orderId }) => {
     await requireCrmPermission(ctx, PAGE_DEMANDES, "update");
-    throw new ConvexError(STRIPE_ONLY);
+    const actor = await requireUser(ctx);
+    const order = await ctx.db.get(orderId);
+    if (!order || order.status !== "payee") throw new ConvexError("La demande n’est pas payée.");
+    const id = await ensureOrderInvoice(ctx, orderId, actor.name ?? actor.email ?? actor.subject);
+    if (!id) throw new ConvexError("Facture impossible à générer.");
+    return id;
   },
 });

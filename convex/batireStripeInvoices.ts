@@ -413,8 +413,9 @@ async function emailInvoice(ctx: ActionCtx, issued: NonNullable<Awaited<ReturnTy
 export const issueOrderInvoice = internalAction({
   args: { orderId: v.id("btOrders"), attempt: v.optional(v.number()) },
   handler: async (ctx, { orderId, attempt }) => {
-    const issued = await ensureInvoice(ctx, orderId, attempt ?? 0);
-    if (issued) await emailInvoice(ctx, issued, false);
+    // Facture Stripe tenue en parallèle de la facture Bâtire : pas d'envoi
+    // automatique (le client reçoit la facture Bâtire), envoi possible du CRM.
+    await ensureInvoice(ctx, orderId, attempt ?? 0);
   },
 });
 
