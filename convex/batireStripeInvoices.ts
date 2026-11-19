@@ -183,8 +183,8 @@ async function ensureInvoice(ctx: ActionCtx, orderId: Id<"btOrders">, attempt: n
   if (!context) throw new ConvexError("Demande introuvable.");
   const { order } = context;
   if (order.status !== "payee") throw new ConvexError("La demande n’est pas payée.");
-  const provider: Provider = order.stripeInvoiceProvider ?? stripeProviderForCategory(context.category);
-  const key = stripeKeyForProvider(provider);
+  let provider: Provider = order.stripeInvoiceProvider ?? stripeProviderForCategory(context.category);
+  let key = stripeKeyForProvider(provider);
   if (order.stripeInvoiceId) {
     const invoice = await stripeRequest<StripeInvoice>(`invoices/${order.stripeInvoiceId}`, key);
     const orderIds = [order._id];
@@ -193,13 +193,26 @@ async function ensureInvoice(ctx: ActionCtx, orderId: Id<"btOrders">, attempt: n
   }
   // Carte : la facture créée par Checkout avec le paiement.
   if ((order.paymentMethod ?? "card") === "card" && order.stripeSessionId) {
-    const session = await stripeRequest<Session>(`checkout/sessions/${order.stripeSessionId}`, key);
-    if (session.invoice) {
+    // La session peut vivre sur l'autre compte Stripe (anciennes commandes) :
+    // on la cherche sur les deux, et la facture suit le compte qui a encaissé.
+    let session: Session | null = null;
+    for (const candidate of [provider, provider === "recycapp" ? "bennespro" : "recycapp"] as Provider[]) {
+      let candidateKey: string;
+      try { candidateKey = stripeKeyForProvider(candidate); } catch { continue; }
+      try {
+        session = await stripeRequest<Session>(`checkout/sessions/${order.stripeSessionId}`, candidateKey);
+        provider = candidate; key = candidateKey;
+        break;
+      } catch (error) {
+        if (!/no such checkout\.session/i.test(error instanceof Error ? error.message : "")) throw error;
+      }
+    }
+    if (session?.invoice) {
       const invoice = await stripeRequest<StripeInvoice>(`invoices/${session.invoice}`, key);
       await ctx.runMutation(internal.batireStripeInvoices.saveInvoice, { orderIds: context.sessionOrderIds, provider, invoice: savedShape(invoice) });
       return { invoice, provider, context, orderIds: context.sessionOrderIds };
     }
-    if (session.invoice_creation?.enabled && attempt < 5) {
+    if (session?.invoice_creation?.enabled && attempt < 5) {
       await ctx.scheduler.runAfter(60_000, internal.batireStripeInvoices.issueOrderInvoice, { orderId, attempt: attempt + 1 });
       return null;
     }
@@ -208,6 +221,7 @@ async function ensureInvoice(ctx: ActionCtx, orderId: Id<"btOrders">, attempt: n
   try {
     const invoice = await createPaidInvoice(key, context);
     await ctx.runMutation(internal.batireStripeInvoices.saveInvoice, { orderIds: [orderId], provider, invoice: savedShape(invoice) });
+    // ⚠ `provider` peut différer de la catégorie : c'est le compte qui a encaissé.
     return { invoice, provider, context, orderIds: [orderId] };
   } catch (error) {
     await ctx.runMutation(internal.batireStripeInvoices.failInvoice, { orderId, error: error instanceof Error ? error.message : String(error) });
@@ -264,10 +278,16 @@ export const sendOrderInvoice = action({
     const access = await ctx.runQuery(api.permissions.myAccess, {});
     if (!accessAllows(access, PAGE_DEMANDES, "update")) throw new ConvexError("Accès CRM insuffisant.");
     if (to && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to.trim())) throw new ConvexError("Adresse e-mail invalide.");
-    const issued = await ensureInvoice(ctx, orderId, 5);
-    if (!issued) throw new ConvexError("La facture est en cours de création chez Stripe. Réessayez dans un instant.");
-    const sent = await emailInvoice(ctx, issued, true, to);
-    return { number: issued.invoice.number ?? issued.invoice.id, to: sent ?? "" };
+    try {
+      const issued = await ensureInvoice(ctx, orderId, 5);
+      if (!issued) throw new ConvexError("La facture est en cours de création chez Stripe. Réessayez dans un instant.");
+      const sent = await emailInvoice(ctx, issued, true, to);
+      return { number: issued.invoice.number ?? issued.invoice.id, to: sent ?? "" };
+    } catch (error) {
+      // Message lisible dans le CRM plutôt qu'un « Server Error » opaque.
+      if (error instanceof ConvexError) throw error;
+      throw new ConvexError(`Stripe : ${error instanceof Error ? error.message : String(error)}`);
+    }
   },
 });
 
