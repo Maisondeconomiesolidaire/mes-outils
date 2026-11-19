@@ -177,6 +177,40 @@ async function handleCatalogEvent(
   }
 }
 
+/* ─── Webhooks Stripe — paiements Bâtire (un par compte vendeur) ─────────────
+ *
+ * Confirment les paiements Checkout de Bâtire côté serveur : stock, reçu,
+ * facture Stripe et e-mail partent même si le client ferme l'onglet.
+ * URLs à déclarer dans chaque compte Stripe (événements
+ * `checkout.session.completed` et `checkout.session.async_payment_succeeded`) :
+ *   Recyclerie : https://hip-marten-394.eu-west-1.convex.site/stripe/batire-recyclerie
+ *   MATERIOSOL : https://hip-marten-394.eu-west-1.convex.site/stripe/batire-materiosol
+ */
+function batireWebhook(provider: "recycapp" | "bennespro", secretName: "BATIRE_RECYCLERIE_STRIPE_WEBHOOK_SECRET" | "BATIRE_MATERIOSOL_STRIPE_WEBHOOK_SECRET") {
+  return httpAction(async (ctx, request) => {
+    const secret = env[secretName];
+    if (!secret) {
+      console.error(`Webhook Stripe Bâtire reçu mais ${secretName} n'est pas configurée.`);
+      return new Response("Webhook non configuré", { status: 500 });
+    }
+    const payload = await request.text();
+    if (!(await verifyStripeSignature(payload, request.headers.get("Stripe-Signature"), secret))) {
+      return new Response("Signature invalide", { status: 400 });
+    }
+    const event = JSON.parse(payload) as { type?: string; data?: { object?: { id?: string; payment_status?: string; metadata?: { source?: string } } } };
+    const session = event.data?.object;
+    const relevant = event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded";
+    if (!relevant || !session?.id || !session.metadata?.source?.startsWith("batire") || session.payment_status !== "paid") {
+      return new Response("ok", { status: 200 });
+    }
+    await ctx.scheduler.runAfter(0, internal.batire.confirmSessionFromWebhook, { provider, sessionId: session.id });
+    return new Response("ok", { status: 200 });
+  });
+}
+
+http.route({ path: "/stripe/batire-recyclerie", method: "POST", handler: batireWebhook("recycapp", "BATIRE_RECYCLERIE_STRIPE_WEBHOOK_SECRET") });
+http.route({ path: "/stripe/batire-materiosol", method: "POST", handler: batireWebhook("bennespro", "BATIRE_MATERIOSOL_STRIPE_WEBHOOK_SECRET") });
+
 http.route({
   path: "/stripe/recycapp",
   method: "POST",

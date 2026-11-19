@@ -8,6 +8,9 @@ export default defineApp({
     RECYCAPP_STRIPE_SECRET_KEY: v.optional(v.string()),
     /** Secret de signature du webhook Stripe de la boutique (whsec_…). */
     RECYCAPP_STRIPE_WEBHOOK_SECRET: v.optional(v.string()),
+    /** Secrets (whsec_…) des webhooks Stripe des paiements Bâtire, un par compte vendeur. */
+    BATIRE_RECYCLERIE_STRIPE_WEBHOOK_SECRET: v.optional(v.string()),
+    BATIRE_MATERIOSOL_STRIPE_WEBHOOK_SECRET: v.optional(v.string()),
     BENNESPRO_STRIPE_SECRET_KEY: v.optional(v.string()),
     BENNESPRO_STRIPE_TVA_TAX_RATE_ID: v.optional(v.string()),
     BENNESPRO_EMAIL_LOGO_ID: v.optional(v.string()),

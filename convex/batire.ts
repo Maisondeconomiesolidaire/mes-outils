@@ -10,7 +10,7 @@ import { ensureOrderTransport } from "./meslogistic";
  * vente, ni le prix ni le stock ne veulent dire quoi que ce soit.
  */
 import { ConvexError, v } from "convex/values";
-import { action, env, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { action, env, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { thumbnailUrl } from "./thumbnails";
@@ -1334,6 +1334,25 @@ export const confirmOfflinePayment = mutation({
     const order = await ctx.db.get(orderId);
     if (!order || !order.paymentMethod || order.paymentMethod === "card" || !["reservee", "en_attente"].includes(order.status)) throw new ConvexError("Paiement différé introuvable ou déjà enregistré.");
     await ctx.runMutation(internal.batire.markOrderPaid, { orderId });
+  },
+});
+
+/**
+ * Webhook Stripe (paiement Checkout Bâtire) : la commande est confirmée même
+ * si le client ferme l'onglet avant de revenir sur le site. Session relue
+ * chez Stripe ; `markOrderPaid` est idempotent (le retour navigateur peut
+ * passer avant ou après).
+ */
+export const confirmSessionFromWebhook = internalAction({
+  args: { provider: v.union(v.literal("recycapp"), v.literal("bennespro")), sessionId: v.string() },
+  handler: async (ctx, { provider, sessionId }) => {
+    const orders: Doc<"btOrders">[] = await ctx.runQuery(internal.batire.ordersByStripeSession, { stripeSessionId: sessionId });
+    if (!orders.length) return;
+    const session = await stripeRequest<{ payment_status?: string; payment_intent?: string | null }>(`checkout/sessions/${sessionId}`, stripeKeyForProvider(provider));
+    if (session.payment_status !== "paid") return;
+    for (const order of orders) {
+      await ctx.runMutation(internal.batire.markOrderPaid, { orderId: order._id, stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined });
+    }
   },
 });
 
