@@ -22,7 +22,7 @@ test("same depot and old aliases require no transport", () => {
 test("reservation creates one transport; payment and replay never duplicate it", async () => {
  const {t,materialId}=await fixture();
  const client=t.withIdentity({subject:"client",email:customer.email});
- await client.mutation(api.batireDons.saveMyDonorProfile,{customerType:"professionnel"});
+ await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "professionnel", address: "1 rue du Test", postalCode: "60000", city: "Beauvais"});
  await client.mutation(api.batire.reserveMaterial,{materialId,quantity:2,customer,pickupLocation:"esspace_150"});
  const orders=await t.run(ctx=>ctx.db.query("btOrders").collect());
  expect(orders[0].logisticsSourceDepot).toBe("Comptoir C");
@@ -40,7 +40,7 @@ test("checkout and payment create no transport; the Batire pickup request uses t
  const rows=await t.run(ctx=>ctx.db.query("mlRequests").collect());expect(rows).toHaveLength(1);expect(rows[0].origin).toBe("Comptoir C");
  expect((await t.run(ctx=>ctx.db.get(materialId)))?.quantity).toBe(8);
 });
-test("same site reservation creates no request",async()=>{const {t,materialId}=await fixture();const client=t.withIdentity({subject:"client",email:customer.email});await client.mutation(api.batireDons.saveMyDonorProfile,{customerType:"professionnel"});await client.mutation(api.batire.reserveMaterial,{materialId,quantity:1,customer,pickupLocation:"comptoir_c"});expect(await t.run(ctx=>ctx.db.query("mlRequests").collect())).toHaveLength(0);});
+test("same site reservation creates no request",async()=>{const {t,materialId}=await fixture();const client=t.withIdentity({subject:"client",email:customer.email});await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "professionnel", address: "1 rue du Test", postalCode: "60000", city: "Beauvais"});await client.mutation(api.batire.reserveMaterial,{materialId,quantity:1,customer,pickupLocation:"comptoir_c"});expect(await t.run(ctx=>ctx.db.query("mlRequests").collect())).toHaveLength(0);});
 test("permissions, sequential steps, stale writes and history are enforced",async()=>{
  const {t,admin}=await fixture();
  const values={title:"Porte",quantity:1,unit:"unité",customerName:"Interne",origin:"Comptoir C",destination:"Esspace 150",scheduledDate:"2026-11-12",dueDate:"2026-11-20"};

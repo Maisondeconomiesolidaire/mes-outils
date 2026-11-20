@@ -902,6 +902,21 @@ async function nextOrderReference(ctx: { db: { query: (t: "btOrders") => any } }
   return `BT${String(all.length + 1).padStart(5, "0")}`;
 }
 
+/**
+ * Adresse de facturation du compte client (espace client) : obligatoire pour
+ * commander, quel que soit le type de client. Elle figure sur nos factures.
+ */
+export async function billingAddressOf(ctx: QueryCtx | MutationCtx, userId: string) {
+  const profile = await ctx.db.query("btDonorProfiles").withIndex("by_clerkId", q => q.eq("clerkId", userId)).unique();
+  const address = profile?.address?.trim(), postalCode = profile?.postalCode?.trim(), city = profile?.city?.trim();
+  return address && postalCode && city ? { address, postalCode, city } : null;
+}
+async function requireBillingAddress(ctx: QueryCtx | MutationCtx, userId: string) {
+  const billing = await billingAddressOf(ctx, userId);
+  if (!billing) throw new ConvexError("Renseignez votre adresse de facturation (adresse, code postal, ville) dans votre espace client avant de commander.");
+  return billing;
+}
+
 /** Fige prix et quantité d'une commande, payée en ligne ou réservée. */
 async function insertOrder(
   ctx: MutationCtx,
@@ -921,6 +936,7 @@ async function insertOrder(
   },
   status: "en_attente" | "reservee",
 ) {
+  if (args.userId) await requireBillingAddress(ctx, args.userId);
   const material = await ctx.db.get(args.materialId);
   if (!material) throw new ConvexError("Matériau introuvable.");
   if (material.status !== "disponible") {
@@ -1601,6 +1617,7 @@ export const requestHomeDelivery = mutation({
     if (!args.items.length || !args.address.trim()) throw new ConvexError("Indiquez les articles et l'adresse de livraison.");
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) throw new ConvexError("Connectez-vous pour demander une livraison.");
+    await requireBillingAddress(ctx, identity.subject);
     // Devis de livraison : rien n'est vendu à ce stade, le stock bloqué par le panier est rendu.
     const holds = args.holderKey ? await ctx.db.query("btCartHolds").withIndex("by_holder", q => q.eq("holderKey", args.holderKey!)).collect() : [];
     for (const hold of holds) await releaseHold(ctx, hold);
@@ -4417,6 +4434,12 @@ export async function completeClient(ctx: QueryCtx | MutationCtx, client: Billin
     ?? (client.email ? await ctx.db.query("btBillingClients").withIndex("by_email", q => q.eq("email", client.email!.toLowerCase())).first() : null);
   const profile = refs.userId ? await ctx.db.query("btDonorProfiles").withIndex("by_clerkId", q => q.eq("clerkId", refs.userId!)).unique() : null;
   const result: BillingClientData = { ...client };
+  // Adresse de facturation de l'espace client : prioritaire sur toute adresse plus ancienne.
+  if (profile?.address?.trim() && profile.postalCode?.trim() && profile.city?.trim()) {
+    result.address = profile.address.trim();
+    result.postalCode = profile.postalCode.trim();
+    result.city = profile.city.trim();
+  }
   for (const key of CLIENT_KEYS) {
     if (result[key]?.trim()) continue;
     const value = (billing as Record<string, unknown> | null)?.[key] ?? (profile as Record<string, unknown> | null)?.[key];

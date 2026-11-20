@@ -15,6 +15,8 @@ async function fixture() {
     title, description: title, category: "Menuiserie", condition: "bon_etat", unit: "unite", quantity: 20, price: 10,
     depot: "Comptoir C", photos: [], status: "disponible", createdAt: 1, updatedAt: 1,
   }))));
+  // Adresse de facturation obligatoire pour commander.
+  await t.run(ctx => ctx.db.insert("btDonorProfiles", { clerkId: "client", address: "1 rue du Test", postalCode: "60000", city: "Beauvais", createdAt: 1, updatedAt: 1 }));
   const orders = await t.mutation(internal.batire.createCartOrders, { customer, userId: "client", items: materials.map((materialId, index) => ({ materialId, quantity: 2, pickupLocation: index === 0 ? "comptoir_c" as const : "recyclerie_pays_de_bray" as const })) });
   const admin = t.withIdentity({ subject: "admin", email: "admin@example.com" });
   const client = t.withIdentity({ subject: "client", email: customer.email });

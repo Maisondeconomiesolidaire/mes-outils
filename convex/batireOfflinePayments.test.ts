@@ -13,6 +13,7 @@ async function fixture() {
   const client = t.withIdentity({ subject: "client", email: "client@example.com" });
   const admin = t.withIdentity({ subject: "admin", email: "admin@example.com" });
   const customer = { firstName: "Jean", lastName: "Test", email: "client@example.com" };
+  await client.mutation(api.batireDons.saveMyDonorProfile, { address: "1 rue du Test", postalCode: "60000", city: "Beauvais" });
   const items = ids.map(materialId => ({ materialId, quantity: 2, pickupLocation: "recyclerie_pays_de_bray" as const }));
   return { t, client, admin, customer, items };
 }
@@ -21,7 +22,7 @@ test("payment methods: card and cash for everyone, bank transfer for association
   const { t, client, customer, items } = await fixture();
   // Particulier : pas de virement, mais les espèces sont ouvertes à tous.
   await expect(client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" })).rejects.toThrow();
-  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "professionnel" });
+  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "professionnel", address: "1 rue du Test", postalCode: "60000", city: "Beauvais" });
   await expect(client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" })).rejects.toThrow();
   const result = await client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "cash" });
   const rows = await t.run(ctx => ctx.db.query("btOrders").collect());
@@ -60,7 +61,7 @@ test("cart holds stock for 30 minutes, the order takes it over, expiry gives it 
 
 test("bank transfer can be planned before payment and stays unpaid until staff confirmation", async () => {
   const { t, client, admin, customer, items } = await fixture();
-  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "collectivite" });
+  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "collectivite", address: "1 rue du Test", postalCode: "60000", city: "Beauvais" });
   await client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" });
   const rows = await t.run(ctx => ctx.db.query("btOrders").collect());
   expect(rows.every(row => row.status === "reservee")).toBe(true);
@@ -73,7 +74,7 @@ test("bank transfer can be planned before payment and stays unpaid until staff c
 
 test("scheduled date is visible to the client before a shuttle is assigned", async () => {
   const { client, admin, customer, items } = await fixture();
-  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "collectivite" });
+  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "collectivite", address: "1 rue du Test", postalCode: "60000", city: "Beauvais" });
   await client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" });
   const order = (await admin.query(api.batire.pickupOperations, {})).orders[0];
   await admin.mutation(api.batire.requestPickupTransfer, { orderId: order._id, dueDate: "2026-11-20" });
@@ -91,7 +92,7 @@ test("scheduled date is visible to the client before a shuttle is assigned", asy
 
 test("cash cannot be handed over before payment confirmation", async () => {
   const { t, client, admin, customer, items } = await fixture();
-  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "professionnel" });
+  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "professionnel", address: "1 rue du Test", postalCode: "60000", city: "Beauvais" });
   await client.mutation(api.batire.requestOfflineCart, { customer, items: [{ ...items[0], pickupLocation: "comptoir_c" }], paymentMethod: "cash" });
   const order = (await t.run(ctx => ctx.db.query("btOrders").collect()))[0];
   await admin.mutation(api.batire.updatePickup, { orderId: order._id, step: "ready", availableFrom: "2026-11-21" });
@@ -103,7 +104,7 @@ test("cash cannot be handed over before payment confirmation", async () => {
 
 test("a donation without a visible company preserves the saved company in the profile", async () => {
   const { t, client } = await fixture();
-  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "particulier", company: "Ancienne entreprise" });
+  await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "particulier", address: "1 rue du Test", postalCode: "60000", city: "Beauvais", company: "Ancienne entreprise" });
   const photo = await t.run(ctx => ctx.storage.store(new Blob(["photo"], { type: "image/png" })));
   await client.mutation(api.batireDons.submitDonation, { title: "Bois", category: "Bois", photos: [photo], donor: { firstName: "Jean", lastName: "Test" } });
   expect((await client.query(api.batireDons.getMyDonorProfile, {}))?.company).toBe("Ancienne entreprise");
@@ -122,4 +123,16 @@ test("a delivery request keeps one card and independent statuses for its materia
   expect(updated?.items.map(item => item.outcome)).toEqual(["en_cours", "gagnee"]);
   expect(updated?.outcome).toBe("nouveau");
   await expect(admin.mutation(api.batire.updateRequestItemOutcome, { id: request._id, index: 2, outcome: "perdue" })).rejects.toThrow();
+});
+
+test("billing address is required to order, and printed on our invoice", async () => {
+  const { t, customer, items } = await fixture();
+  const other = t.withIdentity({ subject: "sans-adresse", email: "autre@example.com" });
+  await expect(other.mutation(api.batire.requestOfflineCart, { customer: { ...customer, email: "autre@example.com" }, items, paymentMethod: "cash" })).rejects.toThrow(/adresse de facturation/);
+  await other.mutation(api.batireDons.saveMyDonorProfile, { address: "8 place Jeanne Hachette", postalCode: "60000", city: "Beauvais" });
+  await other.mutation(api.batire.requestOfflineCart, { customer: { ...customer, email: "autre@example.com" }, items, paymentMethod: "cash" });
+  const order = (await t.run(ctx => ctx.db.query("btOrders").collect())).find(row => row.userId === "sans-adresse")!;
+  await t.mutation(internal.batire.markOrderPaid, { orderId: order._id });
+  const invoice = (await t.run(ctx => ctx.db.query("btBillingDocs").collect())).find(doc => doc.orderId === order._id && doc.type === "facture");
+  expect(invoice?.client).toMatchObject({ address: "8 place Jeanne Hachette", postalCode: "60000", city: "Beauvais" });
 });

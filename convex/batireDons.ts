@@ -82,6 +82,18 @@ export const getMyDonorProfile = query({
   },
 });
 
+/** Adresse de facturation renseignée ? (le panier bloque la commande sinon). */
+export const myBillingAddress = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    const profile = await donorProfile(ctx, identity.subject);
+    const address = profile?.address?.trim(), postalCode = profile?.postalCode?.trim(), city = profile?.city?.trim();
+    return { complete: Boolean(address && postalCode && city), address: address ?? "", postalCode: postalCode ?? "", city: city ?? "" };
+  },
+});
+
 export const saveMyDonorProfile = mutation({
   args: profileFields,
   handler: async (ctx, args) => {
