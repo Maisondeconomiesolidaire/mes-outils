@@ -14,6 +14,7 @@ import type * as articleQrCodes from "../articleQrCodes.js";
 import type * as articles from "../articles.js";
 import type * as ateliers from "../ateliers.js";
 import type * as batire from "../batire.js";
+import type * as batireCart from "../batireCart.js";
 import type * as batireDons from "../batireDons.js";
 import type * as batireEmails from "../batireEmails.js";
 import type * as batireStripeInvoices from "../batireStripeInvoices.js";
@@ -115,6 +116,7 @@ declare const fullApi: ApiFromModules<{
   articles: typeof articles;
   ateliers: typeof ateliers;
   batire: typeof batire;
+  batireCart: typeof batireCart;
   batireDons: typeof batireDons;
   batireEmails: typeof batireEmails;
   batireStripeInvoices: typeof batireStripeInvoices;

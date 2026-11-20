@@ -2,7 +2,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { convexTest } from "convex-test";
 import schema from "./schema";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 const modules = import.meta.glob("./**/*.ts");
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
@@ -17,18 +17,45 @@ async function fixture() {
   return { t, client, admin, customer, items };
 }
 
-test("payment methods are authorized by the saved customer type on the server", async () => {
+test("payment methods: card and cash for everyone, bank transfer for associations and collectivities", async () => {
   const { t, client, customer, items } = await fixture();
-  await expect(client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "cash" })).rejects.toThrow();
+  // Particulier : pas de virement, mais les espèces sont ouvertes à tous.
+  await expect(client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" })).rejects.toThrow();
   await client.mutation(api.batireDons.saveMyDonorProfile, { customerType: "professionnel" });
   await expect(client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "bank_transfer" })).rejects.toThrow();
   const result = await client.mutation(api.batire.requestOfflineCart, { customer, items, paymentMethod: "cash" });
   const rows = await t.run(ctx => ctx.db.query("btOrders").collect());
   expect(rows.map(row => row.purchaseReference)).toEqual([result.reference, result.reference]);
-  expect(rows.every(row => row.paymentMethod === "cash" && row.status === "reservee")).toBe(true);
-  expect(rows.reduce((sum, row) => sum + (row.pickupFeeCents ?? 0), 0)).toBe(3500);
+  expect(rows.every(row => row.paymentMethod === "cash" && row.status === "reservee" && row.stockDeducted)).toBe(true);
+  // Transfert offert jusqu'au 01/01/2027.
+  expect(rows.reduce((sum, row) => sum + (row.pickupFeeCents ?? 0), 0)).toBe(0);
+  // Stock décompté dès la réservation.
+  const materials = await t.run(ctx => ctx.db.query("btMaterials").collect());
+  expect(materials.every(material => material.quantity === 18)).toBe(true);
   expect(await t.run(ctx => ctx.db.query("mlRequests").collect())).toHaveLength(0);
   await expect(client.mutation(api.batire.confirmOfflinePayment, { orderId: rows[0]._id })).rejects.toThrow();
+});
+
+test("cart holds stock for 30 minutes, the order takes it over, expiry gives it back", async () => {
+  const { t, client, customer, items } = await fixture();
+  const holderKey = "holder_abcdefghijklmnop";
+  await t.run(async ctx => { for (const item of items) await ctx.db.patch(item.materialId, { published: true }); });
+  const [first, second] = items;
+  await client.mutation(api.batireCart.setCartItem, { holderKey, materialId: first.materialId, quantity: 5 });
+  await client.mutation(api.batireCart.setCartItem, { holderKey, materialId: second.materialId, quantity: 3 });
+  const stock = async () => (await t.run(ctx => ctx.db.query("btMaterials").collect())).map(material => material.quantity);
+  expect(await stock()).toEqual([15, 17]);
+  // Plus que le stock restant : refusé.
+  await expect(client.mutation(api.batireCart.setCartItem, { holderKey: "other_abcdefghijklmnop", materialId: first.materialId, quantity: 16 })).rejects.toThrow();
+  // La réservation reprend le blocage : pas de second décompte.
+  await client.mutation(api.batire.requestOfflineCart, { customer, items: [{ ...first, quantity: 5 }], paymentMethod: "cash", holderKey });
+  expect(await stock()).toEqual([15, 17]);
+  // Le reste du panier expire au bout de 30 minutes.
+  vi.advanceTimersByTime(31 * 60_000);
+  await t.finishInProgressScheduledFunctions();
+  await t.mutation(internal.batireCart.releaseStaleHolds, {});
+  expect(await stock()).toEqual([15, 20]);
+  expect(await t.run(ctx => ctx.db.query("btCartHolds").collect())).toHaveLength(0);
 });
 
 test("bank transfer can be planned before payment and stays unpaid until staff confirmation", async () => {

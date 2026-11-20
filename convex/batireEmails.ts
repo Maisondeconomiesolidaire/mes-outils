@@ -437,6 +437,51 @@ export const sendPickupReady = internalAction({
   },
 });
 
+/** Équipe Bâtire prévenue de chaque nouvelle demande (achat, réservation, devis de livraison). */
+const BATIRE_TEAM_RECIPIENTS = ["mobilierpro@eco-solidaire.fr", "materiosol@eco-solidaire.fr"];
+
+export const sendTeamNewRequest = internalAction({
+  args: {
+    kind: v.string(),
+    reference: v.string(),
+    customer: v.object({ name: v.string(), email: v.string(), phone: v.optional(v.string()), company: v.optional(v.string()) }),
+    lines: v.array(v.object({ title: v.string(), quantity: v.number(), unit: v.string(), amountCents: v.optional(v.number()) })),
+    totalCents: v.optional(v.number()),
+    payment: v.optional(v.string()),
+    fulfillment: v.optional(v.string()),
+    crmPath: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    const money = (cents: number) => (cents / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+    const rows = args.lines.map(line => `<tr><td style="padding:8px 0;border-bottom:1px solid #e3eff3;">${esc(line.title)}</td><td align="right" style="padding:8px 0;border-bottom:1px solid #e3eff3;white-space:nowrap;">${esc(`${line.quantity} ${line.unit}`)}${line.amountCents !== undefined ? ` · ${esc(money(line.amountCents))}` : ""}</td></tr>`).join("");
+    const total = args.totalCents !== undefined ? `<tr><td style="padding:10px 0;font-weight:700;color:#18181b;">Total TTC</td><td align="right" style="padding:10px 0;font-weight:700;color:#18181b;">${esc(money(args.totalCents))}</td></tr>` : "";
+    const client = [args.customer.company, args.customer.name, args.customer.email, args.customer.phone].filter(Boolean).map(value => esc(value!)).join("<br/>");
+    await resendSend(BATIRE_TEAM_RECIPIENTS, `Nouvelle demande Bâtire ${args.reference} · ${args.kind}`, shell({
+      preheader: `${args.customer.name} · ${args.lines.length} article${args.lines.length > 1 ? "s" : ""}`,
+      heading: `Nouvelle demande ${args.reference}`,
+      intro: `<strong>${esc(args.kind)}</strong>${args.fulfillment ? `<br/>${esc(args.fulfillment)}` : ""}${args.payment ? `<br/>Paiement : ${esc(args.payment)}` : ""}`,
+      contentHtml: `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 22px;border-collapse:collapse;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">${rows}${total}</table>`
+        + note("Client", client)
+        + button(`${appUrl()}${args.crmPath}`, "Ouvrir dans le CRM"),
+    }), FROM);
+  },
+});
+
+/** Remboursement effectué depuis le CRM : le client reçoit le montant, le moyen et le motif. */
+export const sendRefundNotice = internalAction({
+  args: { to: v.string(), firstName: v.string(), reference: v.string(), title: v.string(), amountCents: v.number(), method: v.union(v.literal("card"), v.literal("cash"), v.literal("bank_transfer")), reason: v.optional(v.string()) },
+  handler: async (_ctx, args) => {
+    const amount = (args.amountCents / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+    const how = args.method === "card" ? "Le montant est recrédité sur la carte utilisée pour le paiement (comptez quelques jours selon votre banque)." : args.method === "cash" ? "Le remboursement vous est remis en espèces." : "Le remboursement vous est versé par virement.";
+    await resendSend(args.to, `Remboursement de votre demande ${args.reference}`, shell({
+      preheader: `${amount} remboursés.`,
+      heading: "Votre remboursement",
+      intro: `Bonjour ${esc(args.firstName)},<br/><br/>Nous vous remboursons <strong>${esc(amount)}</strong> pour « ${esc(args.title)} » (demande <strong>${esc(args.reference)}</strong>). ${how}`,
+      contentHtml: (args.reason ? note("Motif du remboursement", esc(args.reason)) : "") + button(`${appUrl()}/mon-compte?onglet=commandes`, "Mon espace client"),
+    }), FROM);
+  },
+});
+
 export const sendOfflineCartConfirmation = internalAction({
   args: { to: v.string(), reference: v.string(), paymentMethod: v.union(v.literal("cash"), v.literal("bank_transfer")), amountCents: v.number() },
   handler: async (_ctx, args) => {

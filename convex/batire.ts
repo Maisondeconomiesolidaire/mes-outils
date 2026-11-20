@@ -12,7 +12,7 @@ import { ensureOrderTransport } from "./meslogistic";
 import { ConvexError, v } from "convex/values";
 import { action, env, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import type { MutationCtx, QueryCtx } from "./_generated/server";
+import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
 import { thumbnailUrl } from "./thumbnails";
 import { api, internal } from "./_generated/api";
 import {
@@ -25,6 +25,7 @@ import {
 import { recycappSecretKey, stripeRequest } from "./stripe";
 import { sendBillingDocMail } from "./batireEmails";
 import { checkoutCustomer, vatTaxRate, withVat } from "./batireStripeInvoices";
+import { CART_HOLD_MS, consumeHold, releaseHold } from "./batireCart";
 import { btCondition, btMaterialStatus, btUnit } from "./schema";
 
 const PAGE_MATERIAUX = "batire:materiaux";
@@ -877,7 +878,14 @@ const pickupLocations = {
   esspace_150: { name: "Esspace 150 / Recyclerie de Gournay", address: "150 Rte de Paris, 76220 Gournay-en-Bray" },
 } as const;
 
-const PICKUP_TRANSFER_FEE_CENTS = 990;
+/** Forfait de transfert inter-site : offert jusqu'au 01/01/2027, puis 9,90 €. */
+const FREE_TRANSFER_UNTIL = Date.parse("2027-01-01T00:00:00+01:00");
+function transferFeeCents() {
+  return Date.now() < FREE_TRANSFER_UNTIL ? 0 : 990;
+}
+
+/** Délai laissé au client pour payer en ligne (Stripe impose 30 min minimum). */
+const CHECKOUT_TTL_SECONDS = 31 * 60;
 
 /** Accepte les anciens libellés saisis librement, tout en comparant les lieux canoniques. */
 function storageLocationId(depot?: string): keyof typeof pickupLocations | undefined {
@@ -908,6 +916,8 @@ async function insertOrder(
     purchaseReference?: string;
     pickupReference?: string;
     userId?: string;
+    /** Panier d'où vient la commande : sa quantité bloquée sert la commande. */
+    holderKey?: string;
   },
   status: "en_attente" | "reservee",
 ) {
@@ -919,11 +929,16 @@ async function insertOrder(
   if (material.price <= 0) throw new ConvexError("Ce matériau n'a pas de prix.");
   const quantity = Math.max(0, Number(args.quantity) || 0);
   if (quantity <= 0) throw new ConvexError("Indiquez une quantité.");
-  if (quantity > material.quantity) {
+  // Le panier a déjà retiré sa quantité du stock : elle sert d'abord la commande.
+  const fromHold = await consumeHold(ctx, args.holderKey, args.materialId);
+  const available = material.quantity + fromHold;
+  if (quantity > available) {
     throw new ConvexError(
-      `Stock insuffisant : ${material.quantity} ${material.unit} disponible.`,
+      `Stock insuffisant pour « ${material.title} » : ${Math.round(available * 100) / 100} ${material.unit} disponible.`,
     );
   }
+  // Panier rendu au-delà de la quantité commandée, le reste décompté du stock.
+  await ctx.db.patch(material._id, { quantity: Math.round((available - quantity) * 1000) / 1000, updatedAt: Date.now() });
 
   const pickupFeeCents = Math.max(0, Math.round(args.pickupFeeCents ?? 0));
   const amountCents = Math.round(material.price * quantity * 100) + pickupFeeCents;
@@ -948,12 +963,103 @@ async function insertOrder(
     channel: args.channel,
     status,
     userId: args.userId,
+    stockDeducted: true,
     createdAt: Date.now(),
   });
   // Aucun transit automatique : l'équipe Bâtire crée la demande d'enlèvement
   // (avec son échéance) depuis la fiche de la demande.
   return { orderId, reference, amountCents, pickupFeeCents, title: material.title, unit: material.unit };
 }
+
+/**
+ * Nouvelle demande : l'équipe Bâtire (mobilierpro@, materiosol@) reçoit le
+ * détail. Une seule fois par demande (`teamNotifiedAt`).
+ */
+async function notifyTeamOfOrders(ctx: MutationCtx, orderIds: Id<"btOrders">[], kind: string) {
+  const orders = (await Promise.all(orderIds.map(id => ctx.db.get(id)))).filter((order): order is Doc<"btOrders"> => Boolean(order) && !order!.teamNotifiedAt);
+  if (!orders.length) return;
+  const now = Date.now();
+  for (const order of orders) await ctx.db.patch(order._id, { teamNotifiedAt: now });
+  const first = orders[0]!;
+  const fee = orders.reduce((sum, order) => sum + (order.pickupFeeCents ?? 0), 0);
+  const location = first.pickupLocation ? pickupLocations[first.pickupLocation] : undefined;
+  await ctx.scheduler.runAfter(0, internal.batireEmails.sendTeamNewRequest, {
+    kind,
+    reference: first.purchaseReference ?? first.reference,
+    customer: { name: `${first.customer.firstName} ${first.customer.lastName}`.trim(), email: first.customer.email, phone: first.customer.phone, company: first.customer.company },
+    lines: orders.map(order => ({ title: order.materialTitle, quantity: order.quantity, unit: order.unit, amountCents: order.amountCents - (order.pickupFeeCents ?? 0) })),
+    totalCents: orders.reduce((sum, order) => sum + order.amountCents, 0),
+    payment: PAYMENT_LABELS[first.paymentMethod ?? "card"],
+    fulfillment: location ? `Retrait : ${location.name}${fee ? " (avec transfert)" : ""}` : undefined,
+    crmPath: "/crm/demandes",
+  });
+}
+
+/**
+ * Paiement en ligne non abouti : la session Stripe est expirée (plus aucun
+ * paiement possible), les commandes en attente sont annulées et leur stock
+ * rendu — ou remis dans le panier du client s'il revient sur le site.
+ * Un paiement passé entre-temps est au contraire confirmé.
+ */
+async function settleCheckout(ctx: ActionCtx, provider: "recycapp" | "bennespro", sessionId: string, holderKey?: string) {
+  const key = stripeKeyForProvider(provider);
+  type Session = { status?: string; payment_status?: string; payment_intent?: string | null };
+  let session = await stripeRequest<Session>(`checkout/sessions/${sessionId}`, key);
+  if (session.status === "open") {
+    try { session = await stripeRequest<Session>(`checkout/sessions/${sessionId}/expire`, key, {}); }
+    catch { session = await stripeRequest<Session>(`checkout/sessions/${sessionId}`, key); }
+  }
+  const orders: Doc<"btOrders">[] = await ctx.runQuery(internal.batire.ordersByStripeSession, { stripeSessionId: sessionId });
+  if (session.payment_status === "paid") {
+    for (const order of orders) await ctx.runMutation(internal.batire.markOrderPaid, { orderId: order._id, stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : undefined });
+    return { paid: true };
+  }
+  if (session.status !== "expired") return { paid: false };
+  await ctx.runMutation(internal.batire.cancelPendingOrders, { sessionId, holderKey });
+  return { paid: false };
+}
+
+export const expirePendingCheckout = internalAction({
+  args: { provider: v.union(v.literal("recycapp"), v.literal("bennespro")), sessionId: v.string() },
+  handler: async (ctx, { provider, sessionId }) => { await settleCheckout(ctx, provider, sessionId); },
+});
+
+/** Retour « Annuler » depuis Stripe : la commande est abandonnée, les articles reviennent dans le panier. */
+export const abandonCheckout = action({
+  args: { provider: v.union(v.literal("recycapp"), v.literal("bennespro")), sessionId: v.string(), holderKey: v.optional(v.string()) },
+  handler: async (ctx, { provider, sessionId, holderKey }): Promise<{ paid: boolean }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Connectez-vous.");
+    const orders: Doc<"btOrders">[] = await ctx.runQuery(internal.batire.ordersByStripeSession, { stripeSessionId: sessionId });
+    if (!orders.length || orders.some(order => order.userId !== identity.subject)) throw new ConvexError("Commande introuvable.");
+    return await settleCheckout(ctx, provider, sessionId, holderKey);
+  },
+});
+
+export const cancelPendingOrders = internalMutation({
+  args: { sessionId: v.string(), holderKey: v.optional(v.string()) },
+  handler: async (ctx, { sessionId, holderKey }) => {
+    const now = Date.now();
+    const orders = await ctx.db.query("btOrders").withIndex("by_stripeSession", q => q.eq("stripeSessionId", sessionId)).collect();
+    let rehold = false;
+    for (const order of orders) {
+      if (order.status !== "en_attente") continue;
+      await ctx.db.patch(order._id, { status: "annulee", stockDeducted: false });
+      if (!order.stockDeducted) continue;
+      if (holderKey && /^[A-Za-z0-9_-]{16,80}$/.test(holderKey)) {
+        // Le client revient sur son panier : la quantité y reste bloquée.
+        const hold = await ctx.db.query("btCartHolds").withIndex("by_holder_material", q => q.eq("holderKey", holderKey).eq("materialId", order.materialId)).unique();
+        if (hold) await ctx.db.patch(hold._id, { quantity: hold.quantity + order.quantity, expiresAt: now + CART_HOLD_MS });
+        else await ctx.db.insert("btCartHolds", { holderKey, materialId: order.materialId, quantity: order.quantity, expiresAt: now + CART_HOLD_MS, createdAt: now });
+        rehold = true;
+      } else {
+        const material = await ctx.db.get(order.materialId);
+        if (material) await ctx.db.patch(material._id, { quantity: material.quantity + order.quantity, status: material.status === "vendu" ? "disponible" : material.status, updatedAt: now });
+      }
+    }
+    if (rehold && holderKey) await ctx.scheduler.runAt(now + CART_HOLD_MS + 1_000, internal.batireCart.expireCart, { holderKey });
+  },
+});
 
 /** Commande en attente de paiement : c'est elle qui fige prix et quantité. */
 export const createOrder = internalMutation({
@@ -985,8 +1091,6 @@ export const reserveMaterial = mutation({
   },
   handler: async (ctx, args): Promise<{ reference: string }> => {
     const identity = await requireUser(ctx);
-    const profile = await ctx.db.query("btDonorProfiles").withIndex("by_clerkId", q => q.eq("clerkId", identity.subject)).unique();
-    if (!profile?.customerType || profile.customerType === "particulier") throw new ConvexError("Le paiement au retrait est réservé aux professionnels et collectivités. Ajoutez le matériau au panier pour payer par carte.");
     const material = await ctx.db.get(args.materialId);
     const source = storageLocationId(material?.depot);
     if (!source) throw new ConvexError("Le dépôt de stockage doit être confirmé par l’équipe.");
@@ -1005,11 +1109,12 @@ export const reserveMaterial = mutation({
         pickupLocation: args.pickupLocation,
         userId: identity.subject,
         paymentMethod: "cash",
-        pickupFeeCents: source !== args.pickupLocation ? PICKUP_TRANSFER_FEE_CENTS : 0,
+        pickupFeeCents: source !== args.pickupLocation ? transferFeeCents() : 0,
       },
       "reservee",
     );
     const { reference } = order;
+    await notifyTeamOfOrders(ctx, [order.orderId], "Réservation (espèces au retrait)");
     await ctx.scheduler.runAfter(0, internal.batireEmails.sendReservationConfirmation, {
       to: email,
       firstName: args.customer.firstName,
@@ -1043,6 +1148,7 @@ export const markOrderPaid = internalMutation({
     const order = await ctx.db.get(orderId);
     if (!order) throw new ConvexError("Commande introuvable.");
     if (order.status === "payee") return { alreadyPaid: true };
+    const paidOnline = order.status === "en_attente" && (order.paymentMethod ?? "card") === "card";
 
     await ctx.db.patch(orderId, {
       status: "payee",
@@ -1071,7 +1177,7 @@ export const markOrderPaid = internalMutation({
         ? pickupLocations[order.pickupLocation]
         : undefined,
     });
-    if (material) {
+    if (material && !order.stockDeducted) {
       const remaining = Math.max(0, material.quantity - order.quantity);
       await ctx.db.patch(order.materialId, {
         quantity: remaining,
@@ -1080,6 +1186,19 @@ export const markOrderPaid = internalMutation({
         status: remaining === 0 ? "vendu" : material.status,
         updatedAt: Date.now(),
       });
+    } else if (material && material.quantity <= 0 && material.status === "disponible") {
+      // Stock décompté au panier : le lot n'est « vendu » que si aucun panier ne le bloque encore.
+      const held = await ctx.db.query("btCartHolds").withIndex("by_material", q => q.eq("materialId", material._id)).first();
+      if (!held) await ctx.db.patch(material._id, { status: "vendu", updatedAt: Date.now() });
+    }
+    // Paiement en ligne (ou code promo) : l'équipe est prévenue une fois par commande.
+    if (paidOnline) {
+      const group = order.purchaseReference
+        ? await ctx.db.query("btOrders").withIndex("by_purchaseReference", q => q.eq("purchaseReference", order.purchaseReference)).collect()
+        : [order];
+      if (group.every(row => row._id === orderId || row.status === "payee" || row.status === "annulee")) {
+        await notifyTeamOfOrders(ctx, group.filter(row => row.status !== "annulee").map(row => row._id), "Paiement par carte (encaissé)");
+      }
     }
     return { alreadyPaid: false };
   },
@@ -1155,6 +1274,7 @@ export const startCheckout = action({
         "invoice_creation[enabled]": "true",
         "invoice_creation[invoice_data][metadata][orderId]": order.orderId,
         "invoice_creation[invoice_data][metadata][source]": "batire-boutique",
+        expires_at: String(Math.floor(Date.now() / 1000) + CHECKOUT_TTL_SECONDS),
       },
     );
 
@@ -1162,6 +1282,7 @@ export const startCheckout = action({
       orderId: order.orderId,
       stripeSessionId: session.id,
     });
+    await ctx.scheduler.runAfter((CHECKOUT_TTL_SECONDS + 120) * 1000, internal.batire.expirePendingCheckout, { provider: stripeProviderForCategory(material.category), sessionId: session.id });
     return { checkoutUrl: session.url, orderId: order.orderId };
   },
 });
@@ -1213,7 +1334,7 @@ export const materialForCheckout = internalQuery({
 export const createCartOrders = internalMutation({
   args: {
     items: v.array(v.object({ materialId: v.id("btMaterials"), quantity: v.number(), pickupLocation: pickupLocationValidator })),
-    customer: customerValidator, userId: v.string(), promoCode: v.optional(v.string()),
+    customer: customerValidator, userId: v.string(), promoCode: v.optional(v.string()), holderKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     if (!args.items.length || args.items.length > 50) throw new ConvexError("Le panier doit contenir de 1 à 50 matériaux.");
@@ -1226,9 +1347,9 @@ export const createCartOrders = internalMutation({
       if (!material || !Number.isFinite(item.quantity) || item.quantity <= 0) throw new ConvexError("Matériau ou quantité invalide.");
       const source = storageLocationId(material.depot);
       if (!source) throw new ConvexError(`Le dépôt de stockage de « ${material.title} » doit être confirmé par l’équipe avant le paiement.`);
-      const fee: number = source !== item.pickupLocation && !feeCharged ? PICKUP_TRANSFER_FEE_CENTS : 0;
+      const fee: number = source !== item.pickupLocation && !feeCharged ? transferFeeCents() : 0;
       const suffix = index < 26 ? String.fromCharCode(65 + index) : `A${String.fromCharCode(65 + index - 26)}`;
-      const order = await insertOrder(ctx, { ...item, customer: args.customer, userId: args.userId, channel: "boutique", pickupFeeCents: fee, purchaseReference, pickupReference: `${purchaseReference}-${suffix}` }, "en_attente");
+      const order = await insertOrder(ctx, { ...item, customer: args.customer, userId: args.userId, channel: "boutique", pickupFeeCents: fee, purchaseReference, pickupReference: `${purchaseReference}-${suffix}`, holderKey: args.holderKey }, "en_attente");
       feeCharged ||= fee > 0;
       orders.push({ ...order, quantity: item.quantity });
     }
@@ -1247,8 +1368,9 @@ export const startCartCheckout = action({
     pickupLocation: v.optional(pickupLocationValidator),
     returnUrl: v.string(),
     promoCode: v.optional(v.string()),
+    holderKey: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<{ checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }>; freeReference?: string }> => {
+  handler: async (ctx, args): Promise<{ checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string; sessionId: string }>; freeReference?: string }> => {
     if (!args.items.length || args.items.length > 50) throw new ConvexError("Le panier doit contenir de 1 à 50 matériaux.");
     const email = args.customer.email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email) || !args.customer.firstName.trim() || !args.customer.lastName.trim()) throw new ConvexError("Indiquez vos coordonnées complètes.");
@@ -1266,10 +1388,10 @@ export const startCartCheckout = action({
     if (groups.size > 1) {
       throw new ConvexError("Votre panier contient des articles de vendeurs différents. Finalisez d'abord le panier en cours, puis créez un second panier pour les autres articles.");
     }
-    const checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string }> = [];
+    const checkouts: Array<{ provider: "recycapp" | "bennespro"; checkoutUrl: string; sessionId: string }> = [];
     for (const [provider, items] of groups) {
       const orders: Array<{ orderId: Id<"btOrders">; amountCents: number; pickupFeeCents: number; title: string; unit: string; quantity: number }> = await ctx.runMutation(internal.batire.createCartOrders, {
-        items: items.map(item => ({ materialId: item.materialId, quantity: item.quantity, pickupLocation: item.pickupLocation! })), customer: { ...args.customer, email }, userId: identity.subject, promoCode: args.promoCode,
+        items: items.map(item => ({ materialId: item.materialId, quantity: item.quantity, pickupLocation: item.pickupLocation! })), customer: { ...args.customer, email }, userId: identity.subject, promoCode: args.promoCode, holderKey: args.holderKey,
       });
       // Code promo couvrant tout le panier : rien à encaisser, la commande est réglée.
       if (orders.every(order => order.amountCents <= 0)) {
@@ -1279,7 +1401,7 @@ export const startCartCheckout = action({
       }
       const returnUrl = new URL(args.returnUrl);
       returnUrl.searchParams.set("provider", provider);
-      const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer: await checkoutCustomer(ctx, stripeKeyForCategory(items[0]!.category), identity.subject, { ...args.customer, email }), "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(","), "invoice_creation[enabled]": "true", "invoice_creation[invoice_data][metadata][source]": "batire-cart" };
+      const body: Record<string, string> = { mode: "payment", success_url: `${returnUrl.toString()}&session_id={CHECKOUT_SESSION_ID}`, cancel_url: `${returnUrl.toString()}&status=cancelled`, locale: "fr", customer: await checkoutCustomer(ctx, stripeKeyForCategory(items[0]!.category), identity.subject, { ...args.customer, email }), "metadata[source]": "batire-cart", "metadata[orderIds]": orders.map((order) => order.orderId).join(","), "invoice_creation[enabled]": "true", "invoice_creation[invoice_data][metadata][source]": "batire-cart", expires_at: String(Math.floor(Date.now() / 1000) + CHECKOUT_TTL_SECONDS) };
       orders.filter(order => order.amountCents - order.pickupFeeCents > 0).forEach((order, index) => {
         body[`line_items[${index}][quantity]`] = "1";
         body[`line_items[${index}][price_data][currency]`] = "eur";
@@ -1298,7 +1420,9 @@ export const startCartCheckout = action({
       withVat(body, await vatTaxRate(stripeKeyForCategory(items[0]!.category)));
       const session = await stripeRequest<{ id: string; url: string }>("checkout/sessions", stripeKeyForCategory(items[0]!.category), body);
       for (const order of orders) await ctx.runMutation(internal.batire.attachStripeSession, { orderId: order.orderId, stripeSessionId: session.id });
-      checkouts.push({ provider, checkoutUrl: session.url });
+      // Non payé dans le délai : session expirée chez Stripe, commande annulée, stock rendu.
+      await ctx.scheduler.runAfter((CHECKOUT_TTL_SECONDS + 120) * 1000, internal.batire.expirePendingCheckout, { provider, sessionId: session.id });
+      checkouts.push({ provider, checkoutUrl: session.url, sessionId: session.id });
     }
     return { checkouts };
   },
@@ -1311,12 +1435,14 @@ export const requestOfflineCart = mutation({
     customer: customerValidator,
     paymentMethod: v.union(v.literal("cash"), v.literal("bank_transfer")),
     promoCode: v.optional(v.string()),
+    holderKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const identity = await requireUser(ctx);
     const profile = await ctx.db.query("btDonorProfiles").withIndex("by_clerkId", q => q.eq("clerkId", identity.subject)).unique();
     const customerType = profile?.customerType ?? "particulier";
-    if (customerType === "particulier" || (args.paymentMethod === "bank_transfer" && customerType !== "collectivite")) throw new ConvexError("Ce moyen de paiement n’est pas disponible pour votre type de client.");
+    // Carte et espèces pour tous ; virement réservé aux associations, collectivités et personnes publiques.
+    if (args.paymentMethod === "bank_transfer" && customerType !== "collectivite") throw new ConvexError("Le virement est réservé aux associations et collectivités (sauf livraison).");
     const email = args.customer.email.trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(email) || !args.customer.firstName.trim() || !args.customer.lastName.trim()) throw new ConvexError("Indiquez vos coordonnées complètes.");
     if (!args.items.length || args.items.length > 50 || new Set(args.items.map(item => item.materialId)).size !== args.items.length) throw new ConvexError("Panier invalide.");
@@ -1333,9 +1459,9 @@ export const requestOfflineCart = mutation({
       provider = itemProvider;
       const source = storageLocationId(material.depot);
       if (!source) throw new ConvexError(`Le dépôt de stockage de « ${material.title} » doit être confirmé par l’équipe.`);
-      const fee: number = source !== item.pickupLocation && !feeCharged ? PICKUP_TRANSFER_FEE_CENTS : 0;
+      const fee: number = source !== item.pickupLocation && !feeCharged ? transferFeeCents() : 0;
       const suffix = index < 26 ? String.fromCharCode(65 + index) : `A${String.fromCharCode(65 + index - 26)}`;
-      const order = await insertOrder(ctx, { ...item, customer: { ...args.customer, email }, userId: identity.subject, channel: "boutique", pickupFeeCents: fee, purchaseReference: reference, pickupReference: `${reference}-${suffix}`, paymentMethod: args.paymentMethod }, "reservee");
+      const order = await insertOrder(ctx, { ...item, customer: { ...args.customer, email }, userId: identity.subject, channel: "boutique", pickupFeeCents: fee, purchaseReference: reference, pickupReference: `${reference}-${suffix}`, paymentMethod: args.paymentMethod, holderKey: args.holderKey }, "reservee");
       amountCents += order.amountCents;
       created.push(order);
       feeCharged ||= fee > 0;
@@ -1345,6 +1471,7 @@ export const requestOfflineCart = mutation({
       for (const discount of discounts.values()) amountCents -= discount;
     }
     await ctx.scheduler.runAfter(0, internal.batireEmails.sendOfflineCartConfirmation, { to: email, reference, paymentMethod: args.paymentMethod, amountCents });
+    await notifyTeamOfOrders(ctx, created.map(order => order.orderId), args.paymentMethod === "cash" ? "Réservation · espèces au retrait" : "Réservation · virement bancaire");
     return { reference };
   },
 });
@@ -1467,17 +1594,22 @@ export const requestHomeDelivery = mutation({
     items: v.array(v.object({ materialId: v.id("btMaterials"), quantity: v.number() })),
     customer: customerValidator,
     address: v.string(),
+    paymentMethod: v.optional(v.union(v.literal("card"), v.literal("cash"), v.literal("bank_transfer"))),
+    holderKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     if (!args.items.length || !args.address.trim()) throw new ConvexError("Indiquez les articles et l'adresse de livraison.");
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new ConvexError("Connectez-vous pour demander une livraison.");
+    // Devis de livraison : rien n'est vendu à ce stade, le stock bloqué par le panier est rendu.
+    const holds = args.holderKey ? await ctx.db.query("btCartHolds").withIndex("by_holder", q => q.eq("holderKey", args.holderKey!)).collect() : [];
+    for (const hold of holds) await releaseHold(ctx, hold);
     const items = [] as Array<{ materialId: Id<"btMaterials">; title: string; quantity: number; unit: Doc<"btMaterials">["unit"] }>;
     for (const line of args.items) {
       const material = await ctx.db.get(line.materialId);
       if (!material || material.status !== "disponible" || line.quantity <= 0 || line.quantity > material.quantity) throw new ConvexError("Un article demandé n'est plus disponible.");
       items.push({ materialId: material._id, title: material.title, quantity: line.quantity, unit: material.unit });
     }
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new ConvexError("Connectez-vous pour demander une livraison.");
     const count = await ctx.db.query("btRequests").take(500);
     const reference = `BTD${String(count.length + 1).padStart(5, "0")}`;
     await ctx.db.insert("btRequests", {
@@ -1486,10 +1618,20 @@ export const requestHomeDelivery = mutation({
       customer: { ...args.customer, email: args.customer.email.trim().toLowerCase(), phone: args.customer.phone ?? "" },
       items,
       message: `Livraison à domicile demandée : ${args.address.trim()}`,
+      paymentMethod: args.paymentMethod,
       outcome: "nouveau",
       userId: identity?.subject,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+    });
+    await ctx.scheduler.runAfter(0, internal.batireEmails.sendTeamNewRequest, {
+      kind: "Demande de devis livraison",
+      reference,
+      customer: { name: `${args.customer.firstName} ${args.customer.lastName}`.trim(), email: args.customer.email.trim().toLowerCase(), phone: args.customer.phone, company: args.customer.company },
+      lines: items.map(item => ({ title: item.title, quantity: item.quantity, unit: item.unit })),
+      payment: args.paymentMethod ? PAYMENT_LABELS[args.paymentMethod] : undefined,
+      fulfillment: `Livraison à domicile · ${args.address.trim()}`,
+      crmPath: "/crm/demandes?vue=livraisons",
     });
     return { reference };
   },
@@ -3544,7 +3686,7 @@ export const markPickupLost = mutation({
       await ctx.db.patch(transfer._id, { status: "annulee", updatedAt: Math.max(now, transfer.updatedAt + 1) });
       await ctx.db.insert("mlEvents", { requestId: transfer._id, actor: actor.name ?? actor.subject, message: `Demande Bâtire ${order.pickupReference ?? order.reference} perdue · ${reason}`, createdAt: now });
     }
-    if (args.restock && order.status === "payee") {
+    if (order.status === "payee" ? args.restock : order.stockDeducted) {
       const material = await ctx.db.get(order.materialId);
       if (material) await ctx.db.patch(material._id, { quantity: material.quantity + order.quantity, status: material.status === "vendu" ? "disponible" : material.status, updatedAt: now });
     }
@@ -3622,6 +3764,11 @@ export const markOrderRefunded = internalMutation({
     await ctx.db.patch(order._id, { stripeRefundId: args.stripeRefundId, refundedAt: now, refundedAmountCents: args.refundedAmountCents, refundedBy: args.refundedBy, refundMethod: args.refundMethod, refundReason: args.refundReason, ...(order.lostAt || order.collectedAt ? {} : { lostAt: now, lostReason: "Remboursée" }) });
     // Avoir Stripe sur la facture de la demande (la facture reste juste comptablement).
     await ctx.scheduler.runAfter(0, internal.batireStripeInvoices.creditOrderInvoice, { orderId: order._id });
+    // Le client est prévenu : le motif saisi dans le CRM figure dans l'e-mail.
+    await ctx.scheduler.runAfter(0, internal.batireEmails.sendRefundNotice, {
+      to: order.customer.email, firstName: order.customer.firstName, reference: order.pickupReference ?? order.purchaseReference ?? order.reference,
+      title: order.materialTitle, amountCents: args.refundedAmountCents, method: args.refundMethod ?? "card", reason: args.refundReason,
+    });
     if (order.collectedAt) return;
     if (!order.lostAt) {
       const material = await ctx.db.get(order.materialId);

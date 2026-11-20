@@ -29,7 +29,8 @@ test("one purchase, separate pickups, immutable depot snapshots and one 35 euro 
   const rows = await t.run(ctx => ctx.db.query("btOrders").collect());
   expect(new Set(rows.map(row => row.purchaseReference)).size).toBe(1);
   expect(rows.map(row => row.pickupReference)).toEqual(["BT00001-A", "BT00001-B", "BT00001-C"]);
-  expect(orders.reduce((sum, order) => sum + order.pickupFeeCents, 0)).toBe(3500);
+  // Transfert offert jusqu'au 01/01/2027.
+  expect(orders.reduce((sum, order) => sum + order.pickupFeeCents, 0)).toBe(0);
   expect(await t.run(ctx => ctx.db.query("mlRequests").collect())).toHaveLength(0);
   await t.run(ctx => ctx.db.patch(materials[1], { depot: "Esspace 150" }));
   await pay(); await pay();

@@ -18,6 +18,8 @@ crons.daily(
 // Navettes : un trajet de salarié part (« en route » dans Meslogistic) dès
 // l'heure de début de sa réservation de véhicule.
 crons.interval("depart navettes des trajets", { minutes: 5 }, internal.navettes.departStartedTrips, {});
+// Paniers Bâtire : filet de sécurité, le stock bloqué par un panier expiré revient en vente.
+crons.interval("paniers batire expires", { minutes: 10 }, internal.batireCart.releaseStaleHolds, {});
 
 crons.hourly(
   "emails retour reservations vehicules",

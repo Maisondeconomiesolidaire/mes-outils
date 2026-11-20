@@ -1067,6 +1067,8 @@ const absenceKind = v.union(
   v.literal("formation"),
   v.literal("pmsmp"),
   v.literal("recup"),
+  v.literal("production_interne"),
+  v.literal("production_externe"),
 );
 
 export const listAbsences = query({

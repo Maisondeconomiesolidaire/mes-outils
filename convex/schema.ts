@@ -3124,6 +3124,8 @@ export default defineSchema(
       v.literal("formation"),
       v.literal("pmsmp"),
       v.literal("recup"),
+      v.literal("production_interne"),
+      v.literal("production_externe"),
     ),
     startAt: v.number(),
     endAt: v.number(),
@@ -3322,6 +3324,8 @@ export default defineSchema(
     /** Suivi interne, non visible du client. */
     internalNotes: v.optional(v.string()),
     depot: v.optional(v.string()),
+    /** Moyen de paiement souhaité (livraison : le virement est ouvert à tous). */
+    paymentMethod: v.optional(v.union(v.literal("card"), v.literal("cash"), v.literal("bank_transfer"))),
     /** Compte client Clerk rattaché, si la demande vient d'un utilisateur connu. */
     userId: v.optional(v.string()),
     createdAt: v.number(),
@@ -3416,12 +3420,33 @@ export default defineSchema(
     stripeInvoiceError: v.optional(v.string()),
     invoiceSentAt: v.optional(v.number()),
     invoiceSentTo: v.optional(v.string()),
+    /** Stock déjà décompté à la création (panier / réservation) : rien à retirer au paiement. */
+    stockDeducted: v.optional(v.boolean()),
+    /** Équipe (mobilierpro@, materiosol@) prévenue de cette nouvelle demande. */
+    teamNotifiedAt: v.optional(v.number()),
   })
     .index("by_status", ["status"])
     .index("by_reference", ["reference"])
     .index("by_material", ["materialId"])
     .index("by_stripeSession", ["stripeSessionId"])
-    .index("by_user_createdAt", ["userId", "createdAt"]),
+    .index("by_user_createdAt", ["userId", "createdAt"])
+    .index("by_purchaseReference", ["purchaseReference"]),
+
+  /**
+   * Panier Bâtire : quantité retirée du stock pendant 30 minutes après la
+   * dernière modification du panier (voir batireCart.ts).
+   */
+  btCartHolds: defineTable({
+    holderKey: v.string(),
+    materialId: v.id("btMaterials"),
+    quantity: v.number(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_holder", ["holderKey"])
+    .index("by_holder_material", ["holderKey", "materialId"])
+    .index("by_material", ["materialId"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   /**
    * Devis Stripe d'une demande Bâtire (onglet Devis du CRM). Le devis est créé
