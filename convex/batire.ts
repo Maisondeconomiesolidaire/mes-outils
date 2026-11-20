@@ -892,9 +892,23 @@ function storageLocationId(depot?: string): keyof typeof pickupLocations | undef
   const value = depot?.trim().toLocaleLowerCase("fr-FR") ?? "";
   if (!value) return undefined;
   if (value.includes("comptoir")) return "comptoir_c";
-  if (value.includes("solidarium") || value.includes("usine") || value.includes("pays de bray") || value.includes("lachapelle")) return "recyclerie_pays_de_bray";
+  // Usine Agile et Déchet'Lab : stockage interne rattaché au site de Lachapelle-aux-Pots pour la vente et les transferts.
+  if (value.includes("solidarium") || value.includes("usine") || value.includes("pays de bray") || value.includes("lachapelle") || value.includes("dechet") || value.includes("déchet")) return "recyclerie_pays_de_bray";
   if (value.includes("esspace") || value.includes("gournay")) return "esspace_150";
   return undefined;
+}
+
+/** Lieux de stockage internes (CRM seulement, jamais lieux de retrait en boutique). */
+const INTERNAL_STORAGE_SITES = { usine_agile: "Usine Agile", dechet_lab: "Déchet'Lab" } as const;
+/** Lieu de stockage tel que le CRM le classe (emplacements, filtres) : les sites internes gardent leur propre lieu. */
+function storageSiteId(depot?: string): string | undefined {
+  const value = depot?.trim().toLocaleLowerCase("fr-FR") ?? "";
+  if (value.includes("usine agile")) return "usine_agile";
+  if (value.includes("dechet") || value.includes("déchet")) return "dechet_lab";
+  return storageLocationId(depot);
+}
+function storageSiteName(id: string) {
+  return id in INTERNAL_STORAGE_SITES ? INTERNAL_STORAGE_SITES[id as keyof typeof INTERNAL_STORAGE_SITES] : pickupLocations[id as keyof typeof pickupLocations].name;
 }
 
 async function nextOrderReference(ctx: { db: { query: (t: "btOrders") => any } }) {
@@ -4240,7 +4254,7 @@ export const promoCodeAction = mutation({
 /* Emplacements de stockage                                             */
 /* ------------------------------------------------------------------ */
 
-const STORAGE_LOCATIONS = ["comptoir_c", "recyclerie_pays_de_bray", "esspace_150"] as const;
+const STORAGE_LOCATIONS = ["comptoir_c", "recyclerie_pays_de_bray", "esspace_150", "usine_agile", "dechet_lab"] as const;
 const slotKind = v.optional(v.union(v.literal("stockage"), v.literal("depart"), v.literal("arrivee")));
 
 function cleanSlot(location: string, label: string) {
@@ -4289,8 +4303,8 @@ export const updateStorageSlot = mutation({
     if (label === slot.label && args.location === slot.location) return 0;
     let moved = 0;
     for await (const material of ctx.db.query("btMaterials")) {
-      if (material.location !== slot.label || storageLocationId(material.depot) !== slot.location) continue;
-      await ctx.db.patch(material._id, { location: label, ...(args.location !== slot.location ? { depot: pickupLocations[args.location as keyof typeof pickupLocations].name } : {}), updatedAt: now });
+      if (material.location !== slot.label || storageSiteId(material.depot) !== slot.location) continue;
+      await ctx.db.patch(material._id, { location: label, ...(args.location !== slot.location ? { depot: storageSiteName(args.location) } : {}), updatedAt: now });
       moved++;
     }
     return moved;

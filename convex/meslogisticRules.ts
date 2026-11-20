@@ -17,7 +17,7 @@ export function shortLocationName(value?: string) {
 export function canonicalLocation(value?: string) {
   const name = value?.trim().toLocaleLowerCase("fr-FR") ?? "";
   if (name.includes("comptoir")) return "comptoir_c";
-  if (name.includes("solidarium") || name.includes("usine") || name.includes("pays de bray") || name.includes("pays_de_bray") || name.includes("lachapelle")) return "recyclerie_pays_de_bray";
+  if (name.includes("solidarium") || name.includes("usine") || name.includes("pays de bray") || name.includes("pays_de_bray") || name.includes("lachapelle") || name.includes("dechet") || name.includes("déchet")) return "recyclerie_pays_de_bray";
   if (name.includes("esspace") || name.includes("gournay")) return "esspace_150";
   return undefined;
 }
