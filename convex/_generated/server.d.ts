@@ -33,6 +33,7 @@ type Env = {
   readonly ADMIN_EMAILS: string | undefined;
   readonly APP_URL: string | undefined;
   readonly BATIRE_ANALYSIS_MODEL: string | undefined;
+  readonly BATIRE_GOOGLE_REVIEW_URL: string | undefined;
   readonly BATIRE_MATERIOSOL_STRIPE_WEBHOOK_SECRET: string | undefined;
   readonly BATIRE_RECYCLERIE_STRIPE_WEBHOOK_SECRET: string | undefined;
   readonly BENNESPRO_EMAIL_LOGO_ID: string | undefined;
