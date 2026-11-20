@@ -1213,7 +1213,10 @@ export const markOrderPaid = internalMutation({
         ? await ctx.db.query("btOrders").withIndex("by_purchaseReference", q => q.eq("purchaseReference", order.purchaseReference)).collect()
         : [order];
       if (group.every(row => row._id === orderId || row.status === "payee" || row.status === "annulee")) {
-        await notifyTeamOfOrders(ctx, group.filter(row => row.status !== "annulee").map(row => row._id), "Paiement par carte (encaissé)");
+        const paidIds = group.filter(row => row.status !== "annulee").map(row => row._id);
+        await notifyTeamOfOrders(ctx, paidIds, "Paiement par carte (encaissé)");
+        // Notre facture (HT / TTC) part d'office au client, PDF joint.
+        await ctx.scheduler.runAfter(0, internal.batireInvoiceMail.emailOrderInvoices, { orderIds: paidIds });
       }
     }
     return { alreadyPaid: false };
@@ -3676,6 +3679,12 @@ export const updatePickup = mutation({
       if (!order.readyAt) throw new ConvexError("Confirmez d’abord que le lot est prêt.");
       if ((order.paymentMethod === "cash" || order.paymentMethod === "bank_transfer") && order.status !== "payee") throw new ConvexError("Enregistrez le paiement avant la remise.");
       await ctx.db.patch(order._id, { collectedAt: now });
+      // Demande gagnée : le client est invité à donner son avis (une fois par commande).
+      const siblings = order.purchaseReference ? await ctx.db.query("btOrders").withIndex("by_purchaseReference", q => q.eq("purchaseReference", order.purchaseReference)).collect() : [order];
+      if (!siblings.some(row => row.satisfactionSentAt)) {
+        await ctx.db.patch(order._id, { satisfactionSentAt: now });
+        await ctx.scheduler.runAfter(60 * 60_000, internal.batireEmails.sendSatisfactionRequest, { to: order.customer.email, firstName: order.customer.firstName, reference: order.purchaseReference ?? order.pickupReference ?? order.reference });
+      }
     }
   },
 });

@@ -437,6 +437,37 @@ export const sendPickupReady = internalAction({
   },
 });
 
+/** Nos factures d'une commande payée par carte : un e-mail, un PDF par facture. */
+export async function sendOrderInvoicesMail(args: { to: string; name: string; files: Array<{ number: string; issuerName: string; total: string; pdfBase64: string }> }) {
+  const several = args.files.length > 1;
+  const list = args.files.map(file => `<li style="margin:0 0 6px;">Facture <strong>${esc(file.number)}</strong> · ${esc(file.issuerName)} · ${esc(file.total)} TTC</li>`).join("");
+  const html = shell({
+    preheader: several ? `Vos ${args.files.length} factures BâtiRe.` : `Votre facture ${args.files[0]!.number}.`,
+    heading: several ? "Vos factures" : "Votre facture",
+    intro: `Bonjour${args.name ? ` ${esc(args.name)}` : ""},<br/><br/>Merci pour votre achat. Vous trouverez ci-joint ${several ? "vos factures acquittées" : "votre facture acquittée"} :`,
+    contentHtml: `<ul style="margin:0 0 22px;padding-left:18px;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:#3f3f46;">${list}</ul>` + button(`${appUrl()}/mon-compte?onglet=commandes`, "Suivre ma commande"),
+  });
+  return await resendSend(args.to, several ? "Vos factures BâtiRe" : `Facture ${args.files[0]!.number} — ${args.files[0]!.issuerName}`, html, FROM, args.files.map(file => ({ filename: `${file.number}.pdf`, content: file.pdfBase64 })));
+}
+
+/** Lien d'avis Google du Comptoir C (variable d'environnement pour le lien direct « rédiger un avis »). */
+const DEFAULT_GOOGLE_REVIEW_URL = "https://share.google/1PUY2ud2Oxcsnfped";
+
+/** Demande gagnée : on remercie le client et on l'invite à laisser un avis Google. */
+export const sendSatisfactionRequest = internalAction({
+  args: { to: v.string(), firstName: v.string(), reference: v.string() },
+  handler: async (_ctx, args) => {
+    const reviewUrl = process.env.BATIRE_GOOGLE_REVIEW_URL?.trim() || DEFAULT_GOOGLE_REVIEW_URL;
+    await resendSend(args.to, "Votre avis compte pour nous", shell({
+      preheader: "Une minute pour nous dire comment s'est passé votre retrait ?",
+      heading: "Merci pour votre achat !",
+      intro: `Bonjour ${esc(args.firstName)},<br/><br/>Votre commande <strong>${esc(args.reference)}</strong> vous a été remise. Votre retour nous aide à faire connaître le réemploi des matériaux : pouvez-vous prendre une minute pour donner votre avis sur Google ?`,
+      contentHtml: `<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="border-collapse:collapse;"><tr><td align="center" style="padding:0 0 10px;font-size:28px;letter-spacing:4px;color:#f5b301;">&#9733;&#9733;&#9733;&#9733;&#9733;</td></tr><tr><td align="center">${button(reviewUrl, "Donner mon avis sur Google")}</td></tr></table>`
+        + note("Une remarque ?", "Si quelque chose ne s'est pas bien passé, dites-le-nous aussi : chaque retour est lu par l'équipe du Comptoir C."),
+    }), FROM);
+  },
+});
+
 /** Équipe Bâtire prévenue de chaque nouvelle demande (achat, réservation, devis de livraison). */
 const BATIRE_TEAM_RECIPIENTS = ["mobilierpro@eco-solidaire.fr", "materiosol@eco-solidaire.fr"];
 

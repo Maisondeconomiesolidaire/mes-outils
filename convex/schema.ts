@@ -3424,6 +3424,8 @@ export default defineSchema(
     stockDeducted: v.optional(v.boolean()),
     /** Équipe (mobilierpro@, materiosol@) prévenue de cette nouvelle demande. */
     teamNotifiedAt: v.optional(v.number()),
+    /** Demande d'avis (Google, Comptoir C) envoyée au client après la remise. */
+    satisfactionSentAt: v.optional(v.number()),
   })
     .index("by_status", ["status"])
     .index("by_reference", ["reference"])
